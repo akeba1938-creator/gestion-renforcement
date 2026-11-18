@@ -1,0 +1,7 @@
+# Remplacer @votre-compte par les relecteurs réels
+/backend/src/main/java/com/ecole/saas/finance/        @votre-compte
+/backend/src/main/java/com/ecole/saas/shared/         @votre-compte
+/backend/src/main/java/com/ecole/saas/identity/       @votre-compte
+/backend/src/main/resources/db/migration/             @votre-compte
+/.github/                                             @votre-compte
+/AGENTS.md                                            @votre-compte

@@ -1,0 +1,8 @@
+.env
+.env.*
+secrets/
+target/
+node_modules/
+dist/
+.idea/
+*.log

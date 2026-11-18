@@ -1,0 +1,12 @@
+# Environnement local de développement (à compléter)
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: ecole
+      POSTGRES_USER: ecole
+      POSTGRES_PASSWORD: change-me-local-only
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+volumes:
+  pgdata:
