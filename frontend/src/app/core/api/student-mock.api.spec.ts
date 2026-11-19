@@ -1,5 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { firstValueFrom } from 'rxjs';
+import { vi } from 'vitest';
 import { MOCK_API_OPTIONS } from './mock-api.util';
 import { StudentMockApi } from './student-mock.api';
 
@@ -13,31 +14,40 @@ describe('StudentMockApi', () => {
     api = TestBed.inject(StudentMockApi);
   });
 
-  it('returns a paginated Page<Student> with integer FCFA balances', async () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('returns a paginated Page<Student> with clearly fictional phone numbers and no finance fields', async () => {
     const page = await firstValueFrom(api.list({ page: 0, size: 2 }));
     expect(page.page).toBe(0);
     expect(page.size).toBe(2);
     expect(page.items.length).toBe(2);
     expect(page.total).toBeGreaterThan(2);
+
     for (const student of page.items) {
-      expect(Number.isInteger(student.balanceFcfa)).toBe(true);
+      expect(student.guardianPhone).toMatch(/^\+22100000000\d$/);
+      expect('balanceFcfa' in student).toBe(false);
+      expect('paymentStatus' in student).toBe(false);
     }
   });
 
-  it('filters by search query and sorts by balanceFcfa descending', async () => {
+  it('filters by search query and sorts by lastName descending', async () => {
     const filtered = await firstValueFrom(
-      api.list({ page: 0, size: 10, search: 'Terminale', sortBy: 'balanceFcfa', sortDir: 'desc' })
+      api.list({ page: 0, size: 10, search: 'Terminale', sortBy: 'lastName', sortDir: 'asc' })
     );
     expect(filtered.total).toBe(1);
     expect(filtered.items[0].className).toBe('Terminale S2');
 
     const sorted = await firstValueFrom(
-      api.list({ page: 0, size: 10, sortBy: 'balanceFcfa', sortDir: 'desc' })
+      api.list({ page: 0, size: 10, sortBy: 'lastName', sortDir: 'desc' })
     );
-    expect(sorted.items[0].balanceFcfa).toBeGreaterThanOrEqual(sorted.items[1].balanceFcfa);
+    expect(sorted.items[0].lastName.localeCompare(sorted.items[1].lastName, 'fr')).toBeGreaterThanOrEqual(
+      0
+    );
   });
 
-  it('simulates empty list, error, and delay scenarios', async () => {
+  it('simulates empty list, error, and deterministic delay with fake timers', async () => {
     api.setScenario('empty');
     const emptyPage = await firstValueFrom(api.list({ page: 0, size: 5 }));
     expect(emptyPage.items).toEqual([]);
@@ -48,10 +58,18 @@ describe('StudentMockApi', () => {
       'Impossible de charger la liste des élèves'
     );
 
-    api.configureMock({ scenario: 'default', delayMs: 25 });
-    const startedAt = Date.now();
-    const delayed = await firstValueFrom(api.list({ page: 0, size: 1 }));
-    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(15);
-    expect(delayed.items.length).toBe(1);
+    vi.useFakeTimers();
+    api.configureMock({ scenario: 'default', delayMs: 120 });
+    let receivedCount = 0;
+
+    api.list({ page: 0, size: 1 }).subscribe((page) => {
+      receivedCount = page.items.length;
+    });
+
+    vi.advanceTimersByTime(119);
+    expect(receivedCount).toBe(0);
+
+    vi.advanceTimersByTime(1);
+    expect(receivedCount).toBe(1);
   });
 });

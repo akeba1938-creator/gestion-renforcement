@@ -19,7 +19,7 @@ function setUserWithRole(authService: AuthService, role: UserRole): void {
   authService.setSession('tok-memory', {
     id: `usr-${role.toLowerCase()}`,
     fullName: `Utilisateur ${role}`,
-    email: `${role.toLowerCase()}@ecole-demo.example`,
+    email: `${role.toLowerCase()}@ecole-demo.invalid`,
     role,
     tenantId: 'tenant-demo-1',
     tenantName: 'École Démo',

@@ -13,6 +13,7 @@ import { StudentApi } from './student.api';
 
 /**
  * Purely fictional student dataset for frontend development and tests.
+ * Uses non-assignable phone numbers (+221 00 000 00 0X) and synthetic names.
  * Never use real student personal data in development.
  */
 const FICTIONAL_STUDENTS: readonly Student[] = [
@@ -22,10 +23,8 @@ const FICTIONAL_STUDENTS: readonly Student[] = [
     firstName: 'Awa',
     lastName: 'Ndiaye-Démo',
     className: 'Terminale S2',
-    guardianPhone: '+221770000101',
+    guardianPhone: '+221000000001',
     status: 'ACTIVE',
-    paymentStatus: 'PAID',
-    balanceFcfa: 0,
     enrolledAtUtc: '2026-10-01T09:00:00Z',
   },
   {
@@ -34,10 +33,8 @@ const FICTIONAL_STUDENTS: readonly Student[] = [
     firstName: 'Moussa',
     lastName: 'Diop-Démo',
     className: '3ème A',
-    guardianPhone: '+221770000102',
+    guardianPhone: '+221000000002',
     status: 'ACTIVE',
-    paymentStatus: 'PENDING',
-    balanceFcfa: 35000,
     enrolledAtUtc: '2026-10-02T10:30:00Z',
   },
   {
@@ -46,10 +43,8 @@ const FICTIONAL_STUDENTS: readonly Student[] = [
     firstName: 'Fatou',
     lastName: 'Sall-Démo',
     className: 'CM2 B',
-    guardianPhone: '+221770000103',
+    guardianPhone: '+221000000003',
     status: 'ACTIVE',
-    paymentStatus: 'OVERDUE',
-    balanceFcfa: 75000,
     enrolledAtUtc: '2026-10-03T08:15:00Z',
   },
   {
@@ -58,10 +53,8 @@ const FICTIONAL_STUDENTS: readonly Student[] = [
     firstName: 'Ibrahima',
     lastName: 'Fall-Démo',
     className: 'Seconde L',
-    guardianPhone: '+221770000104',
+    guardianPhone: '+221000000004',
     status: 'ACTIVE',
-    paymentStatus: 'PAID',
-    balanceFcfa: 0,
     enrolledAtUtc: '2026-10-04T11:45:00Z',
   },
   {
@@ -70,10 +63,8 @@ const FICTIONAL_STUDENTS: readonly Student[] = [
     firstName: 'Khady',
     lastName: 'Ba-Démo',
     className: '6ème A',
-    guardianPhone: '+221770000105',
+    guardianPhone: '+221000000005',
     status: 'ACTIVE',
-    paymentStatus: 'PENDING',
-    balanceFcfa: 25000,
     enrolledAtUtc: '2026-10-05T14:20:00Z',
   },
   {
@@ -82,10 +73,8 @@ const FICTIONAL_STUDENTS: readonly Student[] = [
     firstName: 'Cheikh',
     lastName: 'Sow-Démo',
     className: 'Première S1',
-    guardianPhone: '+221770000106',
+    guardianPhone: '+221000000006',
     status: 'INACTIVE',
-    paymentStatus: 'OVERDUE',
-    balanceFcfa: 90000,
     enrolledAtUtc: '2026-10-06T16:00:00Z',
   },
 ];
@@ -94,8 +83,7 @@ const STUDENT_COMPARATORS: Record<string, (a: Student, b: Student) => number> = 
   lastName: (a, b) => a.lastName.localeCompare(b.lastName, 'fr'),
   firstName: (a, b) => a.firstName.localeCompare(b.firstName, 'fr'),
   className: (a, b) => a.className.localeCompare(b.className, 'fr'),
-  balanceFcfa: (a, b) => a.balanceFcfa - b.balanceFcfa,
-  paymentStatus: (a, b) => a.paymentStatus.localeCompare(b.paymentStatus),
+  status: (a, b) => a.status.localeCompare(b.status),
   enrolledAtUtc: (a, b) => a.enrolledAtUtc.localeCompare(b.enrolledAtUtc),
 };
 
@@ -116,7 +104,7 @@ export class StudentMockApi implements StudentApi {
     const emptyPage: Page<Student> = {
       items: [],
       page: Math.max(0, Math.trunc(query.page)),
-      size: Math.max(1, Math.trunc(query.size)),
+      size: Math.max(1, Math.min(100, Math.trunc(query.size))),
       total: 0,
     };
 

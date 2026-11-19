@@ -9,8 +9,6 @@ import { ThemePreviewComponent } from './theme-preview';
 
 describe('ThemePreviewComponent', () => {
   beforeEach(async () => {
-    Object.defineProperty(window, 'innerWidth', { value: 360, configurable: true });
-
     await TestBed.configureTestingModule({
       imports: [ThemePreviewComponent],
       providers: [
@@ -21,22 +19,30 @@ describe('ThemePreviewComponent', () => {
     }).compileComponents();
   });
 
-  it('supports mobile drawer toggle at 360px viewport width', async () => {
+  it('opens and closes the navigation drawer cleanly (responsive 360px layout covered by Playwright)', async () => {
     const fixture = TestBed.createComponent(ThemePreviewComponent);
     await fixture.whenStable();
     fixture.detectChanges();
 
-    expect(window.innerWidth).toBe(360);
     const el = fixture.nativeElement as HTMLElement;
     const menuBtn = el.querySelector<HTMLButtonElement>(
       'button[aria-controls="theme-preview-sidebar"]'
     );
-    expect(menuBtn).not.toBeNull();
+    const drawerCheckbox = el.querySelector<HTMLInputElement>('#theme-preview-drawer');
+    const closeBtn = el.querySelector<HTMLButtonElement>('button[aria-label="Fermer le tiroir"]');
+
     expect(menuBtn?.getAttribute('aria-expanded')).toBe('false');
+    expect(drawerCheckbox?.checked).toBe(false);
 
     menuBtn?.click();
     fixture.detectChanges();
     expect(menuBtn?.getAttribute('aria-expanded')).toBe('true');
+    expect(drawerCheckbox?.checked).toBe(true);
+
+    closeBtn?.click();
+    fixture.detectChanges();
+    expect(menuBtn?.getAttribute('aria-expanded')).toBe('false');
+    expect(drawerCheckbox?.checked).toBe(false);
   });
 
   it('toggles light/dark theme via button and updates html data-theme', async () => {
@@ -47,39 +53,63 @@ describe('ThemePreviewComponent', () => {
 
     const el = fixture.nativeElement as HTMLElement;
     const themeBtn = el.querySelector<HTMLButtonElement>('button[aria-pressed]');
-    expect(doc.documentElement.getAttribute('data-theme')).toBe('light');
+    const initialTheme = doc.documentElement.getAttribute('data-theme');
 
     themeBtn?.click();
     fixture.detectChanges();
-    expect(doc.documentElement.getAttribute('data-theme')).toBe('dark');
-    expect(themeBtn?.getAttribute('aria-pressed')).toBe('true');
+    const toggledTheme = doc.documentElement.getAttribute('data-theme');
+    expect(toggledTheme).not.toBe(initialTheme);
+    expect(themeBtn?.getAttribute('aria-pressed')).toBe(String(toggledTheme === 'dark'));
   });
 
-  it('exposes ARIA tablist/tab/tabpanel roles and explicit form labels', async () => {
+  it('moves both focus and selection on ArrowRight, ArrowLeft, End, and Home with roving tabindex', async () => {
     const fixture = TestBed.createComponent(ThemePreviewComponent);
     await fixture.whenStable();
     fixture.detectChanges();
 
     const el = fixture.nativeElement as HTMLElement;
-    expect(el.querySelector('[role="tablist"]')).not.toBeNull();
+    const tablist = el.querySelector('[role="tablist"]');
+    expect(tablist?.classList.contains('tabs-box')).toBe(true);
+
     const tabs = Array.from(el.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
     expect(tabs.length).toBe(3);
-    expect(tabs[0].getAttribute('aria-selected')).toBe('true');
+    expect(tabs.map((t) => t.getAttribute('tabindex'))).toEqual(['0', '-1', '-1']);
 
-    // Switch to forms tab and verify ARIA selection + explicit form labels
-    tabs[2].click();
+    tabs[0].focus();
+    tabs[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    fixture.detectChanges();
+    expect(tabs[1].getAttribute('aria-selected')).toBe('true');
+    expect(tabs.map((t) => t.getAttribute('tabindex'))).toEqual(['-1', '0', '-1']);
+    expect(document.activeElement).toBe(tabs[1]);
+
+    tabs[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
     fixture.detectChanges();
     expect(tabs[2].getAttribute('aria-selected')).toBe('true');
-    const formsPanel = el.querySelector<HTMLElement>('#panel-forms[role="tabpanel"]');
-    expect(formsPanel?.hidden).toBe(false);
+    expect(document.activeElement).toBe(tabs[2]);
 
+    tabs[2].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+    fixture.detectChanges();
+    expect(tabs[1].getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(tabs[1]);
+
+    tabs[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+    fixture.detectChanges();
+    expect(tabs[0].getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(tabs[0]);
+  });
+
+  it('associates every form input with an explicit label', async () => {
+    const fixture = TestBed.createComponent(ThemePreviewComponent);
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const el = fixture.nativeElement as HTMLElement;
     const formInputs = Array.from(
       el.querySelectorAll<HTMLElement>('form input[id], form select[id]')
     );
     expect(formInputs.length).toBeGreaterThanOrEqual(4);
     for (const inputEl of formInputs) {
-      const label = el.querySelector(`label[for="${inputEl.id}"]`);
-      expect(label).not.toBeNull();
+      expect(el.querySelector(`label[for="${inputEl.id}"]`)).not.toBeNull();
     }
   });
 });

@@ -1,38 +1,72 @@
 import { DOCUMENT } from '@angular/common';
 import { TestBed } from '@angular/core/testing';
+import { vi } from 'vitest';
 import { ThemeService } from './theme.service';
 
 describe('ThemeService', () => {
-  let service: ThemeService;
-  let doc: Document;
+  const originalMatchMedia = window.matchMedia;
 
-  beforeEach(() => {
-    TestBed.configureTestingModule({});
-    doc = TestBed.inject(DOCUMENT);
-    service = TestBed.inject(ThemeService);
+  afterEach(() => {
+    Object.defineProperty(window, 'matchMedia', {
+      value: originalMatchMedia,
+      writable: true,
+      configurable: true,
+    });
   });
 
-  it('initializes with light theme and sets data-theme on html', () => {
+  it('defaults to light when matchMedia is unavailable', () => {
+    Object.defineProperty(window, 'matchMedia', {
+      value: undefined,
+      writable: true,
+      configurable: true,
+    });
+
+    TestBed.configureTestingModule({});
+    const doc = TestBed.inject(DOCUMENT);
+    const service = TestBed.inject(ThemeService);
+
     expect(service.theme()).toBe('light');
     expect(service.isDark()).toBe(false);
     expect(doc.documentElement.getAttribute('data-theme')).toBe('light');
   });
 
-  it('toggles between light and dark themes and updates html data-theme', () => {
-    service.toggleTheme();
+  it('follows system prefers-color-scheme: dark on initialization', () => {
+    Object.defineProperty(window, 'matchMedia', {
+      value: vi.fn().mockReturnValue({ matches: true }),
+      writable: true,
+      configurable: true,
+    });
+
+    TestBed.configureTestingModule({});
+    const doc = TestBed.inject(DOCUMENT);
+    const service = TestBed.inject(ThemeService);
+
     expect(service.theme()).toBe('dark');
     expect(service.isDark()).toBe(true);
     expect(doc.documentElement.getAttribute('data-theme')).toBe('dark');
-
-    service.toggleTheme();
-    expect(service.theme()).toBe('light');
-    expect(service.isDark()).toBe(false);
-    expect(doc.documentElement.getAttribute('data-theme')).toBe('light');
   });
 
-  it('sets a specific theme via setTheme()', () => {
-    service.setTheme('dark');
+  it('toggles theme manually in memory only and updates html data-theme', () => {
+    Object.defineProperty(window, 'matchMedia', {
+      value: vi.fn().mockReturnValue({ matches: false }),
+      writable: true,
+      configurable: true,
+    });
+    const storageSpy = vi.spyOn(Storage.prototype, 'setItem');
+
+    TestBed.configureTestingModule({});
+    const doc = TestBed.inject(DOCUMENT);
+    const service = TestBed.inject(ThemeService);
+
+    service.toggleTheme();
     expect(service.theme()).toBe('dark');
     expect(doc.documentElement.getAttribute('data-theme')).toBe('dark');
+
+    service.setTheme('light');
+    expect(service.theme()).toBe('light');
+    expect(doc.documentElement.getAttribute('data-theme')).toBe('light');
+    expect(storageSpy).not.toHaveBeenCalled();
+
+    storageSpy.mockRestore();
   });
 });

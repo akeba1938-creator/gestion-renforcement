@@ -53,7 +53,9 @@ export const routes: Routes = [
         path: 'grades',
         title: 'Notes et bulletins — École SaaS',
         canActivate: [roleGuard],
-        data: { roles: ['PROMOTER', 'DIRECTOR', 'CENSOR', 'TEACHER'] satisfies UserRole[] },
+        // Le rôle TEACHER est volontairement exclu de l'espace admin : il sera
+        // rattaché à son propre espace lorsque TeacherLayoutComponent sera branché.
+        data: { roles: ['PROMOTER', 'DIRECTOR', 'CENSOR'] satisfies UserRole[] },
         loadComponent: () =>
           import('./features/grades/grades-page').then((m) => m.GradesPageComponent),
       },
@@ -61,7 +63,8 @@ export const routes: Routes = [
         path: 'attendance',
         title: 'Absences — École SaaS',
         canActivate: [roleGuard],
-        data: { roles: ['PROMOTER', 'DIRECTOR', 'SECRETARY', 'CENSOR', 'TEACHER'] satisfies UserRole[] },
+        // Le rôle TEACHER sera rattaché à TeacherLayoutComponent lors de son branchement.
+        data: { roles: ['PROMOTER', 'DIRECTOR', 'SECRETARY', 'CENSOR'] satisfies UserRole[] },
         loadComponent: () =>
           import('./features/attendance/attendance-page').then((m) => m.AttendancePageComponent),
       },

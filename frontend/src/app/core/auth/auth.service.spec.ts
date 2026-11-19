@@ -6,7 +6,7 @@ import { AuthService } from './auth.service';
 const DEMO_USER: AuthUser = {
   id: 'usr-demo-1',
   fullName: 'Direction Démo',
-  email: 'direction@ecole-demo.sn',
+  email: 'direction@ecole-demo.invalid',
   role: 'DIRECTOR',
   tenantId: 'tenant-demo-1',
   tenantName: 'École Démo',

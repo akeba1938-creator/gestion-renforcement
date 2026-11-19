@@ -1,4 +1,4 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, ElementRef, OnInit, computed, inject, signal, viewChildren } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import {
   LucideCircleAlert,
@@ -13,8 +13,12 @@ import {
 } from '@lucide/angular';
 import { FINANCE_API } from '../../core/api/finance.api';
 import { STUDENT_API } from '../../core/api/student.api';
-import { FinanceSummary } from '../../core/models/finance.model';
-import { Student, TuitionPaymentStatus } from '../../core/models/student.model';
+import {
+  FinanceSummary,
+  StudentBalance,
+  TuitionPaymentStatus,
+} from '../../core/models/finance.model';
+import { Student } from '../../core/models/student.model';
 import { ThemeService } from '../../core/services/theme.service';
 import { DataTableComponent } from '../../shared/components/data-table/data-table';
 import { StatCardComponent } from '../../shared/components/stat-card/stat-card';
@@ -27,6 +31,12 @@ export type PreviewTabId = 'overview' | 'students' | 'forms';
 interface PreviewTab {
   readonly id: PreviewTabId;
   readonly label: string;
+}
+
+interface StudentPreviewRow {
+  readonly student: Student;
+  readonly balanceFcfa: number | null;
+  readonly paymentStatus: TuitionPaymentStatus | null;
 }
 
 @Component({
@@ -57,13 +67,31 @@ export class ThemePreviewComponent implements OnInit {
   private readonly financeApi = inject(FINANCE_API);
   private readonly formBuilder = inject(FormBuilder);
 
+  private readonly tabButtons = viewChildren<ElementRef<HTMLButtonElement>>('tabBtn');
+
   protected readonly drawerOpen = signal(false);
   protected readonly activeTab = signal<PreviewTabId>('overview');
   protected readonly students = signal<Student[]>([]);
+  protected readonly balances = signal<StudentBalance[]>([]);
   protected readonly studentsLoading = signal(true);
   protected readonly studentsError = signal<string | null>(null);
   protected readonly financeSummary = signal<FinanceSummary | null>(null);
   protected readonly formSubmittedMessage = signal<string | null>(null);
+
+  /**
+   * Presentation-layer composition of Student (student module) and StudentBalance (finance module).
+   */
+  protected readonly studentRows = computed<StudentPreviewRow[]>(() => {
+    const balanceByStudentId = new Map(this.balances().map((b) => [b.studentId, b]));
+    return this.students().map((student) => {
+      const balance = balanceByStudentId.get(student.id);
+      return {
+        student,
+        balanceFcfa: balance?.balanceFcfa ?? null,
+        paymentStatus: balance?.paymentStatus ?? null,
+      };
+    });
+  });
 
   protected readonly tabs: readonly PreviewTab[] = [
     { id: 'overview', label: 'Vue générale' },
@@ -109,6 +137,7 @@ export class ThemePreviewComponent implements OnInit {
     if (nextIndex !== null) {
       event.preventDefault();
       this.selectTab(this.tabs[nextIndex].id);
+      this.tabButtons()[nextIndex]?.nativeElement.focus();
     }
   }
 
@@ -124,7 +153,10 @@ export class ThemePreviewComponent implements OnInit {
     );
   }
 
-  protected paymentBadgeLabel(status: TuitionPaymentStatus): string {
+  protected paymentBadgeLabel(status: TuitionPaymentStatus | null): string {
+    if (!status) {
+      return 'Non renseigné';
+    }
     const labels: Record<TuitionPaymentStatus, string> = {
       PAID: 'Payé',
       PENDING: 'En attente',
@@ -133,7 +165,10 @@ export class ThemePreviewComponent implements OnInit {
     return labels[status];
   }
 
-  protected paymentBadgeTone(status: TuitionPaymentStatus): BadgeTone {
+  protected paymentBadgeTone(status: TuitionPaymentStatus | null): BadgeTone {
+    if (!status) {
+      return 'neutral';
+    }
     const tones: Record<TuitionPaymentStatus, BadgeTone> = {
       PAID: 'success',
       PENDING: 'warning',
@@ -155,6 +190,10 @@ export class ThemePreviewComponent implements OnInit {
         this.studentsError.set(err.message);
         this.studentsLoading.set(false);
       },
+    });
+
+    this.financeApi.getStudentBalances().subscribe({
+      next: (balances) => this.balances.set(balances),
     });
 
     this.financeApi.getSummary().subscribe({

@@ -19,7 +19,7 @@ function setupTesting(apiBaseUrl: string, withToken = true) {
     authService.setSession('secret-memory-jwt', {
       id: 'usr-1',
       fullName: 'Direction Démo',
-      email: 'direction@ecole-demo.example',
+      email: 'direction@ecole-demo.invalid',
       role: 'DIRECTOR',
       tenantId: 'tenant-1',
       tenantName: 'École Démo',

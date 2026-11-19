@@ -1,19 +1,37 @@
+import { vi } from 'vitest';
 import { DakarDatePipe } from './dakar-date.pipe';
 
 describe('DakarDatePipe', () => {
   const pipe = new DakarDatePipe();
 
-  it('formats a UTC ISO timestamp as a date in Africa/Dakar timezone', () => {
-    // Africa/Dakar is UTC+0 year-round: 23:30 UTC stays on the same calendar day.
-    expect(pipe.transform('2026-10-15T23:30:00Z')).toBe('15/10/2026');
+  it('formats a UTC instant near midnight in Africa/Dakar and explicitly passes timeZone Africa/Dakar', () => {
+    const spy = vi.spyOn(Intl, 'DateTimeFormat');
+
+    // Africa/Dakar is UTC+0 year-round: 23:59 UTC stays on 15/10/2026.
+    const formattedDate = pipe.transform('2026-10-15T23:59:00Z', 'date');
+    expect(formattedDate).toBe('15/10/2026');
+    expect(spy).toHaveBeenCalledWith(
+      'fr-FR',
+      expect.objectContaining({ timeZone: 'Africa/Dakar' })
+    );
+
+    const formattedDateTime = pipe.transform('2026-10-15T23:59:00Z', 'datetime');
+    expect(formattedDateTime).toContain('15/10/2026');
+    expect(formattedDateTime).toContain('23:59');
+
+    spy.mockRestore();
   });
 
-  it('formats datetime and time modes in Africa/Dakar timezone', () => {
-    const datetime = pipe.transform('2026-10-15T09:05:00Z', 'datetime');
-    expect(datetime).toContain('15/10/2026');
-    expect(datetime).toContain('09:05');
+  it('formats time mode in Africa/Dakar timezone', () => {
+    const spy = vi.spyOn(Intl, 'DateTimeFormat');
 
     expect(pipe.transform('2026-10-15T09:05:00Z', 'time')).toBe('09:05');
+    expect(spy).toHaveBeenCalledWith(
+      'fr-FR',
+      expect.objectContaining({ timeZone: 'Africa/Dakar' })
+    );
+
+    spy.mockRestore();
   });
 
   it('accepts Date instances', () => {

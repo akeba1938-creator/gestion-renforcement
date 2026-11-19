@@ -1,10 +1,12 @@
 import { InjectionToken } from '@angular/core';
 import { Observable } from 'rxjs';
-import { FinanceSummary, PaymentRecord } from '../models/finance.model';
+import { FinanceEntry, FinanceSummary, StudentBalance } from '../models/finance.model';
 import { Page, PageQuery } from '../models/page.model';
 
 export interface FinanceApi {
-  listPayments(query: PageQuery): Observable<Page<PaymentRecord>>;
+  listEntries(query: PageQuery): Observable<Page<FinanceEntry>>;
+  getStudentBalances(): Observable<StudentBalance[]>;
+  getStudentBalance(studentId: string): Observable<StudentBalance | null>;
   getSummary(): Observable<FinanceSummary>;
 }
 

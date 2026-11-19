@@ -34,7 +34,7 @@ export class DevLoginPageComponent {
     this.authService.setSession('demo-memory-token', {
       id: 'usr-demo-director',
       fullName: 'Direction Démo',
-      email: 'direction@ecole-demo.example',
+      email: 'direction@ecole-demo.invalid',
       role: 'DIRECTOR',
       tenantId: 'tenant-demo-01',
       tenantName: 'Groupe Scolaire Démo',

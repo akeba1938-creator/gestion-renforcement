@@ -2,14 +2,14 @@ import { Pipe, PipeTransform } from '@angular/core';
 
 export type DakarDateFormat = 'date' | 'datetime' | 'time';
 
-const FORMATTERS: Record<DakarDateFormat, Intl.DateTimeFormat> = {
-  date: new Intl.DateTimeFormat('fr-FR', {
+const FORMAT_OPTIONS: Record<DakarDateFormat, Intl.DateTimeFormatOptions> = {
+  date: {
     timeZone: 'Africa/Dakar',
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
-  }),
-  datetime: new Intl.DateTimeFormat('fr-FR', {
+  },
+  datetime: {
     timeZone: 'Africa/Dakar',
     day: '2-digit',
     month: '2-digit',
@@ -17,13 +17,13 @@ const FORMATTERS: Record<DakarDateFormat, Intl.DateTimeFormat> = {
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
-  }),
-  time: new Intl.DateTimeFormat('fr-FR', {
+  },
+  time: {
     timeZone: 'Africa/Dakar',
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
-  }),
+  },
 };
 
 /**
@@ -45,6 +45,6 @@ export class DakarDatePipe implements PipeTransform {
     if (Number.isNaN(parsed.getTime())) {
       return '—';
     }
-    return FORMATTERS[format].format(parsed);
+    return new Intl.DateTimeFormat('fr-FR', FORMAT_OPTIONS[format]).format(parsed);
   }
 }

@@ -50,10 +50,11 @@
         <div
           role="tablist"
           aria-label="Catégories de composants"
-          class="tabs tabs-boxed flex-wrap bg-base-100 p-1 border border-base-300"
+          class="tabs tabs-box flex-wrap bg-base-100 p-1 border border-base-300"
         >
           @for (tab of tabs; track tab.id; let idx = $index) {
             <button
+              #tabBtn
               type="button"
               role="tab"
               class="tab focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
@@ -131,6 +132,8 @@
             <div class="card-body gap-4 p-4 sm:p-6">
               <h2 id="badges-heading" class="text-lg font-semibold">Badges de statut</h2>
               <div class="flex flex-wrap items-center gap-2 sm:gap-3">
+                <span class="badge badge-primary badge-sm font-medium">Primaire</span>
+                <span class="badge badge-secondary badge-sm font-medium">Secondaire</span>
                 <app-status-badge label="Payé" tone="success" />
                 <app-status-badge label="En attente" tone="warning" />
                 <app-status-badge label="Impayé" tone="error" />
@@ -168,17 +171,17 @@
                 </tr>
               </thead>
               <tbody>
-                @for (student of students(); track student.id) {
+                @for (row of studentRows(); track row.student.id) {
                   <tr>
-                    <td class="font-mono text-xs">{{ student.matricule }}</td>
-                    <td class="font-medium">{{ student.firstName }} {{ student.lastName }}</td>
-                    <td>{{ student.className }}</td>
-                    <td class="whitespace-nowrap">{{ student.balanceFcfa | fcfa }}</td>
-                    <td class="whitespace-nowrap">{{ student.enrolledAtUtc | dakarDate }}</td>
+                    <td class="font-mono text-xs">{{ row.student.matricule }}</td>
+                    <td class="font-medium">{{ row.student.firstName }} {{ row.student.lastName }}</td>
+                    <td>{{ row.student.className }}</td>
+                    <td class="whitespace-nowrap">{{ row.balanceFcfa | fcfa }}</td>
+                    <td class="whitespace-nowrap">{{ row.student.enrolledAtUtc | dakarDate }}</td>
                     <td>
                       <app-status-badge
-                        [label]="paymentBadgeLabel(student.paymentStatus)"
-                        [tone]="paymentBadgeTone(student.paymentStatus)"
+                        [label]="paymentBadgeLabel(row.paymentStatus)"
+                        [tone]="paymentBadgeTone(row.paymentStatus)"
                       />
                     </td>
                   </tr>
