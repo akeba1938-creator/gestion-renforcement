@@ -9,11 +9,18 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import java.util.Locale;
+import java.util.Objects;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 @Entity
 @Table(name = "subscription_plans")
 public class SubscriptionPlan {
+
+    public static final int DEFAULT_TRIAL_DAYS = 14;
+    public static final int MAX_TRIAL_DAYS = 365;
+    private static final Pattern CODE_PATTERN = Pattern.compile("^[A-Z0-9][A-Z0-9_-]{0,39}$");
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -24,6 +31,9 @@ public class SubscriptionPlan {
 
     @Column(name = "name", nullable = false, length = 100)
     private String name;
+
+    @Column(name = "description")
+    private String description;
 
     @Column(name = "monthly_price_xof", nullable = false)
     private long monthlyPriceXof;
@@ -39,6 +49,9 @@ public class SubscriptionPlan {
 
     @Column(name = "max_storage_mb", nullable = false)
     private int maxStorageMb;
+
+    @Column(name = "trial_days", nullable = false)
+    private int trialDays;
 
     @Column(name = "active", nullable = false)
     private boolean active;
@@ -60,11 +73,101 @@ public class SubscriptionPlan {
             int maxStudents,
             int maxUsers,
             int maxStorageMb) {
-        if (code == null || code.isBlank()) {
+        this(
+                code,
+                name,
+                null,
+                monthlyPriceXof,
+                yearlyPriceXof,
+                maxStudents,
+                maxUsers,
+                maxStorageMb,
+                DEFAULT_TRIAL_DAYS);
+    }
+
+    public SubscriptionPlan(
+            String code,
+            String name,
+            String description,
+            long monthlyPriceXof,
+            long yearlyPriceXof,
+            int maxStudents,
+            int maxUsers,
+            int maxStorageMb,
+            int trialDays) {
+        this.code = normalizeCode(code);
+        applyDetails(
+                name,
+                description,
+                monthlyPriceXof,
+                yearlyPriceXof,
+                maxStudents,
+                maxUsers,
+                maxStorageMb,
+                trialDays);
+        this.active = true;
+    }
+
+    public static String normalizeCode(String rawCode) {
+        if (rawCode == null || rawCode.isBlank()) {
             throw new IllegalArgumentException("Le code du forfait est obligatoire.");
         }
+        String normalized = rawCode.trim().toUpperCase(Locale.ROOT);
+        if (!CODE_PATTERN.matcher(normalized).matches()) {
+            throw new IllegalArgumentException(
+                    "Le code du forfait doit contenir uniquement des lettres majuscules, chiffres, tirets ou underscores (40 caractères max).");
+        }
+        return normalized;
+    }
+
+    public void updateDetails(
+            String name,
+            String description,
+            long monthlyPriceXof,
+            long yearlyPriceXof,
+            int maxStudents,
+            int maxUsers,
+            int maxStorageMb,
+            int trialDays) {
+        applyDetails(
+                name,
+                description,
+                monthlyPriceXof,
+                yearlyPriceXof,
+                maxStudents,
+                maxUsers,
+                maxStorageMb,
+                trialDays);
+    }
+
+    public void activate() {
+        this.active = true;
+    }
+
+    public void deactivate() {
+        this.active = false;
+    }
+
+    public long priceFor(BillingCycle billingCycle) {
+        Objects.requireNonNull(billingCycle, "Le cycle de facturation est obligatoire.");
+        return billingCycle == BillingCycle.YEARLY ? yearlyPriceXof : monthlyPriceXof;
+    }
+
+    private void applyDetails(
+            String name,
+            String description,
+            long monthlyPriceXof,
+            long yearlyPriceXof,
+            int maxStudents,
+            int maxUsers,
+            int maxStorageMb,
+            int trialDays) {
         if (name == null || name.isBlank()) {
             throw new IllegalArgumentException("Le nom du forfait est obligatoire.");
+        }
+        String trimmedName = name.trim();
+        if (trimmedName.length() > 100) {
+            throw new IllegalArgumentException("Le nom du forfait ne peut pas dépasser 100 caractères.");
         }
         if (monthlyPriceXof < 0 || yearlyPriceXof < 0) {
             throw new IllegalArgumentException("Les tarifs en FCFA doivent être positifs ou nuls.");
@@ -72,14 +175,18 @@ public class SubscriptionPlan {
         if (maxStudents <= 0 || maxUsers <= 0 || maxStorageMb <= 0) {
             throw new IllegalArgumentException("Les quotas du forfait doivent être strictement positifs.");
         }
-        this.code = code.trim().toUpperCase();
-        this.name = name.trim();
+        if (trialDays < 0 || trialDays > MAX_TRIAL_DAYS) {
+            throw new IllegalArgumentException(
+                    "La durée d'essai doit être comprise entre 0 et " + MAX_TRIAL_DAYS + " jours.");
+        }
+        this.name = trimmedName;
+        this.description = (description == null || description.isBlank()) ? null : description.trim();
         this.monthlyPriceXof = monthlyPriceXof;
         this.yearlyPriceXof = yearlyPriceXof;
         this.maxStudents = maxStudents;
         this.maxUsers = maxUsers;
         this.maxStorageMb = maxStorageMb;
-        this.active = true;
+        this.trialDays = trialDays;
     }
 
     @PrePersist
@@ -108,6 +215,10 @@ public class SubscriptionPlan {
         return name;
     }
 
+    public String getDescription() {
+        return description;
+    }
+
     public long getMonthlyPriceXof() {
         return monthlyPriceXof;
     }
@@ -128,7 +239,19 @@ public class SubscriptionPlan {
         return maxStorageMb;
     }
 
+    public int getTrialDays() {
+        return trialDays;
+    }
+
     public boolean isActive() {
         return active;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
+    }
+
+    public Instant getUpdatedAt() {
+        return updatedAt;
     }
 }
