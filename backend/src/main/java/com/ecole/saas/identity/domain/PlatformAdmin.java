@@ -1,6 +1,7 @@
 package com.ecole.saas.identity.domain;
 
 import jakarta.persistence.Column;
+import jakarta.persistence.Embedded;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -11,7 +12,6 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import java.time.Instant;
-import java.util.Locale;
 import java.util.UUID;
 
 @Entity
@@ -38,17 +38,8 @@ public class PlatformAdmin {
     @Column(name = "status", nullable = false, length = 20)
     private UserStatus status;
 
-    @Column(name = "failed_login_attempts", nullable = false)
-    private int failedLoginAttempts;
-
-    @Column(name = "locked_until")
-    private Instant lockedUntil;
-
-    @Column(name = "mfa_enabled", nullable = false)
-    private boolean mfaEnabled;
-
-    @Column(name = "mfa_secret_encrypted")
-    private String mfaSecretEncrypted;
+    @Embedded
+    private LoginSecurity security = new LoginSecurity();
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
@@ -60,13 +51,11 @@ public class PlatformAdmin {
     }
 
     public PlatformAdmin(String email, String firstName, String lastName, String passwordHash) {
-        this.email = requireNonBlank(email, "L'adresse e-mail est obligatoire.").trim().toLowerCase(Locale.ROOT);
+        this.email = User.normalizeEmail(email);
         this.firstName = requireNonBlank(firstName, "Le prénom est obligatoire.").trim();
         this.lastName = requireNonBlank(lastName, "Le nom est obligatoire.").trim();
         this.passwordHash = requireNonBlank(passwordHash, "Le hachage du mot de passe est obligatoire.");
         this.status = UserStatus.ACTIVE;
-        this.failedLoginAttempts = 0;
-        this.mfaEnabled = false;
     }
 
     @PrePersist
@@ -81,6 +70,14 @@ public class PlatformAdmin {
     @PreUpdate
     void onUpdate() {
         updatedAt = Instant.now();
+    }
+
+    public boolean canAuthenticate(Instant now) {
+        return status == UserStatus.ACTIVE && !security.isLocked(now);
+    }
+
+    public boolean isActive() {
+        return status == UserStatus.ACTIVE;
     }
 
     public UUID getId() {
@@ -99,12 +96,16 @@ public class PlatformAdmin {
         return lastName;
     }
 
+    public String getPasswordHash() {
+        return passwordHash;
+    }
+
     public UserStatus getStatus() {
         return status;
     }
 
-    public boolean isMfaEnabled() {
-        return mfaEnabled;
+    public LoginSecurity getSecurity() {
+        return security;
     }
 
     private static String requireNonBlank(String value, String message) {

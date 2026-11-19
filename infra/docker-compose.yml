@@ -1,12 +1,16 @@
-# Environnement local de développement (à compléter)
+# Environnement local de développement
+# Variables requises : voir infra/env.example (copier en infra/.env).
 services:
   postgres:
     image: postgres:17
     environment:
       POSTGRES_DB: ecole
       POSTGRES_USER: ecole
-      POSTGRES_PASSWORD: change-me-local-only
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Définir POSTGRES_PASSWORD (voir infra/env.example)}
+      ECOLE_APP_DB_PASSWORD: ${ECOLE_APP_DB_PASSWORD:?Définir ECOLE_APP_DB_PASSWORD (voir infra/env.example)}
     ports: ["5432:5432"]
-    volumes: [pgdata:/var/lib/postgresql/data]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
 volumes:
   pgdata:

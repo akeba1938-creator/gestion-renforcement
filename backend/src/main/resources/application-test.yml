@@ -1,3 +1,15 @@
 spring:
   jpa:
     show-sql: false
+
+app:
+  security:
+    jwt:
+      # Clé de test uniquement (48 octets en Base64) — ne jamais utiliser hors profil test
+      secret: dGVzdC1qd3Qtc2VjcmV0LWtleS1vbmx5LWZvci1hdXRvbWF0ZWQtdGVzdHMtMTIz
+      issuer: ecole-saas
+    mfa:
+      # Clé AES-256 de test uniquement (32 octets en Base64) — ne jamais utiliser hors profil test
+      encryption-key: dGVzdC1tZmEtYWVzMjU2LWtleS0zMmJ5dGVzLW9ubHk=
+    cookie:
+      secure: true

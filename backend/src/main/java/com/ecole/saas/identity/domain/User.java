@@ -2,6 +2,7 @@ package com.ecole.saas.identity.domain;
 
 import com.ecole.saas.shared.domain.TenantScopedEntity;
 import jakarta.persistence.Column;
+import jakarta.persistence.Embedded;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -40,30 +41,31 @@ public class User extends TenantScopedEntity {
     @Column(name = "status", nullable = false, length = 20)
     private UserStatus status;
 
-    @Column(name = "failed_login_attempts", nullable = false)
-    private int failedLoginAttempts;
-
-    @Column(name = "locked_until")
-    private Instant lockedUntil;
-
-    @Column(name = "mfa_enabled", nullable = false)
-    private boolean mfaEnabled;
-
-    @Column(name = "mfa_secret_encrypted")
-    private String mfaSecretEncrypted;
+    @Embedded
+    private LoginSecurity security = new LoginSecurity();
 
     protected User() {
     }
 
     public User(String email, String phone, String firstName, String lastName, String passwordHash) {
-        this.email = requireNonBlank(email, "L'adresse e-mail est obligatoire.").trim().toLowerCase(Locale.ROOT);
+        this.email = normalizeEmail(email);
         this.phone = phone;
         this.firstName = requireNonBlank(firstName, "Le prénom est obligatoire.").trim();
         this.lastName = requireNonBlank(lastName, "Le nom est obligatoire.").trim();
         this.passwordHash = requireNonBlank(passwordHash, "Le hachage du mot de passe est obligatoire.");
         this.status = UserStatus.ACTIVE;
-        this.failedLoginAttempts = 0;
-        this.mfaEnabled = false;
+    }
+
+    public static String normalizeEmail(String email) {
+        return requireNonBlank(email, "L'adresse e-mail est obligatoire.").trim().toLowerCase(Locale.ROOT);
+    }
+
+    public boolean canAuthenticate(Instant now) {
+        return status == UserStatus.ACTIVE && !security.isLocked(now);
+    }
+
+    public boolean isActive() {
+        return status == UserStatus.ACTIVE;
     }
 
     public void updateName(String firstName, String lastName) {
@@ -99,20 +101,8 @@ public class User extends TenantScopedEntity {
         return status;
     }
 
-    public int getFailedLoginAttempts() {
-        return failedLoginAttempts;
-    }
-
-    public Instant getLockedUntil() {
-        return lockedUntil;
-    }
-
-    public boolean isMfaEnabled() {
-        return mfaEnabled;
-    }
-
-    public String getMfaSecretEncrypted() {
-        return mfaSecretEncrypted;
+    public LoginSecurity getSecurity() {
+        return security;
     }
 
     private static String requireNonBlank(String value, String message) {

@@ -22,6 +22,24 @@ spring:
   jackson:
     time-zone: UTC
 
+app:
+  security:
+    jwt:
+      # Clé HMAC HS256 encodée en Base64, au moins 256 bits. Démarrage refusé sinon.
+      secret: ${APP_JWT_SECRET:}
+      issuer: ${APP_JWT_ISSUER:ecole-saas}
+    mfa:
+      # Clé AES-256 encodée en Base64 (32 octets) pour chiffrer les secrets TOTP.
+      encryption-key: ${APP_MFA_ENCRYPTION_KEY:}
+    cookie:
+      refresh-name: ecole_refresh_token
+      secure: ${APP_COOKIE_SECURE:true}
+      same-site: Strict
+      path: /api/v1/auth
+    csrf:
+      cookie-name: XSRF-TOKEN
+      header-name: X-XSRF-TOKEN
+
 management:
   endpoints:
     web:
