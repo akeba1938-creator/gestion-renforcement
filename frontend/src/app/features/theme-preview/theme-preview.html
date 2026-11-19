@@ -1,0 +1,366 @@
+<div class="drawer lg:drawer-open min-h-screen bg-base-200 text-base-content">
+  <input
+    id="theme-preview-drawer"
+    type="checkbox"
+    class="drawer-toggle"
+    [checked]="drawerOpen()"
+    (change)="toggleDrawer()"
+  />
+
+  <div class="drawer-content flex min-w-0 flex-col">
+    <header class="navbar sticky top-0 z-20 border-b border-base-300 bg-base-100 px-3 sm:px-6">
+      <div class="flex flex-1 items-center gap-2 min-w-0">
+        <button
+          type="button"
+          class="btn btn-ghost btn-square lg:hidden focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+          aria-label="Ouvrir le menu latéral"
+          aria-controls="theme-preview-sidebar"
+          [attr.aria-expanded]="drawerOpen()"
+          (click)="toggleDrawer()"
+        >
+          <svg lucideMenu class="h-5 w-5"></svg>
+        </button>
+        <div class="flex items-center gap-2 min-w-0">
+          <svg lucidePalette class="h-5 w-5 shrink-0 text-primary"></svg>
+          <h1 class="truncate text-base font-bold sm:text-lg">
+            Prévisualisation du thème (Dev uniquement)
+          </h1>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        class="btn btn-outline btn-sm gap-2 shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        [attr.aria-pressed]="themeService.isDark()"
+        (click)="themeService.toggleTheme()"
+      >
+        @if (themeService.isDark()) {
+          <svg lucideSun class="h-4 w-4"></svg>
+          <span>Mode clair</span>
+        } @else {
+          <svg lucideMoon class="h-4 w-4"></svg>
+          <span>Mode sombre</span>
+        }
+      </button>
+    </header>
+
+    <main class="mx-auto w-full max-w-6xl min-w-0 space-y-6 p-3 sm:p-6">
+      <!-- Navigation par onglets avec rôles ARIA -->
+      <section aria-label="Sections de validation" class="space-y-4">
+        <div
+          role="tablist"
+          aria-label="Catégories de composants"
+          class="tabs tabs-box flex-wrap bg-base-100 p-1 border border-base-300"
+        >
+          @for (tab of tabs; track tab.id; let idx = $index) {
+            <button
+              #tabBtn
+              type="button"
+              role="tab"
+              class="tab focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+              [class.tab-active]="activeTab() === tab.id"
+              [attr.id]="'tab-' + tab.id"
+              [attr.aria-selected]="activeTab() === tab.id"
+              [attr.aria-controls]="'panel-' + tab.id"
+              [attr.tabindex]="activeTab() === tab.id ? 0 : -1"
+              (click)="selectTab(tab.id)"
+              (keydown)="onTabKeydown($event, idx)"
+            >
+              {{ tab.label }}
+            </button>
+          }
+        </div>
+
+        <!-- Panneau 1 : Vue générale (stats, boutons, badges) -->
+        <div
+          role="tabpanel"
+          id="panel-overview"
+          aria-labelledby="tab-overview"
+          [hidden]="activeTab() !== 'overview'"
+          class="space-y-6"
+        >
+          <!-- Cartes de statistiques -->
+          <section aria-labelledby="stats-heading" class="space-y-3">
+            <h2 id="stats-heading" class="text-lg font-semibold">Cartes de statistiques</h2>
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <app-stat-card
+                label="Élèves inscrits (démo)"
+                value="428"
+                description="+12 depuis la rentrée"
+                tone="primary"
+              />
+              <app-stat-card
+                label="Frais encaissés"
+                [value]="(financeSummary()?.totalCollectedFcfa ?? 1875000) | fcfa"
+                description="Taux de recouvrement : 77 %"
+                tone="secondary"
+              />
+              <app-stat-card
+                label="Taux de présence"
+                value="96 %"
+                description="Appel du jour complété"
+                tone="neutral"
+              />
+            </div>
+          </section>
+
+          <!-- Boutons -->
+          <section
+            aria-labelledby="buttons-heading"
+            class="card border border-base-300 bg-base-100 shadow-xs"
+          >
+            <div class="card-body gap-4 p-4 sm:p-6">
+              <h2 id="buttons-heading" class="text-lg font-semibold">Boutons</h2>
+              <div class="flex flex-wrap items-center gap-2 sm:gap-3">
+                <button type="button" class="btn btn-primary">Primaire</button>
+                <button type="button" class="btn btn-secondary">Secondaire</button>
+                <button type="button" class="btn btn-accent">Accent</button>
+                <button type="button" class="btn btn-neutral">Neutre</button>
+                <button type="button" class="btn btn-outline">Contour</button>
+                <button type="button" class="btn btn-ghost">Discret</button>
+                <button type="button" class="btn btn-error">Supprimer</button>
+                <button type="button" class="btn btn-primary" disabled>Désactivé</button>
+              </div>
+            </div>
+          </section>
+
+          <!-- Badges -->
+          <section
+            aria-labelledby="badges-heading"
+            class="card border border-base-300 bg-base-100 shadow-xs"
+          >
+            <div class="card-body gap-4 p-4 sm:p-6">
+              <h2 id="badges-heading" class="text-lg font-semibold">Badges de statut</h2>
+              <div class="flex flex-wrap items-center gap-2 sm:gap-3">
+                <span class="badge badge-primary badge-sm font-medium">Primaire</span>
+                <span class="badge badge-secondary badge-sm font-medium">Secondaire</span>
+                <app-status-badge label="Payé" tone="success" />
+                <app-status-badge label="En attente" tone="warning" />
+                <app-status-badge label="Impayé" tone="error" />
+                <app-status-badge label="Nouveau" tone="info" />
+                <app-status-badge label="Archivé" tone="neutral" />
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <!-- Panneau 2 : Tableau d'élèves fictifs -->
+        <div
+          role="tabpanel"
+          id="panel-students"
+          aria-labelledby="tab-students"
+          [hidden]="activeTab() !== 'students'"
+          class="space-y-3"
+        >
+          <h2 class="text-lg font-semibold">Tableau des élèves (données fictives)</h2>
+          <app-data-table
+            [loading]="studentsLoading()"
+            [empty]="!studentsLoading() && students().length === 0"
+            [errorMessage]="studentsError()"
+            emptyMessage="Aucun élève fictif disponible."
+          >
+            <table class="table table-zebra w-full">
+              <thead>
+                <tr>
+                  <th scope="col">Matricule</th>
+                  <th scope="col">Élève</th>
+                  <th scope="col">Classe</th>
+                  <th scope="col">Solde</th>
+                  <th scope="col">Inscription (Dakar)</th>
+                  <th scope="col">Statut</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (row of studentRows(); track row.student.id) {
+                  <tr>
+                    <td class="font-mono text-xs">{{ row.student.matricule }}</td>
+                    <td class="font-medium">{{ row.student.firstName }} {{ row.student.lastName }}</td>
+                    <td>{{ row.student.className }}</td>
+                    <td class="whitespace-nowrap">{{ row.balanceFcfa | fcfa }}</td>
+                    <td class="whitespace-nowrap">{{ row.student.enrolledAtUtc | dakarDate }}</td>
+                    <td>
+                      <app-status-badge
+                        [label]="paymentBadgeLabel(row.paymentStatus)"
+                        [tone]="paymentBadgeTone(row.paymentStatus)"
+                      />
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </app-data-table>
+        </div>
+
+        <!-- Panneau 3 : Formulaire et alertes -->
+        <div
+          role="tabpanel"
+          id="panel-forms"
+          aria-labelledby="tab-forms"
+          [hidden]="activeTab() !== 'forms'"
+          class="space-y-6"
+        >
+          <!-- Formulaire -->
+          <section
+            aria-labelledby="form-heading"
+            class="card border border-base-300 bg-base-100 shadow-xs"
+          >
+            <div class="card-body gap-4 p-4 sm:p-6">
+              <h2 id="form-heading" class="text-lg font-semibold">Formulaire de saisie</h2>
+              <form
+                [formGroup]="previewForm"
+                (ngSubmit)="submitPreviewForm()"
+                class="grid grid-cols-1 gap-4 sm:grid-cols-2"
+                novalidate
+              >
+                <div class="form-control gap-1">
+                  <label for="preview-student-name" class="label-text text-sm font-medium">
+                    Nom complet de l'élève
+                  </label>
+                  <input
+                    id="preview-student-name"
+                    type="text"
+                    formControlName="studentName"
+                    placeholder="Ex. Awa Ndiaye-Démo"
+                    class="input input-bordered w-full"
+                    [attr.aria-invalid]="
+                      previewForm.controls.studentName.invalid &&
+                      previewForm.controls.studentName.touched
+                    "
+                    aria-describedby="preview-student-name-hint"
+                  />
+                  <span id="preview-student-name-hint" class="text-xs text-base-content/70">
+                    @if (
+                      previewForm.controls.studentName.invalid &&
+                      previewForm.controls.studentName.touched
+                    ) {
+                      Veuillez saisir au moins 2 caractères.
+                    } @else {
+                      Saisissez un nom fictif pour tester le champ.
+                    }
+                  </span>
+                </div>
+
+                <div class="form-control gap-1">
+                  <label for="preview-class" class="label-text text-sm font-medium">
+                    Classe
+                  </label>
+                  <select
+                    id="preview-class"
+                    formControlName="className"
+                    class="select select-bordered w-full"
+                  >
+                    <option value="Terminale S2">Terminale S2</option>
+                    <option value="3ème A">3ème A</option>
+                    <option value="CM2 B">CM2 B</option>
+                  </select>
+                </div>
+
+                <div class="form-control gap-1">
+                  <label for="preview-amount" class="label-text text-sm font-medium">
+                    Montant (FCFA entier)
+                  </label>
+                  <input
+                    id="preview-amount"
+                    type="number"
+                    step="1"
+                    min="1000"
+                    formControlName="amountFcfa"
+                    class="input input-bordered w-full"
+                  />
+                </div>
+
+                <div class="flex items-end pb-2">
+                  <label
+                    for="preview-notify-parent"
+                    class="flex cursor-pointer items-center gap-3 text-sm"
+                  >
+                    <input
+                      id="preview-notify-parent"
+                      type="checkbox"
+                      formControlName="notifyParent"
+                      class="checkbox checkbox-primary"
+                    />
+                    <span>Envoyer un reçu SMS au parent</span>
+                  </label>
+                </div>
+
+                <div class="sm:col-span-2 flex flex-wrap items-center gap-3">
+                  <button type="submit" class="btn btn-primary">Enregistrer</button>
+                  @if (formSubmittedMessage(); as msg) {
+                    <span class="text-sm font-medium text-base-content" role="status">
+                      {{ msg }}
+                    </span>
+                  }
+                </div>
+              </form>
+            </div>
+          </section>
+
+          <!-- Alertes -->
+          <section aria-labelledby="alerts-heading" class="space-y-3">
+            <h2 id="alerts-heading" class="text-lg font-semibold">Alertes</h2>
+            <div class="space-y-3">
+              <div class="alert alert-info" role="status">
+                <svg lucideInfo class="h-5 w-5 shrink-0"></svg>
+                <span>Information : les frais du trimestre 1 sont ouverts au recouvrement.</span>
+              </div>
+              <div class="alert alert-success" role="status">
+                <svg lucideCircleCheck class="h-5 w-5 shrink-0"></svg>
+                <span>Succès : le paiement de 45 000 FCFA a été validé.</span>
+              </div>
+              <div class="alert alert-warning" role="alert">
+                <svg lucideCircleAlert class="h-5 w-5 shrink-0"></svg>
+                <span>Attention : 3 élèves ont un solde en attente de régularisation.</span>
+              </div>
+              <div class="alert alert-error" role="alert">
+                <svg lucideCircleX class="h-5 w-5 shrink-0"></svg>
+                <span>Erreur : impossible de contacter le serveur de paiement.</span>
+              </div>
+            </div>
+          </section>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Tiroir latéral mobile & desktop -->
+  <div class="drawer-side z-30">
+    <label
+      for="theme-preview-drawer"
+      aria-label="Fermer le menu latéral"
+      class="drawer-overlay"
+      (click)="closeDrawer()"
+    ></label>
+
+    <aside
+      id="theme-preview-sidebar"
+      aria-label="Navigation de prévisualisation"
+      class="flex min-h-full w-64 flex-col border-r border-base-300 bg-base-100 p-4 text-base-content"
+    >
+      <div class="mb-4 flex items-center justify-between border-b border-base-300 pb-3">
+        <span class="font-bold text-primary">Charte École SaaS</span>
+        <button
+          type="button"
+          class="btn btn-ghost btn-sm btn-square lg:hidden"
+          aria-label="Fermer le tiroir"
+          (click)="closeDrawer()"
+        >
+          <svg lucideX class="h-4 w-4"></svg>
+        </button>
+      </div>
+
+      <nav class="menu gap-1 p-0" aria-label="Accès rapide aux onglets">
+        @for (tab of tabs; track tab.id) {
+          <button
+            type="button"
+            class="justify-start text-left"
+            [class.menu-active]="activeTab() === tab.id"
+            (click)="selectTab(tab.id); closeDrawer()"
+          >
+            {{ tab.label }}
+          </button>
+        }
+      </nav>
+    </aside>
+  </div>
+</div>
