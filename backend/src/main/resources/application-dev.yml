@@ -1,0 +1,16 @@
+spring:
+  datasource:
+    # Compte applicatif soumis à la Row-Level Security (créé par infra/postgres/init)
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/ecole}
+    username: ${DB_USERNAME:ecole_app_login}
+    password: ${DB_PASSWORD}
+  flyway:
+    # Compte propriétaire du schéma, utilisé uniquement pour les migrations
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/ecole}
+    user: ${DB_MIGRATION_USERNAME:ecole}
+    password: ${DB_MIGRATION_PASSWORD}
+
+app:
+  security:
+    cookie:
+      secure: ${APP_COOKIE_SECURE:false}
