@@ -2,6 +2,7 @@ package com.ecole.saas.student.infrastructure;
 
 import com.ecole.saas.student.domain.EnrollmentStatus;
 import com.ecole.saas.student.domain.StudentEnrollment;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -16,6 +17,9 @@ public interface StudentEnrollmentRepository
     boolean existsByStudentIdAndAcademicYearIdAndStatus(
             UUID studentId, UUID academicYearId, EnrollmentStatus status);
 
+    boolean existsByStudentIdAndClassRoomIdInAndStatus(
+            UUID studentId, Collection<UUID> classRoomIds, EnrollmentStatus status);
+
     long countByClassRoomIdAndStatus(UUID classRoomId, EnrollmentStatus status);
 
     Optional<StudentEnrollment> findByStudentIdAndAcademicYearIdAndStatus(
@@ -27,5 +31,11 @@ public interface StudentEnrollmentRepository
     List<StudentEnrollment> findByClassRoomIdAndStatusOrderByCreatedAtAsc(
             UUID classRoomId, EnrollmentStatus status);
 
+    List<StudentEnrollment> findByClassRoomIdInAndStatus(
+            Collection<UUID> classRoomIds, EnrollmentStatus status);
+
     Page<StudentEnrollment> findByStudentId(UUID studentId, Pageable pageable);
+
+    Page<StudentEnrollment> findByStudentIdAndClassRoomIdIn(
+            UUID studentId, Collection<UUID> classRoomIds, Pageable pageable);
 }

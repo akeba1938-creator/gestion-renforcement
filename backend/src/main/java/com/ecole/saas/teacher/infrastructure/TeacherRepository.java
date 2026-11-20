@@ -1,0 +1,20 @@
+package com.ecole.saas.teacher.infrastructure;
+
+import com.ecole.saas.teacher.domain.Teacher;
+import java.util.Optional;
+import java.util.UUID;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+
+public interface TeacherRepository extends JpaRepository<Teacher, UUID>, JpaSpecificationExecutor<Teacher> {
+
+    Optional<Teacher> findByEmployeeCode(String employeeCode);
+
+    boolean existsByEmployeeCode(String employeeCode);
+
+    Optional<Teacher> findByUserId(UUID userId);
+
+    boolean existsByUserId(UUID userId);
+
+    boolean existsByUserIdAndIdNot(UUID userId, UUID id);
+}

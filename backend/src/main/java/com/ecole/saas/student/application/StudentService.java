@@ -19,6 +19,7 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -43,6 +44,7 @@ public class StudentService {
     private final MatriculeSequenceRepository matriculeSequenceRepository;
     private final SchoolDirectory schoolDirectory;
     private final StudentSubscriptionGuard subscriptionGuard;
+    private final StudentTeacherScopeGuard teacherScopeGuard;
     private final Clock clock;
 
     public StudentService(
@@ -50,11 +52,13 @@ public class StudentService {
             MatriculeSequenceRepository matriculeSequenceRepository,
             SchoolDirectory schoolDirectory,
             StudentSubscriptionGuard subscriptionGuard,
+            StudentTeacherScopeGuard teacherScopeGuard,
             Clock clock) {
         this.studentRepository = studentRepository;
         this.matriculeSequenceRepository = matriculeSequenceRepository;
         this.schoolDirectory = schoolDirectory;
         this.subscriptionGuard = subscriptionGuard;
+        this.teacherScopeGuard = teacherScopeGuard;
         this.clock = clock;
     }
 
@@ -64,8 +68,20 @@ public class StudentService {
         TenantContext.requireCurrent();
         subscriptionGuard.requireReadAccess();
 
+        Set<UUID> visibleStudentIds = null;
+        if (teacherScopeGuard.isRestrictedTeacher()) {
+            visibleStudentIds = teacherScopeGuard.resolveVisibleStudentIds();
+            if (visibleStudentIds.isEmpty()) {
+                return Page.empty(pageable);
+            }
+        }
+        Set<UUID> restrictedIds = visibleStudentIds;
+
         Specification<Student> spec = (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
+            if (restrictedIds != null) {
+                predicates.add(root.get("id").in(restrictedIds));
+            }
             if (status != null) {
                 predicates.add(cb.equal(root.get("status"), status));
             }
@@ -89,7 +105,9 @@ public class StudentService {
     public Student getStudent(UUID studentId) {
         TenantContext.requireCurrent();
         subscriptionGuard.requireReadAccess();
-        return requireStudent(studentId);
+        Student student = requireStudent(studentId);
+        teacherScopeGuard.assertCanReadStudent(student.getId());
+        return student;
     }
 
     @PreAuthorize(READ_ROLES)
@@ -98,8 +116,10 @@ public class StudentService {
         TenantContext.requireCurrent();
         subscriptionGuard.requireReadAccess();
         String normalized = MatriculeFormatter.normalize(rawMatricule);
-        return studentRepository.findByMatricule(normalized)
+        Student student = studentRepository.findByMatricule(normalized)
                 .orElseThrow(() -> new StudentNotFoundException("Élève introuvable."));
+        teacherScopeGuard.assertCanReadStudent(student.getId());
+        return student;
     }
 
     @PreAuthorize(WRITE_ROLES)

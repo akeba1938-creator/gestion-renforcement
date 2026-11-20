@@ -1,0 +1,537 @@
+package com.ecole.saas.grade.application;
+
+import com.ecole.saas.academic.AcademicStructurePort;
+import com.ecole.saas.academic.ClassRoomSummary;
+import com.ecole.saas.academic.ClassSubjectSummary;
+import com.ecole.saas.academic.EvaluationPeriodSummary;
+import com.ecole.saas.grade.domain.CouncilDecision;
+import com.ecole.saas.grade.domain.Evaluation;
+import com.ecole.saas.grade.domain.EvaluationPeriodClosedException;
+import com.ecole.saas.grade.domain.EvaluationStatus;
+import com.ecole.saas.grade.domain.GradeConflictException;
+import com.ecole.saas.grade.domain.GradeNotFoundException;
+import com.ecole.saas.grade.domain.GradeValidationException;
+import com.ecole.saas.grade.domain.GradingCalculator;
+import com.ecole.saas.grade.domain.GradingPolicy;
+import com.ecole.saas.grade.domain.Mention;
+import com.ecole.saas.grade.domain.MentionPolicy;
+import com.ecole.saas.grade.domain.PeriodReportCard;
+import com.ecole.saas.grade.domain.PeriodSubjectResult;
+import com.ecole.saas.grade.domain.RankingCalculator;
+import com.ecole.saas.grade.domain.ReportCardStatus;
+import com.ecole.saas.grade.domain.StudentGrade;
+import com.ecole.saas.grade.infrastructure.EvaluationRepository;
+import com.ecole.saas.grade.infrastructure.PeriodReportCardRepository;
+import com.ecole.saas.grade.infrastructure.PeriodSubjectResultRepository;
+import com.ecole.saas.grade.infrastructure.StudentGradeRepository;
+import com.ecole.saas.school.SchoolProfileSnapshot;
+import com.ecole.saas.shared.domain.TenantContext;
+import com.ecole.saas.student.StudentDirectoryPort;
+import com.ecole.saas.student.StudentEnrollmentSummary;
+import com.ecole.saas.student.StudentSummary;
+import jakarta.persistence.criteria.Predicate;
+import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+/**
+ * Service applicatif de calcul, d'appréciation, de validation et de verrouillage des bulletins
+ * de période (moyennes par matière, moyennes générales pondérées par coefficient et rangs ex æquo).
+ */
+@Service
+public class ReportCardService {
+
+    public record ReportCardView(
+            PeriodReportCard reportCard,
+            String studentMatricule,
+            String studentFirstName,
+            String studentLastName,
+            String classRoomCode,
+            String classRoomName,
+            String periodCode,
+            String periodName,
+            List<PeriodSubjectResult> subjectResults) {
+    }
+
+    private final PeriodReportCardRepository reportCardRepository;
+    private final PeriodSubjectResultRepository subjectResultRepository;
+    private final EvaluationRepository evaluationRepository;
+    private final StudentGradeRepository studentGradeRepository;
+    private final AcademicStructurePort academicStructurePort;
+    private final StudentDirectoryPort studentDirectoryPort;
+    private final GradeSchoolContext schoolContext;
+    private final GradeSubscriptionGuard subscriptionGuard;
+    private final GradeTeacherScopeGuard teacherScopeGuard;
+    private final Clock clock;
+
+    public ReportCardService(
+            PeriodReportCardRepository reportCardRepository,
+            PeriodSubjectResultRepository subjectResultRepository,
+            EvaluationRepository evaluationRepository,
+            StudentGradeRepository studentGradeRepository,
+            AcademicStructurePort academicStructurePort,
+            StudentDirectoryPort studentDirectoryPort,
+            GradeSchoolContext schoolContext,
+            GradeSubscriptionGuard subscriptionGuard,
+            GradeTeacherScopeGuard teacherScopeGuard,
+            Clock clock) {
+        this.reportCardRepository = reportCardRepository;
+        this.subjectResultRepository = subjectResultRepository;
+        this.evaluationRepository = evaluationRepository;
+        this.studentGradeRepository = studentGradeRepository;
+        this.academicStructurePort = academicStructurePort;
+        this.studentDirectoryPort = studentDirectoryPort;
+        this.schoolContext = schoolContext;
+        this.subscriptionGuard = subscriptionGuard;
+        this.teacherScopeGuard = teacherScopeGuard;
+        this.clock = clock;
+    }
+
+    @PreAuthorize(GradeRoles.REPORT_CARD_COMPUTE_ROLES)
+    @Transactional
+    public List<ReportCardView> computeClassReportCards(UUID classRoomId, UUID evaluationPeriodId) {
+        TenantContext.requireCurrent();
+        subscriptionGuard.requireWriteAccess();
+
+        ClassRoomSummary classRoom = academicStructurePort.findClassRoomById(classRoomId)
+                .orElseThrow(() -> new GradeNotFoundException(
+                        "classroom-not-found", "Classe introuvable", "La classe demandée est introuvable."));
+        EvaluationPeriodSummary period = academicStructurePort.findEvaluationPeriodById(evaluationPeriodId)
+                .orElseThrow(() -> new GradeNotFoundException(
+                        "evaluation-period-not-found",
+                        "Période d'évaluation introuvable",
+                        "La période d'évaluation demandée est introuvable."));
+        if (!classRoom.academicYearId().equals(period.academicYearId())) {
+            throw new GradeValidationException(
+                    "La classe sélectionnée n'appartient pas à l'année scolaire de la période d'évaluation.");
+        }
+        if ("PLANNED".equals(period.status()) || "LOCKED".equals(period.status())) {
+            throw new EvaluationPeriodClosedException(
+                    "Impossible de calculer les bulletins lorsque la période est au statut " + period.status() + ".");
+        }
+
+        List<PeriodReportCard> existingCards = reportCardRepository
+                .findByEvaluationPeriodIdAndClassRoomIdOrderByRankInClassAscStudentIdAsc(
+                        evaluationPeriodId, classRoomId);
+        for (PeriodReportCard existing : existingCards) {
+            if (existing.getStatus() != ReportCardStatus.DRAFT) {
+                throw new GradeConflictException(
+                        "report-card-already-finalized",
+                        "Bulletins déjà validés ou verrouillés",
+                        "Impossible de recalculer la classe car au moins un bulletin est déjà " + existing.getStatus() + ".");
+            }
+        }
+
+        SchoolProfileSnapshot school = schoolContext.requireSchoolProfile();
+        int gradingScale = school.gradingScale();
+        GradingPolicy policy = GradingPolicy.defaultSenegalPolicy();
+
+        List<StudentEnrollmentSummary> enrollments =
+                studentDirectoryPort.findActiveEnrollmentsByClassRoom(classRoomId);
+        List<ClassSubjectSummary> classSubjects = academicStructurePort.findActiveSubjectsForClass(classRoomId);
+        List<Evaluation> evaluations = evaluationRepository
+                .findByEvaluationPeriodIdAndClassRoomIdAndStatusNotOrderByEvaluationDateAscCreatedAtAsc(
+                        evaluationPeriodId, classRoomId, EvaluationStatus.CANCELLED);
+
+        List<UUID> evaluationIds = evaluations.stream().map(Evaluation::getId).toList();
+        Map<UUID, Evaluation> evaluationsById = evaluations.stream()
+                .collect(Collectors.toMap(Evaluation::getId, Function.identity()));
+        Map<UUID, Map<UUID, List<StudentGrade>>> gradesByStudentAndSubject = new HashMap<>();
+        if (!evaluationIds.isEmpty()) {
+            for (StudentGrade grade : studentGradeRepository.findByEvaluationIdIn(evaluationIds)) {
+                Evaluation eval = evaluationsById.get(grade.getEvaluationId());
+                if (eval == null) {
+                    continue;
+                }
+                gradesByStudentAndSubject
+                        .computeIfAbsent(grade.getStudentId(), k -> new HashMap<>())
+                        .computeIfAbsent(eval.getSubjectId(), k -> new ArrayList<>())
+                        .add(grade);
+            }
+        }
+
+        // 1. Calcul des moyennes par élève et par matière
+        Map<UUID, Map<UUID, BigDecimal>> subjectAveragesByStudent = new HashMap<>();
+        Map<UUID, Map<UUID, Integer>> subjectEvalCountsByStudent = new HashMap<>();
+        Map<UUID, Map<UUID, BigDecimal>> averagesBySubjectThenStudent = new HashMap<>();
+
+        for (StudentEnrollmentSummary enrollment : enrollments) {
+            UUID studentId = enrollment.studentId();
+            Map<UUID, BigDecimal> perSubjectAvg = new HashMap<>();
+            Map<UUID, Integer> perSubjectCount = new HashMap<>();
+
+            for (ClassSubjectSummary cs : classSubjects) {
+                List<StudentGrade> studentSubjectGrades = gradesByStudentAndSubject
+                        .getOrDefault(studentId, Map.of())
+                        .getOrDefault(cs.subjectId(), List.of());
+
+                List<GradingCalculator.EvaluationScoreInput> inputs = studentSubjectGrades.stream()
+                        .map(g -> {
+                            Evaluation eval = evaluationsById.get(g.getEvaluationId());
+                            return new GradingCalculator.EvaluationScoreInput(
+                                    g.getAttendanceStatus(),
+                                    g.getScore(),
+                                    eval.getMaxScore(),
+                                    eval.getWeight());
+                        })
+                        .toList();
+
+                BigDecimal avg = GradingCalculator.computeSubjectAverage(inputs, gradingScale, policy);
+                perSubjectAvg.put(cs.subjectId(), avg);
+                perSubjectCount.put(cs.subjectId(), studentSubjectGrades.size());
+                averagesBySubjectThenStudent
+                        .computeIfAbsent(cs.subjectId(), k -> new HashMap<>())
+                        .put(studentId, avg);
+            }
+
+            subjectAveragesByStudent.put(studentId, perSubjectAvg);
+            subjectEvalCountsByStudent.put(studentId, perSubjectCount);
+        }
+
+        // 2. Statistiques et rangs par matière
+        Map<UUID, BigDecimal> classAvgBySubject = new HashMap<>();
+        Map<UUID, Map<UUID, RankingCalculator.RankEntry>> subjectRanksBySubject = new HashMap<>();
+        for (ClassSubjectSummary cs : classSubjects) {
+            Map<UUID, BigDecimal> scoresForSubject = averagesBySubjectThenStudent.getOrDefault(cs.subjectId(), Map.of());
+            GradingCalculator.ClassAverageStats stats =
+                    GradingCalculator.computeClassStats(scoresForSubject.values(), policy);
+            classAvgBySubject.put(cs.subjectId(), stats.classAverage());
+            subjectRanksBySubject.put(cs.subjectId(), RankingCalculator.rankDescending(scoresForSubject));
+        }
+
+        // 3. Calcul des moyennes générales pondérées par coefficient et classement de la classe
+        Map<UUID, GradingCalculator.GeneralAverageResult> generalByStudent = new HashMap<>();
+        Map<UUID, BigDecimal> generalAveragesMap = new HashMap<>();
+        for (StudentEnrollmentSummary enrollment : enrollments) {
+            UUID studentId = enrollment.studentId();
+            Map<UUID, BigDecimal> perSubjectAvg = subjectAveragesByStudent.getOrDefault(studentId, Map.of());
+            List<GradingCalculator.SubjectAverageInput> subjectInputs = classSubjects.stream()
+                    .map(cs -> new GradingCalculator.SubjectAverageInput(
+                            cs.coefficient(), perSubjectAvg.get(cs.subjectId())))
+                    .toList();
+            GradingCalculator.GeneralAverageResult general =
+                    GradingCalculator.computeGeneralAverage(subjectInputs, policy);
+            generalByStudent.put(studentId, general);
+            generalAveragesMap.put(studentId, general.generalAverage());
+        }
+
+        GradingCalculator.ClassAverageStats classStats =
+                GradingCalculator.computeClassStats(generalAveragesMap.values(), policy);
+        Map<UUID, RankingCalculator.RankEntry> classRanks = RankingCalculator.rankDescending(generalAveragesMap);
+
+        // 4. Persistance des bulletins et résultats matière (en préservant les appréciations sur DRAFT)
+        Map<UUID, PeriodReportCard> existingByStudent = existingCards.stream()
+                .collect(Collectors.toMap(PeriodReportCard::getStudentId, Function.identity()));
+        Instant now = clock.instant();
+        int classSize = enrollments.size();
+
+        List<PeriodReportCard> savedCards = new ArrayList<>();
+        for (StudentEnrollmentSummary enrollment : enrollments) {
+            UUID studentId = enrollment.studentId();
+            GradingCalculator.GeneralAverageResult general = generalByStudent.get(studentId);
+            RankingCalculator.RankEntry rank =
+                    classRanks.getOrDefault(studentId, new RankingCalculator.RankEntry(null, false));
+            Mention mention = MentionPolicy.resolve(general.generalAverage(), gradingScale);
+
+            PeriodReportCard card = existingByStudent.get(studentId);
+            if (card == null) {
+                card = reportCardRepository
+                        .findByEvaluationPeriodIdAndStudentId(evaluationPeriodId, studentId)
+                        .orElseGet(() -> new PeriodReportCard(
+                                period.academicYearId(),
+                                evaluationPeriodId,
+                                classRoomId,
+                                studentId,
+                                gradingScale,
+                                now));
+            }
+            card.applyComputedResults(
+                    classRoomId,
+                    gradingScale,
+                    general.generalAverage(),
+                    general.totalWeightedScore(),
+                    general.totalCoefficients(),
+                    classStats.classAverage(),
+                    classStats.minAverage(),
+                    classStats.maxAverage(),
+                    rank.rank(),
+                    classSize,
+                    rank.tied(),
+                    mention,
+                    now);
+            PeriodReportCard savedCard = reportCardRepository.save(card);
+            savedCards.add(savedCard);
+
+            Map<UUID, PeriodSubjectResult> existingSubjects = subjectResultRepository
+                    .findByReportCardIdOrderBySubjectNameAsc(savedCard.getId())
+                    .stream()
+                    .collect(Collectors.toMap(PeriodSubjectResult::getSubjectId, Function.identity()));
+
+            Set<UUID> activeSubjectIds = classSubjects.stream()
+                    .map(ClassSubjectSummary::subjectId)
+                    .collect(Collectors.toSet());
+            for (PeriodSubjectResult obsolete : existingSubjects.values()) {
+                if (!activeSubjectIds.contains(obsolete.getSubjectId())) {
+                    subjectResultRepository.delete(obsolete);
+                }
+            }
+
+            for (ClassSubjectSummary cs : classSubjects) {
+                BigDecimal avg = subjectAveragesByStudent.getOrDefault(studentId, Map.of()).get(cs.subjectId());
+                int evalCount = subjectEvalCountsByStudent.getOrDefault(studentId, Map.of())
+                        .getOrDefault(cs.subjectId(), 0);
+                BigDecimal classSubjectAvg = classAvgBySubject.get(cs.subjectId());
+                Integer rankInSubject = subjectRanksBySubject
+                        .getOrDefault(cs.subjectId(), Map.of())
+                        .getOrDefault(studentId, new RankingCalculator.RankEntry(null, false))
+                        .rank();
+
+                PeriodSubjectResult existingSubject = existingSubjects.get(cs.subjectId());
+                if (existingSubject != null) {
+                    existingSubject.updateComputedResult(
+                            cs.id(),
+                            cs.subjectCode(),
+                            cs.subjectName(),
+                            cs.coefficient(),
+                            avg,
+                            classSubjectAvg,
+                            rankInSubject,
+                            evalCount);
+                    subjectResultRepository.save(existingSubject);
+                } else {
+                    subjectResultRepository.save(new PeriodSubjectResult(
+                            savedCard.getId(),
+                            cs.subjectId(),
+                            cs.id(),
+                            cs.subjectCode(),
+                            cs.subjectName(),
+                            cs.coefficient(),
+                            avg,
+                            classSubjectAvg,
+                            rankInSubject,
+                            evalCount));
+                }
+            }
+        }
+
+        List<PeriodReportCard> orderedCards = reportCardRepository
+                .findByEvaluationPeriodIdAndClassRoomIdOrderByRankInClassAscStudentIdAsc(
+                        evaluationPeriodId, classRoomId);
+        return enrichReportCards(orderedCards);
+    }
+
+    @PreAuthorize(GradeRoles.READ_ROLES)
+    @Transactional(readOnly = true)
+    public Page<ReportCardView> listReportCards(
+            UUID academicYearId,
+            UUID evaluationPeriodId,
+            UUID classRoomId,
+            UUID studentId,
+            ReportCardStatus status,
+            Pageable pageable) {
+        TenantContext.requireCurrent();
+        subscriptionGuard.requireReadAccess();
+
+        Set<UUID> allowedClasses = null;
+        if (teacherScopeGuard.isRestrictedTeacher()) {
+            if (classRoomId != null) {
+                teacherScopeGuard.assertCanAccessClass(classRoomId);
+            }
+            allowedClasses = teacherScopeGuard.currentTeacherClassRoomIds();
+            if (allowedClasses.isEmpty()) {
+                return Page.empty(pageable);
+            }
+        }
+        Set<UUID> scopedClasses = allowedClasses;
+
+        Specification<PeriodReportCard> spec = (root, query, cb) -> {
+            List<Predicate> predicates = new ArrayList<>();
+            if (scopedClasses != null) {
+                predicates.add(root.get("classRoomId").in(scopedClasses));
+            }
+            if (academicYearId != null) {
+                predicates.add(cb.equal(root.get("academicYearId"), academicYearId));
+            }
+            if (evaluationPeriodId != null) {
+                predicates.add(cb.equal(root.get("evaluationPeriodId"), evaluationPeriodId));
+            }
+            if (classRoomId != null) {
+                predicates.add(cb.equal(root.get("classRoomId"), classRoomId));
+            }
+            if (studentId != null) {
+                predicates.add(cb.equal(root.get("studentId"), studentId));
+            }
+            if (status != null) {
+                predicates.add(cb.equal(root.get("status"), status));
+            }
+            return cb.and(predicates.toArray(Predicate[]::new));
+        };
+        Page<PeriodReportCard> page = reportCardRepository.findAll(spec, pageable);
+        Map<UUID, ReportCardView> enriched = enrichReportCards(page.getContent()).stream()
+                .collect(Collectors.toMap(v -> v.reportCard().getId(), Function.identity()));
+        return page.map(c -> enriched.get(c.getId()));
+    }
+
+    @PreAuthorize(GradeRoles.READ_ROLES)
+    @Transactional(readOnly = true)
+    public ReportCardView getReportCard(UUID reportCardId) {
+        TenantContext.requireCurrent();
+        subscriptionGuard.requireReadAccess();
+
+        PeriodReportCard card = requireReportCard(reportCardId);
+        teacherScopeGuard.assertCanAccessClass(card.getClassRoomId());
+        return enrichReportCards(List.of(card)).getFirst();
+    }
+
+    @PreAuthorize(GradeRoles.APPRECIATION_WRITE_ROLES)
+    @Transactional
+    public ReportCardView updateSubjectAppreciation(
+            UUID reportCardId,
+            UUID subjectId,
+            String teacherAppreciation,
+            UUID actorId) {
+        TenantContext.requireCurrent();
+        subscriptionGuard.requireWriteAccess();
+
+        PeriodReportCard card = requireReportCard(reportCardId);
+        assertPeriodNotLocked(card.getEvaluationPeriodId());
+        card.assertDraft();
+        teacherScopeGuard.assertCanAccessClassSubject(card.getClassRoomId(), subjectId);
+
+        PeriodSubjectResult result = subjectResultRepository
+                .findByReportCardIdAndSubjectId(reportCardId, subjectId)
+                .orElseThrow(() -> new GradeNotFoundException(
+                        "report-card-subject-not-found",
+                        "Matière absente du bulletin",
+                        "Cette matière ne figure pas sur ce bulletin de période."));
+        result.updateTeacherAppreciation(teacherAppreciation, actorId, clock.instant());
+        subjectResultRepository.save(result);
+        return enrichReportCards(List.of(card)).getFirst();
+    }
+
+    @PreAuthorize(GradeRoles.APPRECIATION_WRITE_ROLES)
+    @Transactional
+    public ReportCardView updateReportCardAppreciations(
+            UUID reportCardId,
+            String homeroomAppreciation,
+            String directorAppreciation,
+            CouncilDecision councilDecision) {
+        TenantContext.requireCurrent();
+        subscriptionGuard.requireWriteAccess();
+
+        PeriodReportCard card = requireReportCard(reportCardId);
+        assertPeriodNotLocked(card.getEvaluationPeriodId());
+        card.assertNotLocked();
+
+        if (homeroomAppreciation != null) {
+            teacherScopeGuard.assertCanWriteHomeroomAppreciation(card.getClassRoomId());
+            card.updateHomeroomAppreciation(homeroomAppreciation);
+        }
+        if (directorAppreciation != null || councilDecision != null) {
+            teacherScopeGuard.assertCanWriteDirectorAppreciation();
+            card.updateDirectorAppreciationAndDecision(directorAppreciation, councilDecision);
+        }
+
+        PeriodReportCard saved = reportCardRepository.save(card);
+        return enrichReportCards(List.of(saved)).getFirst();
+    }
+
+    @PreAuthorize(GradeRoles.REPORT_CARD_VALIDATE_ROLES)
+    @Transactional
+    public ReportCardView validateReportCard(UUID reportCardId, UUID actorId) {
+        TenantContext.requireCurrent();
+        subscriptionGuard.requireWriteAccess();
+
+        PeriodReportCard card = requireReportCard(reportCardId);
+        assertPeriodNotLocked(card.getEvaluationPeriodId());
+        card.validate(actorId, clock.instant());
+        PeriodReportCard saved = reportCardRepository.save(card);
+        return enrichReportCards(List.of(saved)).getFirst();
+    }
+
+    @PreAuthorize(GradeRoles.REPORT_CARD_LOCK_ROLES)
+    @Transactional
+    public ReportCardView lockReportCard(UUID reportCardId, UUID actorId) {
+        TenantContext.requireCurrent();
+        subscriptionGuard.requireWriteAccess();
+
+        PeriodReportCard card = requireReportCard(reportCardId);
+        card.lock(actorId, clock.instant());
+        PeriodReportCard saved = reportCardRepository.save(card);
+        return enrichReportCards(List.of(saved)).getFirst();
+    }
+
+    private void assertPeriodNotLocked(UUID evaluationPeriodId) {
+        EvaluationPeriodSummary period = academicStructurePort.findEvaluationPeriodById(evaluationPeriodId)
+                .orElseThrow(() -> new GradeNotFoundException(
+                        "evaluation-period-not-found",
+                        "Période d'évaluation introuvable",
+                        "La période d'évaluation demandée est introuvable."));
+        if ("LOCKED".equals(period.status())) {
+            throw new EvaluationPeriodClosedException(
+                    "La période d'évaluation est verrouillée (LOCKED) : les bulletins ne peuvent plus être modifiés.");
+        }
+    }
+
+    private PeriodReportCard requireReportCard(UUID reportCardId) {
+        return reportCardRepository.findById(reportCardId)
+                .orElseThrow(() -> new GradeNotFoundException(
+                        "report-card-not-found", "Bulletin introuvable", "Le bulletin de période demandé est introuvable."));
+    }
+
+    private List<ReportCardView> enrichReportCards(List<PeriodReportCard> cards) {
+        if (cards.isEmpty()) {
+            return List.of();
+        }
+        Set<UUID> cardIds = cards.stream().map(PeriodReportCard::getId).collect(Collectors.toSet());
+        Map<UUID, List<PeriodSubjectResult>> subjectsByCard = subjectResultRepository.findByReportCardIdIn(cardIds)
+                .stream()
+                .collect(Collectors.groupingBy(PeriodSubjectResult::getReportCardId));
+        for (List<PeriodSubjectResult> list : subjectsByCard.values()) {
+            list.sort((a, b) -> a.getSubjectName().compareToIgnoreCase(b.getSubjectName()));
+        }
+
+        Set<UUID> studentIds = cards.stream().map(PeriodReportCard::getStudentId).collect(Collectors.toSet());
+        Map<UUID, StudentSummary> studentsById = studentDirectoryPort.findStudentsByIds(studentIds).stream()
+                .collect(Collectors.toMap(StudentSummary::id, Function.identity()));
+
+        Map<UUID, ClassRoomSummary> roomsCache = new HashMap<>();
+        Map<UUID, EvaluationPeriodSummary> periodsCache = new HashMap<>();
+
+        return cards.stream()
+                .map(card -> {
+                    StudentSummary student = studentsById.get(card.getStudentId());
+                    ClassRoomSummary room = roomsCache.computeIfAbsent(
+                            card.getClassRoomId(),
+                            id -> academicStructurePort.findClassRoomById(id).orElse(null));
+                    EvaluationPeriodSummary period = periodsCache.computeIfAbsent(
+                            card.getEvaluationPeriodId(),
+                            id -> academicStructurePort.findEvaluationPeriodById(id).orElse(null));
+                    return new ReportCardView(
+                            card,
+                            student != null ? student.matricule() : null,
+                            student != null ? student.firstName() : null,
+                            student != null ? student.lastName() : null,
+                            room != null ? room.code() : null,
+                            room != null ? room.name() : null,
+                            period != null ? period.code() : null,
+                            period != null ? period.name() : null,
+                            subjectsByCard.getOrDefault(card.getId(), List.of()));
+                })
+                .toList();
+    }
+}
