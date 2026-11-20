@@ -52,6 +52,7 @@ public class StudentEnrollmentService {
     private final AcademicStructurePort academicStructurePort;
     private final SchoolDirectory schoolDirectory;
     private final StudentSubscriptionGuard subscriptionGuard;
+    private final StudentTeacherScopeGuard teacherScopeGuard;
     private final Clock clock;
 
     public StudentEnrollmentService(
@@ -60,12 +61,14 @@ public class StudentEnrollmentService {
             AcademicStructurePort academicStructurePort,
             SchoolDirectory schoolDirectory,
             StudentSubscriptionGuard subscriptionGuard,
+            StudentTeacherScopeGuard teacherScopeGuard,
             Clock clock) {
         this.enrollmentRepository = enrollmentRepository;
         this.studentRepository = studentRepository;
         this.academicStructurePort = academicStructurePort;
         this.schoolDirectory = schoolDirectory;
         this.subscriptionGuard = subscriptionGuard;
+        this.teacherScopeGuard = teacherScopeGuard;
         this.clock = clock;
     }
 
@@ -80,8 +83,23 @@ public class StudentEnrollmentService {
         TenantContext.requireCurrent();
         subscriptionGuard.requireReadAccess();
 
+        Set<UUID> restrictedClassRooms = null;
+        if (teacherScopeGuard.isRestrictedTeacher()) {
+            restrictedClassRooms = teacherScopeGuard.resolveAssignedClassRoomIds();
+            if (classRoomId != null && !restrictedClassRooms.contains(classRoomId)) {
+                teacherScopeGuard.assertCanReadClassRoom(classRoomId);
+            }
+            if (restrictedClassRooms.isEmpty()) {
+                return Page.empty(pageable);
+            }
+        }
+        Set<UUID> allowedClasses = restrictedClassRooms;
+
         Specification<StudentEnrollment> spec = (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
+            if (allowedClasses != null) {
+                predicates.add(root.get("classRoomId").in(allowedClasses));
+            }
             if (academicYearId != null) {
                 predicates.add(cb.equal(root.get("academicYearId"), academicYearId));
             }
@@ -105,6 +123,11 @@ public class StudentEnrollmentService {
         TenantContext.requireCurrent();
         subscriptionGuard.requireReadAccess();
         requireStudent(studentId);
+        if (teacherScopeGuard.isRestrictedTeacher()) {
+            teacherScopeGuard.assertCanReadStudent(studentId);
+            Set<UUID> allowedClasses = teacherScopeGuard.resolveAssignedClassRoomIds();
+            return enrichPage(enrollmentRepository.findByStudentIdAndClassRoomIdIn(studentId, allowedClasses, pageable));
+        }
         return enrichPage(enrollmentRepository.findByStudentId(studentId, pageable));
     }
 
@@ -114,6 +137,7 @@ public class StudentEnrollmentService {
         TenantContext.requireCurrent();
         subscriptionGuard.requireReadAccess();
         StudentEnrollment enrollment = requireEnrollment(enrollmentId);
+        teacherScopeGuard.assertCanReadClassRoom(enrollment.getClassRoomId());
         return toView(
                 enrollment,
                 studentRepository.findById(enrollment.getStudentId()).orElse(null),
