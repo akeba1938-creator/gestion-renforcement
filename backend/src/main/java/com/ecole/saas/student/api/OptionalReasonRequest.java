@@ -1,0 +1,8 @@
+package com.ecole.saas.student.api;
+
+import jakarta.validation.constraints.Size;
+
+public record OptionalReasonRequest(
+        @Size(max = 255, message = "Le motif ne peut pas dépasser 255 caractères.")
+        String reason) {
+}
