@@ -12,6 +12,8 @@ public interface SchoolDirectory {
 
     Optional<SchoolSummary> findSummaryById(UUID id);
 
+    Optional<SchoolProfileSnapshot> findProfileById(UUID id);
+
     record SchoolSummary(UUID id, String code, String name, boolean active) {
     }
 }
