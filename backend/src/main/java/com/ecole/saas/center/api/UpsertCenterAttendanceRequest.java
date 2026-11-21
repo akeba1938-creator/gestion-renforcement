@@ -12,8 +12,7 @@ import java.util.UUID;
 
 public record UpsertCenterAttendanceRequest(
         @NotEmpty(message = "Au moins un pointage est requis.")
-        @Valid
-        List<AttendanceItem> records) {
+        List<@Valid AttendanceItem> records) {
 
     public record AttendanceItem(
             @NotNull(message = "L'identifiant de l'élève est obligatoire.")

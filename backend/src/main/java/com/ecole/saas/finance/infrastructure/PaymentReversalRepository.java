@@ -47,4 +47,34 @@ public interface PaymentReversalRepository extends Repository<PaymentReversal, U
             @Param("method") PaymentMethod method,
             @Param("startInclusive") Instant startInclusive,
             @Param("endExclusive") Instant endExclusive);
+
+    @Query("""
+            SELECT r.paymentMethod,
+                   COALESCE(SUM(r.amountXof), 0L),
+                   COUNT(r.id)
+            FROM PaymentReversal r
+            WHERE r.reversedAt >= :startInclusive
+              AND r.reversedAt < :endExclusive
+            GROUP BY r.paymentMethod
+            """)
+    List<Object[]> aggregateByPaymentMethodForRange(
+            @Param("startInclusive") Instant startInclusive,
+            @Param("endExclusive") Instant endExclusive);
+
+    @Query("""
+            SELECT r.paymentMethod,
+                   COALESCE(SUM(r.amountXof), 0L),
+                   COUNT(r.id)
+            FROM PaymentReversal r
+            WHERE r.invoiceId IN (
+                    SELECT i.id FROM StudentInvoice i WHERE i.academicYearId = :academicYearId
+                  )
+              AND r.reversedAt >= :startInclusive
+              AND r.reversedAt < :endExclusive
+            GROUP BY r.paymentMethod
+            """)
+    List<Object[]> aggregateByPaymentMethodForYearAndRange(
+            @Param("academicYearId") UUID academicYearId,
+            @Param("startInclusive") Instant startInclusive,
+            @Param("endExclusive") Instant endExclusive);
 }

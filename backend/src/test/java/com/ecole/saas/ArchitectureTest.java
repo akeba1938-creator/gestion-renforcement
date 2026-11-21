@@ -43,7 +43,8 @@ class ArchitectureTest {
         noClasses()
                 .that().resideInAPackage("..domain..")
                 .should().dependOnClassesThat().resideInAPackage("org.springframework..")
-                .because("La couche domain doit rester du Java pur (annotations jakarta.persistence autorisées, aucune annotation ni type Spring).")
+                .because(
+                        "La couche domain doit rester du Java pur (annotations jakarta.persistence autorisées, aucune annotation ni type Spring).")
                 .check(PRODUCTION_CLASSES);
     }
 
@@ -63,7 +64,8 @@ class ArchitectureTest {
                 .should().dependOnClassesThat(
                         resideInAPackage("..infrastructure..")
                                 .and(resideOutsideOfPackage("com.ecole.saas.shared.infrastructure.security..")))
-                .because("La couche api ne doit pas accéder directement aux dépôts ou adaptateurs d'infrastructure métier.")
+                .because(
+                        "La couche api ne doit pas accéder directement aux dépôts ou adaptateurs d'infrastructure métier.")
                 .allowEmptyShould(true)
                 .check(PRODUCTION_CLASSES);
     }
@@ -92,7 +94,8 @@ class ArchitectureTest {
                 .that().areDeclaredInClassesThat().areAnnotatedWith(RestController.class)
                 .and().arePublic()
                 .should(notReturnJpaEntity())
-                .because("Les contrôleurs REST doivent exposer exclusivement des DTO dédiés, jamais d'entités JPA @Entity.")
+                .because(
+                        "Les contrôleurs REST doivent exposer exclusivement des DTO dédiés, jamais d'entités JPA @Entity.")
                 .check(PRODUCTION_CLASSES);
     }
 
@@ -100,20 +103,24 @@ class ArchitectureTest {
     void monetaryAndGradeModulesMustNotUseFloatingPointNumbers() {
         noFields()
                 .that().areDeclaredInClassesThat()
-                .resideInAnyPackage("..finance..", "..grade..", "..center..", "..schooldocs..", "..schoolimport..")
+                .resideInAnyPackage("..finance..", "..grade..", "..center..", "..schooldocs..", "..schoolimport..",
+                        "..reporting..")
                 .should().haveRawType(float.class)
                 .orShould().haveRawType(double.class)
                 .orShould().haveRawType(Float.class)
                 .orShould().haveRawType(Double.class)
-                .because("Les montants FCFA (entiers long/BIGINT) et notes/moyennes (BigDecimal) ne doivent jamais utiliser float ou double.")
+                .because(
+                        "Les montants FCFA (entiers long/BIGINT) et notes/moyennes/taux (BigDecimal) ne doivent jamais utiliser float ou double.")
                 .allowEmptyShould(true)
                 .check(PRODUCTION_CLASSES);
 
         methods()
                 .that().areDeclaredInClassesThat()
-                .resideInAnyPackage("..finance..", "..grade..", "..center..", "..schooldocs..", "..schoolimport..")
+                .resideInAnyPackage("..finance..", "..grade..", "..center..", "..schooldocs..", "..schoolimport..",
+                        "..reporting..")
                 .should(notUseFloatingPointInSignature())
-                .because("Aucune méthode des modules finance, grade, center, schooldocs ou schoolimport ne doit exposer ou accepter float ou double.")
+                .because(
+                        "Aucune méthode des modules finance, grade, center, schooldocs, schoolimport ou reporting ne doit exposer ou accepter float ou double.")
                 .check(PRODUCTION_CLASSES);
     }
 

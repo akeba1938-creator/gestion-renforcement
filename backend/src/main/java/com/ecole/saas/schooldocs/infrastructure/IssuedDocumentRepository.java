@@ -60,4 +60,68 @@ public interface IssuedDocumentRepository
             GROUP BY d.documentType
             """)
     List<Object[]> countGroupedByDocumentType();
+
+    @Query("""
+            SELECT
+                COUNT(d),
+                COALESCE(SUM(CASE WHEN d.status = com.ecole.saas.schooldocs.DocumentStatus.ISSUED THEN 1L ELSE 0L END), 0L),
+                COALESCE(SUM(CASE WHEN d.status = com.ecole.saas.schooldocs.DocumentStatus.REVOKED THEN 1L ELSE 0L END), 0L),
+                COALESCE(SUM(CASE WHEN d.status = com.ecole.saas.schooldocs.DocumentStatus.ISSUED
+                    AND d.validUntil IS NOT NULL AND d.validUntil < :now THEN 1L ELSE 0L END), 0L),
+                COALESCE(SUM(CASE WHEN d.duplicate = true THEN 1L ELSE 0L END), 0L),
+                COALESCE(SUM(d.fileSizeBytes), 0L),
+                COALESCE(SUM(d.feeAmountXof), 0L)
+            FROM IssuedDocument d
+            WHERE d.issuedAt >= :fromInclusive
+              AND d.issuedAt < :toExclusive
+            """)
+    List<Object[]> aggregateSummaryTotalsForRange(
+            @Param("now") Instant now,
+            @Param("fromInclusive") Instant fromInclusive,
+            @Param("toExclusive") Instant toExclusive);
+
+    @Query("""
+            SELECT
+                COUNT(d),
+                COALESCE(SUM(CASE WHEN d.status = com.ecole.saas.schooldocs.DocumentStatus.ISSUED THEN 1L ELSE 0L END), 0L),
+                COALESCE(SUM(CASE WHEN d.status = com.ecole.saas.schooldocs.DocumentStatus.REVOKED THEN 1L ELSE 0L END), 0L),
+                COALESCE(SUM(CASE WHEN d.status = com.ecole.saas.schooldocs.DocumentStatus.ISSUED
+                    AND d.validUntil IS NOT NULL AND d.validUntil < :now THEN 1L ELSE 0L END), 0L),
+                COALESCE(SUM(CASE WHEN d.duplicate = true THEN 1L ELSE 0L END), 0L),
+                COALESCE(SUM(d.fileSizeBytes), 0L),
+                COALESCE(SUM(d.feeAmountXof), 0L)
+            FROM IssuedDocument d
+            WHERE d.academicYearId = :academicYearId
+              AND d.issuedAt >= :fromInclusive
+              AND d.issuedAt < :toExclusive
+            """)
+    List<Object[]> aggregateSummaryTotalsForYearAndRange(
+            @Param("now") Instant now,
+            @Param("academicYearId") UUID academicYearId,
+            @Param("fromInclusive") Instant fromInclusive,
+            @Param("toExclusive") Instant toExclusive);
+
+    @Query("""
+            SELECT d.documentType, COUNT(d)
+            FROM IssuedDocument d
+            WHERE d.issuedAt >= :fromInclusive
+              AND d.issuedAt < :toExclusive
+            GROUP BY d.documentType
+            """)
+    List<Object[]> countGroupedByDocumentTypeForRange(
+            @Param("fromInclusive") Instant fromInclusive,
+            @Param("toExclusive") Instant toExclusive);
+
+    @Query("""
+            SELECT d.documentType, COUNT(d)
+            FROM IssuedDocument d
+            WHERE d.academicYearId = :academicYearId
+              AND d.issuedAt >= :fromInclusive
+              AND d.issuedAt < :toExclusive
+            GROUP BY d.documentType
+            """)
+    List<Object[]> countGroupedByDocumentTypeForYearAndRange(
+            @Param("academicYearId") UUID academicYearId,
+            @Param("fromInclusive") Instant fromInclusive,
+            @Param("toExclusive") Instant toExclusive);
 }

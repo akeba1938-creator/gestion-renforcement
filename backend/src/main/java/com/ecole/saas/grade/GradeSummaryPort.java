@@ -1,5 +1,6 @@
 package com.ecole.saas.grade;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -16,4 +17,7 @@ public interface GradeSummaryPort {
     List<StudentPeriodGradeSummary> findStudentYearSummaries(UUID studentId, UUID academicYearId);
 
     Optional<ClassPeriodGradeStats> findClassPeriodStats(UUID classRoomId, UUID evaluationPeriodId);
+
+    GradeReportingOverview getPeriodReportingOverview(
+            UUID academicYearId, UUID evaluationPeriodId, Collection<UUID> classRoomIds);
 }

@@ -135,7 +135,7 @@ public class TenantAuditQueryService {
             predicates.add(cb.lessThanOrEqualTo(root.get("occurredAt"), to));
         }
 
-        cq.multiselect(root.get(fieldName), cb.count(root));
+        cq.select(cb.tuple(root.get(fieldName), cb.count(root)));
         if (!predicates.isEmpty()) {
             cq.where(predicates.toArray(Predicate[]::new));
         }

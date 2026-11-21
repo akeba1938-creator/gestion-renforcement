@@ -1,5 +1,6 @@
 package com.ecole.saas.schoolimport;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -17,4 +18,7 @@ public interface SchoolImportDirectoryPort {
     List<ImportJobSummary> findRecentJobs(int limit);
 
     long countCompletedJobs();
+
+    SchoolImportActivitySummary getActivitySummary(
+            UUID academicYearId, Instant fromInclusive, Instant toExclusive);
 }

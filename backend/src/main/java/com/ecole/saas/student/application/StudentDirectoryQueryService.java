@@ -222,6 +222,23 @@ public class StudentDirectoryQueryService implements StudentDirectoryPort {
 
     @Override
     @Transactional(readOnly = true)
+    public List<StudentEnrollmentSummary> findActiveEnrollmentsByClassRooms(Collection<UUID> classRoomIds) {
+        TenantContext.requireCurrent();
+        if (classRoomIds == null || classRoomIds.isEmpty()) {
+            return List.of();
+        }
+        Set<UUID> validIds = classRoomIds.stream().filter(Objects::nonNull).collect(Collectors.toSet());
+        if (validIds.isEmpty()) {
+            return List.of();
+        }
+        return enrollmentRepository.findByClassRoomIdInAndStatus(validIds, EnrollmentStatus.ACTIVE)
+                .stream()
+                .map(StudentDirectoryQueryService::toEnrollmentSummary)
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public Map<UUID, Long> countActiveEnrollmentsByClassRooms(Collection<UUID> classRoomIds) {
         TenantContext.requireCurrent();
         if (classRoomIds == null || classRoomIds.isEmpty()) {

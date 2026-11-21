@@ -31,8 +31,10 @@ import org.w3c.dom.NodeList;
 import org.xml.sax.SAXException;
 
 /**
- * Parseur sécurisé pur Java 21 (zéro dépendance externe) pour fichiers CSV (RFC 4180 UTF-8)
- * et classeurs Excel XLSX (OOXML) avec contrôle par type réel, garde anti-ZIP-bomb et durcissement anti-XXE.
+ * Parseur sécurisé pur Java 21 (zéro dépendance externe) pour fichiers CSV (RFC
+ * 4180 UTF-8)
+ * et classeurs Excel XLSX (OOXML) avec contrôle par type réel, garde
+ * anti-ZIP-bomb et durcissement anti-XXE.
  */
 @Component
 public class SecureTabularFileParser implements TabularFileParser {

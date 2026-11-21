@@ -28,4 +28,6 @@ public interface StudentInvoiceRepository
     List<StudentInvoice> findByStudentIdIn(Collection<UUID> studentIds);
 
     List<StudentInvoice> findByStudentIdInAndAcademicYearId(Collection<UUID> studentIds, UUID academicYearId);
+
+    List<StudentInvoice> findByAcademicYearId(UUID academicYearId);
 }

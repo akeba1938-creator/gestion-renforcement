@@ -49,4 +49,34 @@ public interface PaymentRepository extends Repository<Payment, UUID>, JpaSpecifi
             @Param("method") PaymentMethod method,
             @Param("startInclusive") Instant startInclusive,
             @Param("endExclusive") Instant endExclusive);
+
+    @Query("""
+            SELECT p.paymentMethod,
+                   COALESCE(SUM(p.amountXof), 0L),
+                   COUNT(p.id)
+            FROM Payment p
+            WHERE p.paidAt >= :startInclusive
+              AND p.paidAt < :endExclusive
+            GROUP BY p.paymentMethod
+            """)
+    List<Object[]> aggregateByPaymentMethodForRange(
+            @Param("startInclusive") Instant startInclusive,
+            @Param("endExclusive") Instant endExclusive);
+
+    @Query("""
+            SELECT p.paymentMethod,
+                   COALESCE(SUM(p.amountXof), 0L),
+                   COUNT(p.id)
+            FROM Payment p
+            WHERE p.invoiceId IN (
+                    SELECT i.id FROM StudentInvoice i WHERE i.academicYearId = :academicYearId
+                  )
+              AND p.paidAt >= :startInclusive
+              AND p.paidAt < :endExclusive
+            GROUP BY p.paymentMethod
+            """)
+    List<Object[]> aggregateByPaymentMethodForYearAndRange(
+            @Param("academicYearId") UUID academicYearId,
+            @Param("startInclusive") Instant startInclusive,
+            @Param("endExclusive") Instant endExclusive);
 }
