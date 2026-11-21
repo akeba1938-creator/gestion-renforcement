@@ -2,15 +2,18 @@ package com.ecole.saas.family.application;
 
 import com.ecole.saas.family.FamilyDirectoryPort;
 import com.ecole.saas.family.FamilySummary;
+import com.ecole.saas.family.GuardianContactSummary;
 import com.ecole.saas.family.GuardianSummary;
 import com.ecole.saas.family.StudentGuardianSummary;
 import com.ecole.saas.family.domain.Family;
 import com.ecole.saas.family.domain.Guardian;
+import com.ecole.saas.family.domain.GuardianStatus;
 import com.ecole.saas.family.domain.StudentGuardianLink;
 import com.ecole.saas.family.infrastructure.FamilyRepository;
 import com.ecole.saas.family.infrastructure.GuardianRepository;
 import com.ecole.saas.family.infrastructure.StudentGuardianLinkRepository;
 import com.ecole.saas.shared.domain.TenantContext;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -62,6 +65,61 @@ public class FamilyDirectoryQueryService implements FamilyDirectoryPort {
 
     @Override
     @Transactional(readOnly = true)
+    public Optional<GuardianContactSummary> findGuardianContactById(UUID guardianId) {
+        TenantContext.requireCurrent();
+        if (guardianId == null) {
+            return Optional.empty();
+        }
+        return guardianRepository.findById(guardianId).map(FamilyDirectoryQueryService::toGuardianContactSummary);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<GuardianContactSummary> findGuardianContactByUserId(UUID userId) {
+        TenantContext.requireCurrent();
+        if (userId == null) {
+            return Optional.empty();
+        }
+        return guardianRepository.findByUserId(userId).map(FamilyDirectoryQueryService::toGuardianContactSummary);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<GuardianContactSummary> findGuardianContactsByIds(Collection<UUID> guardianIds) {
+        TenantContext.requireCurrent();
+        if (guardianIds == null || guardianIds.isEmpty()) {
+            return List.of();
+        }
+        return guardianRepository.findAllById(guardianIds).stream()
+                .map(FamilyDirectoryQueryService::toGuardianContactSummary)
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<GuardianContactSummary> findActiveGuardiansByFamilyId(UUID familyId) {
+        TenantContext.requireCurrent();
+        if (familyId == null) {
+            return List.of();
+        }
+        return guardianRepository
+                .findByFamilyIdAndStatusOrderByLastNameAscFirstNameAsc(familyId, GuardianStatus.ACTIVE)
+                .stream()
+                .map(FamilyDirectoryQueryService::toGuardianContactSummary)
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<GuardianContactSummary> findAllActiveGuardians() {
+        TenantContext.requireCurrent();
+        return guardianRepository.findByStatusOrderByLastNameAscFirstNameAsc(GuardianStatus.ACTIVE).stream()
+                .map(FamilyDirectoryQueryService::toGuardianContactSummary)
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public List<StudentGuardianSummary> findGuardiansByStudentId(UUID studentId) {
         TenantContext.requireCurrent();
         if (studentId == null) {
@@ -69,6 +127,22 @@ public class FamilyDirectoryQueryService implements FamilyDirectoryPort {
         }
         List<StudentGuardianLink> links =
                 linkRepository.findByStudentIdAndActiveTrueOrderByPrimaryContactDescCreatedAtAsc(studentId);
+        return mapStudentGuardianLinks(links);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<StudentGuardianSummary> findActiveGuardiansByStudentIds(Collection<UUID> studentIds) {
+        TenantContext.requireCurrent();
+        if (studentIds == null || studentIds.isEmpty()) {
+            return List.of();
+        }
+        List<StudentGuardianLink> links =
+                linkRepository.findByStudentIdInAndActiveTrueOrderByPrimaryContactDescCreatedAtAsc(studentIds);
+        return mapStudentGuardianLinks(links);
+    }
+
+    private List<StudentGuardianSummary> mapStudentGuardianLinks(List<StudentGuardianLink> links) {
         if (links.isEmpty()) {
             return List.of();
         }
@@ -159,6 +233,20 @@ public class FamilyDirectoryQueryService implements FamilyDirectoryPort {
                 guardian.getEmail(),
                 guardian.getProfession(),
                 guardian.getStatus().name(),
+                guardian.isActive());
+    }
+
+    private static GuardianContactSummary toGuardianContactSummary(Guardian guardian) {
+        return new GuardianContactSummary(
+                guardian.getId(),
+                guardian.getFamilyId(),
+                guardian.getUserId(),
+                guardian.getFirstName(),
+                guardian.getLastName(),
+                guardian.getPhone(),
+                guardian.getSecondaryPhone(),
+                guardian.getEmail(),
+                guardian.getPreferredLanguage(),
                 guardian.isActive());
     }
 

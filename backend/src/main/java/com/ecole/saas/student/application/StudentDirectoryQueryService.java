@@ -3,6 +3,7 @@ package com.ecole.saas.student.application;
 import com.ecole.saas.academic.AcademicStructurePort;
 import com.ecole.saas.academic.AcademicYearSummary;
 import com.ecole.saas.shared.domain.TenantContext;
+import com.ecole.saas.student.StudentContactSummary;
 import com.ecole.saas.student.StudentDirectoryPort;
 import com.ecole.saas.student.StudentEnrollmentSummary;
 import com.ecole.saas.student.StudentSummary;
@@ -79,6 +80,38 @@ public class StudentDirectoryQueryService implements StudentDirectoryPort {
 
     @Override
     @Transactional(readOnly = true)
+    public Optional<StudentContactSummary> findStudentContactById(UUID studentId) {
+        TenantContext.requireCurrent();
+        if (studentId == null) {
+            return Optional.empty();
+        }
+        return studentRepository.findById(studentId).map(StudentDirectoryQueryService::toStudentContactSummary);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<StudentContactSummary> findStudentContactByUserId(UUID userId) {
+        TenantContext.requireCurrent();
+        if (userId == null) {
+            return Optional.empty();
+        }
+        return studentRepository.findByUserId(userId).map(StudentDirectoryQueryService::toStudentContactSummary);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<StudentContactSummary> findStudentContactsByIds(Collection<UUID> studentIds) {
+        TenantContext.requireCurrent();
+        if (studentIds == null || studentIds.isEmpty()) {
+            return List.of();
+        }
+        return studentRepository.findAllById(studentIds).stream()
+                .map(StudentDirectoryQueryService::toStudentContactSummary)
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public Optional<StudentEnrollmentSummary> findEnrollmentByStudentAndYear(UUID studentId, UUID academicYearId) {
         TenantContext.requireCurrent();
         if (studentId == null || academicYearId == null) {
@@ -136,6 +169,18 @@ public class StudentDirectoryQueryService implements StudentDirectoryPort {
                 student.getGender().name(),
                 student.getBirthDate(),
                 student.getStatus().name(),
+                student.isActive());
+    }
+
+    private static StudentContactSummary toStudentContactSummary(Student student) {
+        return new StudentContactSummary(
+                student.getId(),
+                student.getMatricule(),
+                student.getUserId(),
+                student.getFirstName(),
+                student.getLastName(),
+                student.getPhone(),
+                student.getEmail(),
                 student.isActive());
     }
 

@@ -1,7 +1,9 @@
 package com.ecole.saas.family.infrastructure;
 
 import com.ecole.saas.family.domain.Guardian;
+import com.ecole.saas.family.domain.GuardianStatus;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -13,4 +15,10 @@ public interface GuardianRepository extends JpaRepository<Guardian, UUID>, JpaSp
     Page<Guardian> findByFamilyId(UUID familyId, Pageable pageable);
 
     List<Guardian> findByFamilyId(UUID familyId);
+
+    List<Guardian> findByFamilyIdAndStatusOrderByLastNameAscFirstNameAsc(UUID familyId, GuardianStatus status);
+
+    List<Guardian> findByStatusOrderByLastNameAscFirstNameAsc(GuardianStatus status);
+
+    Optional<Guardian> findByUserId(UUID userId);
 }

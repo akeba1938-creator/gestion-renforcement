@@ -1,5 +1,6 @@
 package com.ecole.saas.family;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -15,7 +16,19 @@ public interface FamilyDirectoryPort {
 
     Optional<GuardianSummary> findGuardianById(UUID guardianId);
 
+    Optional<GuardianContactSummary> findGuardianContactById(UUID guardianId);
+
+    Optional<GuardianContactSummary> findGuardianContactByUserId(UUID userId);
+
+    List<GuardianContactSummary> findGuardianContactsByIds(Collection<UUID> guardianIds);
+
+    List<GuardianContactSummary> findActiveGuardiansByFamilyId(UUID familyId);
+
+    List<GuardianContactSummary> findAllActiveGuardians();
+
     List<StudentGuardianSummary> findGuardiansByStudentId(UUID studentId);
+
+    List<StudentGuardianSummary> findActiveGuardiansByStudentIds(Collection<UUID> studentIds);
 
     Optional<StudentGuardianSummary> findPrimaryContactByStudentId(UUID studentId);
 

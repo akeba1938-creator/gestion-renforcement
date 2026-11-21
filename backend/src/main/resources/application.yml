@@ -39,6 +39,17 @@ app:
     csrf:
       cookie-name: XSRF-TOKEN
       header-name: X-XSRF-TOKEN
+  communication:
+    gateways:
+      sms:
+        unit-cost-xof: ${APP_COMM_SMS_UNIT_COST_XOF:25}
+        provider-name: ${APP_COMM_SMS_PROVIDER:LOCAL_STUB_SMS}
+      whatsapp:
+        unit-cost-xof: ${APP_COMM_WHATSAPP_UNIT_COST_XOF:15}
+        provider-name: ${APP_COMM_WHATSAPP_PROVIDER:LOCAL_STUB_WHATSAPP}
+      email:
+        unit-cost-xof: ${APP_COMM_EMAIL_UNIT_COST_XOF:0}
+        provider-name: ${APP_COMM_EMAIL_PROVIDER:LOCAL_STUB_EMAIL}
 
 management:
   endpoints:
