@@ -8,7 +8,9 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.Repository;
+import org.springframework.data.repository.query.Param;
 
 /**
  * Dépôt en ajout seul sur {@code ledger_entries} (ADR 0003) : aucune méthode de suppression n'est exposée.
@@ -27,4 +29,29 @@ public interface LedgerEntryRepository extends Repository<LedgerEntry, UUID>, Jp
 
     Optional<LedgerEntry> findFirstByReferenceTypeAndReferenceIdAndEntryType(
             LedgerReferenceType referenceType, UUID referenceId, LedgerEntryType entryType);
+
+    @Query("""
+            SELECT COALESCE(SUM(
+                CASE WHEN l.direction = com.ecole.saas.finance.domain.LedgerDirection.DEBIT
+                     THEN l.amountXof
+                     ELSE -l.amountXof
+                END
+            ), 0L)
+            FROM LedgerEntry l
+            """)
+    long sumSignedNetBalanceAll();
+
+    @Query("""
+            SELECT COALESCE(SUM(
+                CASE WHEN l.direction = com.ecole.saas.finance.domain.LedgerDirection.DEBIT
+                     THEN l.amountXof
+                     ELSE -l.amountXof
+                END
+            ), 0L)
+            FROM LedgerEntry l
+            WHERE l.invoiceId IN (
+                SELECT i.id FROM StudentInvoice i WHERE i.academicYearId = :academicYearId
+            )
+            """)
+    long sumSignedNetBalanceByAcademicYear(@Param("academicYearId") UUID academicYearId);
 }

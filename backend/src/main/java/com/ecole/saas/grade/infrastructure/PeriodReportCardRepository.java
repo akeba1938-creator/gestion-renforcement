@@ -20,4 +20,13 @@ public interface PeriodReportCardRepository
             UUID evaluationPeriodId, UUID classRoomId);
 
     List<PeriodReportCard> findByStudentIdAndAcademicYearIdOrderByComputedAtAsc(UUID studentId, UUID academicYearId);
+
+    List<PeriodReportCard> findByAcademicYearId(UUID academicYearId);
+
+    List<PeriodReportCard> findByAcademicYearIdAndClassRoomIdIn(UUID academicYearId, Collection<UUID> classRoomIds);
+
+    List<PeriodReportCard> findByEvaluationPeriodId(UUID evaluationPeriodId);
+
+    List<PeriodReportCard> findByEvaluationPeriodIdAndClassRoomIdIn(
+            UUID evaluationPeriodId, Collection<UUID> classRoomIds);
 }

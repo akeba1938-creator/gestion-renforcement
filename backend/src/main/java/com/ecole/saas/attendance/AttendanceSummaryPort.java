@@ -1,6 +1,7 @@
 package com.ecole.saas.attendance;
 
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
@@ -21,4 +22,11 @@ public interface AttendanceSummaryPort {
             LocalDate toDate);
 
     List<StudentAttendanceSummary> getClassPeriodSummaries(UUID classRoomId, UUID evaluationPeriodId);
+
+    AttendanceReportingOverview getAttendanceReportingOverview(
+            UUID academicYearId,
+            UUID evaluationPeriodId,
+            Collection<UUID> classRoomIds,
+            LocalDate fromDate,
+            LocalDate toDate);
 }

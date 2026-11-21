@@ -1,5 +1,6 @@
 package com.ecole.saas.schooldocs;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -19,4 +20,7 @@ public interface SchoolDocsDirectoryPort {
     long countDocumentsForCurrentTenant();
 
     long totalStorageBytesForCurrentTenant();
+
+    SchoolDocsActivitySummary getActivitySummary(
+            UUID academicYearId, Instant fromInclusive, Instant toExclusive);
 }

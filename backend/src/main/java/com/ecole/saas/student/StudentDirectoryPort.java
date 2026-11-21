@@ -38,6 +38,8 @@ public interface StudentDirectoryPort {
 
     List<StudentEnrollmentSummary> findActiveEnrollmentsByClassRoom(UUID classRoomId);
 
+    List<StudentEnrollmentSummary> findActiveEnrollmentsByClassRooms(Collection<UUID> classRoomIds);
+
     Map<UUID, Long> countActiveEnrollmentsByClassRooms(Collection<UUID> classRoomIds);
 
     Set<UUID> findActiveStudentIdsByClassRooms(Collection<UUID> classRoomIds);

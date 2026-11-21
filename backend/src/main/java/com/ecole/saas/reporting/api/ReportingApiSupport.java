@@ -1,0 +1,40 @@
+package com.ecole.saas.reporting.api;
+
+import com.ecole.saas.reporting.domain.ReportingValidationException;
+import java.util.UUID;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
+
+final class ReportingApiSupport {
+
+    private ReportingApiSupport() {
+    }
+
+    static UUID extractActorId(JwtAuthenticationToken authentication) {
+        if (authentication == null || authentication.getToken() == null) {
+            throw new ReportingValidationException("Jeton d'authentification manquant.");
+        }
+        try {
+            return UUID.fromString(authentication.getToken().getSubject());
+        } catch (IllegalArgumentException ex) {
+            throw new ReportingValidationException("Identifiant utilisateur JWT invalide.");
+        }
+    }
+
+    static String resolveIdempotencyKey(String headerKey, String bodyKey) {
+        boolean hasHeader = headerKey != null && !headerKey.isBlank();
+        boolean hasBody = bodyKey != null && !bodyKey.isBlank();
+        if (hasHeader && hasBody && !headerKey.trim().equals(bodyKey.trim())) {
+            throw new ReportingValidationException(
+                    "L'en-tête Idempotency-Key et le champ idempotencyKey du corps doivent être identiques.");
+        }
+        if (hasHeader) {
+            return headerKey.trim();
+        }
+        if (hasBody) {
+            return bodyKey.trim();
+        }
+        throw new ReportingValidationException(
+                "reporting-idempotency-key-required",
+                "La clé d'idempotence est obligatoire (en-tête Idempotency-Key ou champ idempotencyKey).");
+    }
+}
