@@ -15,7 +15,9 @@ import com.ecole.saas.family.infrastructure.StudentGuardianLinkRepository;
 import com.ecole.saas.shared.domain.TenantContext;
 import java.util.Collection;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -55,12 +57,53 @@ public class FamilyDirectoryQueryService implements FamilyDirectoryPort {
 
     @Override
     @Transactional(readOnly = true)
+    public List<FamilySummary> findFamiliesByCodes(Collection<String> codes) {
+        TenantContext.requireCurrent();
+        if (codes == null || codes.isEmpty()) {
+            return List.of();
+        }
+        Set<String> normalized = codes.stream()
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(s -> !s.isBlank())
+                .map(s -> s.toUpperCase(Locale.ROOT))
+                .collect(Collectors.toSet());
+        if (normalized.isEmpty()) {
+            return List.of();
+        }
+        return familyRepository.findByCodeIn(normalized).stream()
+                .map(FamilyDirectoryQueryService::toFamilySummary)
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public Optional<GuardianSummary> findGuardianById(UUID guardianId) {
         TenantContext.requireCurrent();
         if (guardianId == null) {
             return Optional.empty();
         }
         return guardianRepository.findById(guardianId).map(FamilyDirectoryQueryService::toGuardianSummary);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<GuardianContactSummary> findGuardiansByPhones(Collection<String> phones) {
+        TenantContext.requireCurrent();
+        if (phones == null || phones.isEmpty()) {
+            return List.of();
+        }
+        Set<String> normalized = phones.stream()
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(s -> !s.isBlank())
+                .collect(Collectors.toSet());
+        if (normalized.isEmpty()) {
+            return List.of();
+        }
+        return guardianRepository.findByPhoneIn(normalized).stream()
+                .map(FamilyDirectoryQueryService::toGuardianContactSummary)
+                .toList();
     }
 
     @Override

@@ -80,6 +80,17 @@ public class AcademicStructureQueryService implements AcademicStructurePort {
 
     @Override
     @Transactional(readOnly = true)
+    public Optional<AcademicYearSummary> findAcademicYearByCode(String code) {
+        TenantContext.requireCurrent();
+        if (code == null || code.isBlank()) {
+            return Optional.empty();
+        }
+        return academicYearRepository.findByCode(code.trim().toUpperCase(java.util.Locale.ROOT))
+                .map(AcademicStructureQueryService::toYearSummary);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public Map<UUID, AcademicYearSummary> findAcademicYearsByIds(Collection<UUID> academicYearIds) {
         TenantContext.requireCurrent();
         Set<UUID> validIds = sanitizeIds(academicYearIds);
@@ -173,6 +184,15 @@ public class AcademicStructureQueryService implements AcademicStructurePort {
 
     @Override
     @Transactional(readOnly = true)
+    public List<SubjectSummary> findAllSubjects() {
+        TenantContext.requireCurrent();
+        return subjectRepository.findAll().stream()
+                .map(AcademicStructureQueryService::toSubjectSummary)
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public Optional<ClassRoomSummary> findClassRoomById(UUID classRoomId) {
         TenantContext.requireCurrent();
         if (classRoomId == null) {
@@ -192,6 +212,18 @@ public class AcademicStructureQueryService implements AcademicStructurePort {
         return classRoomRepository.findAllById(validIds).stream()
                 .collect(Collectors.toMap(
                         ClassRoom::getId, AcademicStructureQueryService::toClassRoomSummary, (a, b) -> a));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<ClassRoomSummary> findClassRoomsByAcademicYear(UUID academicYearId) {
+        TenantContext.requireCurrent();
+        if (academicYearId == null) {
+            return List.of();
+        }
+        return classRoomRepository.findByAcademicYearIdOrderByCodeAsc(academicYearId).stream()
+                .map(AcademicStructureQueryService::toClassRoomSummary)
+                .toList();
     }
 
     @Override

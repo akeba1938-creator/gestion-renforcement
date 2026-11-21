@@ -15,5 +15,6 @@ public enum AuditCategory {
     CENTER,
     COMMUNICATION,
     SCHOOLDOCS,
+    SCHOOLIMPORT,
     AUDIT
 }

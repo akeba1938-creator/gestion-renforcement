@@ -17,6 +17,8 @@ public interface AcademicStructurePort {
 
     Optional<AcademicYearSummary> findAcademicYearById(UUID academicYearId);
 
+    Optional<AcademicYearSummary> findAcademicYearByCode(String code);
+
     Map<UUID, AcademicYearSummary> findAcademicYearsByIds(Collection<UUID> academicYearIds);
 
     List<EvaluationPeriodSummary> findEvaluationPeriodsByYear(UUID academicYearId);
@@ -33,9 +35,13 @@ public interface AcademicStructurePort {
 
     Map<UUID, SubjectSummary> findSubjectsByIds(Collection<UUID> subjectIds);
 
+    List<SubjectSummary> findAllSubjects();
+
     Optional<ClassRoomSummary> findClassRoomById(UUID classRoomId);
 
     Map<UUID, ClassRoomSummary> findClassRoomsByIds(Collection<UUID> classRoomIds);
+
+    List<ClassRoomSummary> findClassRoomsByAcademicYear(UUID academicYearId);
 
     List<ClassSubjectSummary> findActiveSubjectsForClass(UUID classRoomId);
 }

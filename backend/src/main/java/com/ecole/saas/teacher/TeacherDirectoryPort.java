@@ -18,6 +18,8 @@ public interface TeacherDirectoryPort {
 
     Map<UUID, TeacherSummary> findTeachersByIds(Collection<UUID> teacherIds);
 
+    List<TeacherSummary> findTeachersByEmployeeCodes(Collection<String> employeeCodes);
+
     Optional<TeacherSummary> findTeacherByUserId(UUID userId);
 
     List<TeacherSummary> findAllActiveTeachers();

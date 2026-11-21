@@ -11,6 +11,7 @@ import com.ecole.saas.teacher.infrastructure.TeacherAssignmentRepository;
 import com.ecole.saas.teacher.infrastructure.TeacherRepository;
 import java.util.Collection;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -61,6 +62,27 @@ public class TeacherDirectoryQueryService implements TeacherDirectoryPort {
         }
         return teacherRepository.findAllById(validIds).stream()
                 .collect(Collectors.toMap(Teacher::getId, TeacherDirectoryQueryService::toTeacherSummary, (a, b) -> a));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<TeacherSummary> findTeachersByEmployeeCodes(Collection<String> employeeCodes) {
+        TenantContext.requireCurrent();
+        if (employeeCodes == null || employeeCodes.isEmpty()) {
+            return List.of();
+        }
+        Set<String> normalized = employeeCodes.stream()
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(s -> !s.isBlank())
+                .map(s -> s.toUpperCase(Locale.ROOT))
+                .collect(Collectors.toSet());
+        if (normalized.isEmpty()) {
+            return List.of();
+        }
+        return teacherRepository.findByEmployeeCodeIn(normalized).stream()
+                .map(TeacherDirectoryQueryService::toTeacherSummary)
+                .toList();
     }
 
     @Override

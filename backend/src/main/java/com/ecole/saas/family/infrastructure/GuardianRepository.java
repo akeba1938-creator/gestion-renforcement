@@ -25,5 +25,7 @@ public interface GuardianRepository extends JpaRepository<Guardian, UUID>, JpaSp
 
     List<Guardian> findByStatusOrderByLastNameAscFirstNameAsc(GuardianStatus status);
 
+    List<Guardian> findByPhoneIn(Collection<String> phones);
+
     Optional<Guardian> findByUserId(UUID userId);
 }

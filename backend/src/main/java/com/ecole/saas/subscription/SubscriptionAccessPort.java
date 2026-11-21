@@ -19,4 +19,6 @@ public interface SubscriptionAccessPort {
     QuotaCheckResult checkQuota(QuotaResource resource, long currentUsage, long requestedAdditional);
 
     void assertQuotaAvailable(QuotaResource resource, long currentUsage, long requestedAdditional);
+
+    long currentUsage(QuotaResource resource);
 }

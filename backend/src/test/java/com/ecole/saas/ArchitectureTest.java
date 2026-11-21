@@ -100,7 +100,7 @@ class ArchitectureTest {
     void monetaryAndGradeModulesMustNotUseFloatingPointNumbers() {
         noFields()
                 .that().areDeclaredInClassesThat()
-                .resideInAnyPackage("..finance..", "..grade..", "..center..", "..schooldocs..")
+                .resideInAnyPackage("..finance..", "..grade..", "..center..", "..schooldocs..", "..schoolimport..")
                 .should().haveRawType(float.class)
                 .orShould().haveRawType(double.class)
                 .orShould().haveRawType(Float.class)
@@ -111,9 +111,9 @@ class ArchitectureTest {
 
         methods()
                 .that().areDeclaredInClassesThat()
-                .resideInAnyPackage("..finance..", "..grade..", "..center..", "..schooldocs..")
+                .resideInAnyPackage("..finance..", "..grade..", "..center..", "..schooldocs..", "..schoolimport..")
                 .should(notUseFloatingPointInSignature())
-                .because("Aucune méthode des modules finance, grade, center ou schooldocs ne doit exposer ou accepter float ou double.")
+                .because("Aucune méthode des modules finance, grade, center, schooldocs ou schoolimport ne doit exposer ou accepter float ou double.")
                 .check(PRODUCTION_CLASSES);
     }
 

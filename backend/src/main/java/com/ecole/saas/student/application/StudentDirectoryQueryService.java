@@ -15,7 +15,11 @@ import com.ecole.saas.student.domain.StudentStatus;
 import com.ecole.saas.student.infrastructure.StudentEnrollmentRepository;
 import com.ecole.saas.student.infrastructure.StudentRepository;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -82,6 +86,48 @@ public class StudentDirectoryQueryService implements StudentDirectoryPort {
 
     @Override
     @Transactional(readOnly = true)
+    public List<StudentSummary> findStudentsByMatricules(Collection<String> matricules) {
+        TenantContext.requireCurrent();
+        if (matricules == null || matricules.isEmpty()) {
+            return List.of();
+        }
+        Set<String> normalized = matricules.stream()
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(s -> !s.isBlank())
+                .map(s -> s.toUpperCase(Locale.ROOT))
+                .collect(Collectors.toSet());
+        if (normalized.isEmpty()) {
+            return List.of();
+        }
+        return studentRepository.findByMatriculeIn(normalized).stream()
+                .map(StudentDirectoryQueryService::toStudentSummary)
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<StudentSummary> findStudentsByLastNamesIgnoreCase(Collection<String> lastNames) {
+        TenantContext.requireCurrent();
+        if (lastNames == null || lastNames.isEmpty()) {
+            return List.of();
+        }
+        Set<String> lower = lastNames.stream()
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(s -> !s.isBlank())
+                .map(s -> s.toLowerCase(Locale.ROOT))
+                .collect(Collectors.toSet());
+        if (lower.isEmpty()) {
+            return List.of();
+        }
+        return studentRepository.findByLastNameLowerIn(lower).stream()
+                .map(StudentDirectoryQueryService::toStudentSummary)
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public Optional<StudentContactSummary> findStudentContactById(UUID studentId) {
         TenantContext.requireCurrent();
         if (studentId == null) {
@@ -130,6 +176,25 @@ public class StudentDirectoryQueryService implements StudentDirectoryPort {
 
     @Override
     @Transactional(readOnly = true)
+    public List<StudentEnrollmentSummary> findActiveEnrollmentsByYearAndStudents(
+            UUID academicYearId, Collection<UUID> studentIds) {
+        TenantContext.requireCurrent();
+        if (academicYearId == null || studentIds == null || studentIds.isEmpty()) {
+            return List.of();
+        }
+        Set<UUID> validIds = studentIds.stream().filter(Objects::nonNull).collect(Collectors.toSet());
+        if (validIds.isEmpty()) {
+            return List.of();
+        }
+        return enrollmentRepository
+                .findByAcademicYearIdAndStudentIdInAndStatus(academicYearId, validIds, EnrollmentStatus.ACTIVE)
+                .stream()
+                .map(StudentDirectoryQueryService::toEnrollmentSummary)
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public Optional<StudentEnrollmentSummary> findCurrentEnrollmentForStudent(UUID studentId) {
         TenantContext.requireCurrent();
         if (studentId == null) {
@@ -153,6 +218,29 @@ public class StudentDirectoryQueryService implements StudentDirectoryPort {
                 .stream()
                 .map(StudentDirectoryQueryService::toEnrollmentSummary)
                 .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Map<UUID, Long> countActiveEnrollmentsByClassRooms(Collection<UUID> classRoomIds) {
+        TenantContext.requireCurrent();
+        if (classRoomIds == null || classRoomIds.isEmpty()) {
+            return Map.of();
+        }
+        Set<UUID> validIds = classRoomIds.stream().filter(Objects::nonNull).collect(Collectors.toSet());
+        if (validIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<UUID, Long> counts = new HashMap<>();
+        for (UUID id : validIds) {
+            counts.put(id, 0L);
+        }
+        for (Object[] row : enrollmentRepository.countByClassRoomIdsAndStatus(validIds, EnrollmentStatus.ACTIVE)) {
+            if (row != null && row.length >= 2 && row[0] instanceof UUID cid && row[1] instanceof Number n) {
+                counts.put(cid, n.longValue());
+            }
+        }
+        return Map.copyOf(counts);
     }
 
     @Override
