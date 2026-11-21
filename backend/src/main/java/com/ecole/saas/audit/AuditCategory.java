@@ -14,5 +14,6 @@ public enum AuditCategory {
     ATTENDANCE,
     CENTER,
     COMMUNICATION,
+    SCHOOLDOCS,
     AUDIT
 }
