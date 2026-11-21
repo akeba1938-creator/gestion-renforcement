@@ -20,8 +20,10 @@ import com.ecole.saas.academic.infrastructure.EvaluationPeriodRepository;
 import com.ecole.saas.academic.infrastructure.GradeLevelRepository;
 import com.ecole.saas.academic.infrastructure.SubjectRepository;
 import com.ecole.saas.shared.domain.TenantContext;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -78,6 +80,18 @@ public class AcademicStructureQueryService implements AcademicStructurePort {
 
     @Override
     @Transactional(readOnly = true)
+    public Map<UUID, AcademicYearSummary> findAcademicYearsByIds(Collection<UUID> academicYearIds) {
+        TenantContext.requireCurrent();
+        Set<UUID> validIds = sanitizeIds(academicYearIds);
+        if (validIds.isEmpty()) {
+            return Map.of();
+        }
+        return academicYearRepository.findAllById(validIds).stream()
+                .collect(Collectors.toMap(AcademicYear::getId, AcademicStructureQueryService::toYearSummary, (a, b) -> a));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public List<EvaluationPeriodSummary> findEvaluationPeriodsByYear(UUID academicYearId) {
         TenantContext.requireCurrent();
         if (academicYearId == null || academicYearRepository.findById(academicYearId).isEmpty()) {
@@ -100,12 +114,38 @@ public class AcademicStructureQueryService implements AcademicStructurePort {
 
     @Override
     @Transactional(readOnly = true)
+    public Map<UUID, EvaluationPeriodSummary> findEvaluationPeriodsByIds(Collection<UUID> periodIds) {
+        TenantContext.requireCurrent();
+        Set<UUID> validIds = sanitizeIds(periodIds);
+        if (validIds.isEmpty()) {
+            return Map.of();
+        }
+        return evaluationPeriodRepository.findAllById(validIds).stream()
+                .collect(Collectors.toMap(
+                        EvaluationPeriod::getId, AcademicStructureQueryService::toPeriodSummary, (a, b) -> a));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public Optional<GradeLevelSummary> findGradeLevelById(UUID gradeLevelId) {
         TenantContext.requireCurrent();
         if (gradeLevelId == null) {
             return Optional.empty();
         }
         return gradeLevelRepository.findById(gradeLevelId).map(AcademicStructureQueryService::toLevelSummary);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Map<UUID, GradeLevelSummary> findGradeLevelsByIds(Collection<UUID> gradeLevelIds) {
+        TenantContext.requireCurrent();
+        Set<UUID> validIds = sanitizeIds(gradeLevelIds);
+        if (validIds.isEmpty()) {
+            return Map.of();
+        }
+        return gradeLevelRepository.findAllById(validIds).stream()
+                .collect(Collectors.toMap(
+                        GradeLevel::getId, AcademicStructureQueryService::toLevelSummary, (a, b) -> a));
     }
 
     @Override
@@ -120,12 +160,38 @@ public class AcademicStructureQueryService implements AcademicStructurePort {
 
     @Override
     @Transactional(readOnly = true)
+    public Map<UUID, SubjectSummary> findSubjectsByIds(Collection<UUID> subjectIds) {
+        TenantContext.requireCurrent();
+        Set<UUID> validIds = sanitizeIds(subjectIds);
+        if (validIds.isEmpty()) {
+            return Map.of();
+        }
+        return subjectRepository.findAllById(validIds).stream()
+                .collect(Collectors.toMap(
+                        Subject::getId, AcademicStructureQueryService::toSubjectSummary, (a, b) -> a));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public Optional<ClassRoomSummary> findClassRoomById(UUID classRoomId) {
         TenantContext.requireCurrent();
         if (classRoomId == null) {
             return Optional.empty();
         }
         return classRoomRepository.findById(classRoomId).map(AcademicStructureQueryService::toClassRoomSummary);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Map<UUID, ClassRoomSummary> findClassRoomsByIds(Collection<UUID> classRoomIds) {
+        TenantContext.requireCurrent();
+        Set<UUID> validIds = sanitizeIds(classRoomIds);
+        if (validIds.isEmpty()) {
+            return Map.of();
+        }
+        return classRoomRepository.findAllById(validIds).stream()
+                .collect(Collectors.toMap(
+                        ClassRoom::getId, AcademicStructureQueryService::toClassRoomSummary, (a, b) -> a));
     }
 
     @Override
@@ -159,6 +225,13 @@ public class AcademicStructureQueryService implements AcademicStructurePort {
                             cs.isActive());
                 })
                 .toList();
+    }
+
+    private static Set<UUID> sanitizeIds(Collection<UUID> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return Set.of();
+        }
+        return ids.stream().filter(Objects::nonNull).collect(Collectors.toSet());
     }
 
     private static AcademicYearSummary toYearSummary(AcademicYear year) {

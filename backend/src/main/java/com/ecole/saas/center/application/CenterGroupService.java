@@ -140,7 +140,17 @@ public class CenterGroupService {
             return cb.and(predicates.toArray(Predicate[]::new));
         };
         Page<CenterGroup> page = groupRepository.findAll(spec, pageable);
-        return page.map(this::toGroupView);
+        if (page.isEmpty()) {
+            return page.map(g -> new GroupView(g, 0L));
+        }
+        Set<UUID> groupIds = page.getContent().stream().map(CenterGroup::getId).collect(Collectors.toSet());
+        Map<UUID, Long> activeCountsByGroup = enrollmentRepository
+                .countByGroupIdInAndStatus(groupIds, CenterGroupEnrollmentStatus.ACTIVE)
+                .stream()
+                .collect(Collectors.toMap(
+                        CenterGroupEnrollmentRepository.GroupEnrollmentCount::getGroupId,
+                        CenterGroupEnrollmentRepository.GroupEnrollmentCount::getEnrollmentCount));
+        return page.map(g -> new GroupView(g, activeCountsByGroup.getOrDefault(g.getId(), 0L)));
     }
 
     @PreAuthorize(CenterRoles.READ_ROLES)
@@ -308,8 +318,17 @@ public class CenterGroupService {
         subscriptionGuard.requireReadAccess();
         CenterGroup group = requireGroup(groupId);
         tutorScopeGuard.assertCanAccessGroup(group.getId());
-        return groupTutorRepository.findByGroupIdOrderByActiveDescLeadTutorDescCreatedAtAsc(group.getId()).stream()
-                .map(this::toGroupTutorView)
+        List<CenterGroupTutor> assignments =
+                groupTutorRepository.findByGroupIdOrderByActiveDescLeadTutorDescCreatedAtAsc(group.getId());
+        if (assignments.isEmpty()) {
+            return List.of();
+        }
+        Set<UUID> teacherIds = assignments.stream()
+                .map(CenterGroupTutor::getTeacherId)
+                .collect(Collectors.toSet());
+        Map<UUID, TeacherSummary> teachersById = teacherDirectoryPort.findTeachersByIds(teacherIds);
+        return assignments.stream()
+                .map(a -> new GroupTutorView(a, teachersById.get(a.getTeacherId())))
                 .toList();
     }
 

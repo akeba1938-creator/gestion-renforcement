@@ -42,6 +42,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
@@ -241,13 +242,33 @@ public class ReportCardService {
                 GradingCalculator.computeClassStats(generalAveragesMap.values(), policy);
         Map<UUID, RankingCalculator.RankEntry> classRanks = RankingCalculator.rankDescending(generalAveragesMap);
 
-        // 4. Persistance des bulletins et résultats matière (en préservant les appréciations sur DRAFT)
-        Map<UUID, PeriodReportCard> existingByStudent = existingCards.stream()
-                .collect(Collectors.toMap(PeriodReportCard::getStudentId, Function.identity()));
+        // 4. Persistance en lot des bulletins et résultats matière (en préservant les appréciations sur DRAFT)
+        Map<UUID, PeriodReportCard> existingByStudent = new HashMap<>();
+        for (PeriodReportCard existing : existingCards) {
+            existingByStudent.put(existing.getStudentId(), existing);
+        }
+        Set<UUID> missingStudentIds = enrollments.stream()
+                .map(StudentEnrollmentSummary::studentId)
+                .filter(id -> !existingByStudent.containsKey(id))
+                .collect(Collectors.toSet());
+        if (!missingStudentIds.isEmpty()) {
+            for (PeriodReportCard existing : reportCardRepository.findByEvaluationPeriodIdAndStudentIdIn(
+                    evaluationPeriodId, missingStudentIds)) {
+                existingByStudent.putIfAbsent(existing.getStudentId(), existing);
+            }
+        }
+
+        Set<UUID> existingCardIds = enrollments.stream()
+                .map(e -> existingByStudent.get(e.studentId()))
+                .filter(Objects::nonNull)
+                .map(PeriodReportCard::getId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+
         Instant now = clock.instant();
         int classSize = enrollments.size();
 
-        List<PeriodReportCard> savedCards = new ArrayList<>();
+        List<PeriodReportCard> cardsToSave = new ArrayList<>(enrollments.size());
         for (StudentEnrollmentSummary enrollment : enrollments) {
             UUID studentId = enrollment.studentId();
             GradingCalculator.GeneralAverageResult general = generalByStudent.get(studentId);
@@ -257,15 +278,13 @@ public class ReportCardService {
 
             PeriodReportCard card = existingByStudent.get(studentId);
             if (card == null) {
-                card = reportCardRepository
-                        .findByEvaluationPeriodIdAndStudentId(evaluationPeriodId, studentId)
-                        .orElseGet(() -> new PeriodReportCard(
-                                period.academicYearId(),
-                                evaluationPeriodId,
-                                classRoomId,
-                                studentId,
-                                gradingScale,
-                                now));
+                card = new PeriodReportCard(
+                        period.academicYearId(),
+                        evaluationPeriodId,
+                        classRoomId,
+                        studentId,
+                        gradingScale,
+                        now);
             }
             card.applyComputedResults(
                     classRoomId,
@@ -281,20 +300,35 @@ public class ReportCardService {
                     rank.tied(),
                     mention,
                     now);
-            PeriodReportCard savedCard = reportCardRepository.save(card);
-            savedCards.add(savedCard);
+            cardsToSave.add(card);
+        }
+        List<PeriodReportCard> savedCards = cardsToSave.isEmpty()
+                ? List.of()
+                : reportCardRepository.saveAll(cardsToSave);
 
-            Map<UUID, PeriodSubjectResult> existingSubjects = subjectResultRepository
-                    .findByReportCardIdOrderBySubjectNameAsc(savedCard.getId())
-                    .stream()
-                    .collect(Collectors.toMap(PeriodSubjectResult::getSubjectId, Function.identity()));
+        Map<UUID, Map<UUID, PeriodSubjectResult>> existingSubjectsByCard = new HashMap<>();
+        if (!existingCardIds.isEmpty()) {
+            for (PeriodSubjectResult result : subjectResultRepository.findByReportCardIdIn(existingCardIds)) {
+                existingSubjectsByCard
+                        .computeIfAbsent(result.getReportCardId(), ignored -> new HashMap<>())
+                        .put(result.getSubjectId(), result);
+            }
+        }
 
-            Set<UUID> activeSubjectIds = classSubjects.stream()
-                    .map(ClassSubjectSummary::subjectId)
-                    .collect(Collectors.toSet());
+        Set<UUID> activeSubjectIds = classSubjects.stream()
+                .map(ClassSubjectSummary::subjectId)
+                .collect(Collectors.toSet());
+        List<PeriodSubjectResult> obsoleteSubjects = new ArrayList<>();
+        List<PeriodSubjectResult> subjectResultsToSave = new ArrayList<>(savedCards.size() * classSubjects.size());
+
+        for (PeriodReportCard savedCard : savedCards) {
+            UUID studentId = savedCard.getStudentId();
+            Map<UUID, PeriodSubjectResult> existingSubjects =
+                    existingSubjectsByCard.getOrDefault(savedCard.getId(), Map.of());
+
             for (PeriodSubjectResult obsolete : existingSubjects.values()) {
                 if (!activeSubjectIds.contains(obsolete.getSubjectId())) {
-                    subjectResultRepository.delete(obsolete);
+                    obsoleteSubjects.add(obsolete);
                 }
             }
 
@@ -319,9 +353,9 @@ public class ReportCardService {
                             classSubjectAvg,
                             rankInSubject,
                             evalCount);
-                    subjectResultRepository.save(existingSubject);
+                    subjectResultsToSave.add(existingSubject);
                 } else {
-                    subjectResultRepository.save(new PeriodSubjectResult(
+                    subjectResultsToSave.add(new PeriodSubjectResult(
                             savedCard.getId(),
                             cs.subjectId(),
                             cs.id(),
@@ -334,6 +368,13 @@ public class ReportCardService {
                             evalCount));
                 }
             }
+        }
+
+        if (!obsoleteSubjects.isEmpty()) {
+            subjectResultRepository.deleteAll(obsoleteSubjects);
+        }
+        if (!subjectResultsToSave.isEmpty()) {
+            subjectResultRepository.saveAll(subjectResultsToSave);
         }
 
         List<PeriodReportCard> orderedCards = reportCardRepository
@@ -545,18 +586,22 @@ public class ReportCardService {
         Map<UUID, StudentSummary> studentsById = studentDirectoryPort.findStudentsByIds(studentIds).stream()
                 .collect(Collectors.toMap(StudentSummary::id, Function.identity()));
 
-        Map<UUID, ClassRoomSummary> roomsCache = new HashMap<>();
-        Map<UUID, EvaluationPeriodSummary> periodsCache = new HashMap<>();
+        Set<UUID> classRoomIds = cards.stream()
+                .map(PeriodReportCard::getClassRoomId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Set<UUID> periodIds = cards.stream()
+                .map(PeriodReportCard::getEvaluationPeriodId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Map<UUID, ClassRoomSummary> roomsById = academicStructurePort.findClassRoomsByIds(classRoomIds);
+        Map<UUID, EvaluationPeriodSummary> periodsById = academicStructurePort.findEvaluationPeriodsByIds(periodIds);
 
         return cards.stream()
                 .map(card -> {
                     StudentSummary student = studentsById.get(card.getStudentId());
-                    ClassRoomSummary room = roomsCache.computeIfAbsent(
-                            card.getClassRoomId(),
-                            id -> academicStructurePort.findClassRoomById(id).orElse(null));
-                    EvaluationPeriodSummary period = periodsCache.computeIfAbsent(
-                            card.getEvaluationPeriodId(),
-                            id -> academicStructurePort.findEvaluationPeriodById(id).orElse(null));
+                    ClassRoomSummary room = roomsById.get(card.getClassRoomId());
+                    EvaluationPeriodSummary period = periodsById.get(card.getEvaluationPeriodId());
                     return new ReportCardView(
                             card,
                             student != null ? student.matricule() : null,

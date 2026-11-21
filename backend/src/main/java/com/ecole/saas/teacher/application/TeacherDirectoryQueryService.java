@@ -9,8 +9,10 @@ import com.ecole.saas.teacher.domain.TeacherAssignment;
 import com.ecole.saas.teacher.domain.TeacherStatus;
 import com.ecole.saas.teacher.infrastructure.TeacherAssignmentRepository;
 import com.ecole.saas.teacher.infrastructure.TeacherRepository;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -44,6 +46,21 @@ public class TeacherDirectoryQueryService implements TeacherDirectoryPort {
             return Optional.empty();
         }
         return teacherRepository.findById(teacherId).map(TeacherDirectoryQueryService::toTeacherSummary);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Map<UUID, TeacherSummary> findTeachersByIds(Collection<UUID> teacherIds) {
+        TenantContext.requireCurrent();
+        if (teacherIds == null || teacherIds.isEmpty()) {
+            return Map.of();
+        }
+        Set<UUID> validIds = teacherIds.stream().filter(Objects::nonNull).collect(Collectors.toSet());
+        if (validIds.isEmpty()) {
+            return Map.of();
+        }
+        return teacherRepository.findAllById(validIds).stream()
+                .collect(Collectors.toMap(Teacher::getId, TeacherDirectoryQueryService::toTeacherSummary, (a, b) -> a));
     }
 
     @Override

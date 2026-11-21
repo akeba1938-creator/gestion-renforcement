@@ -21,6 +21,12 @@ public interface CenterSessionRepository
     List<CenterSession> findByGroupIdAndSessionDateBetweenAndStatusNot(
             UUID groupId, LocalDate fromDate, LocalDate toDate, CenterSessionStatus excludedStatus);
 
+    List<CenterSession> findByTeacherIdInAndSessionDateBetweenAndStatusNot(
+            Collection<UUID> teacherIds,
+            LocalDate fromDate,
+            LocalDate toDate,
+            CenterSessionStatus excludedStatus);
+
     List<CenterSession> findByTeacherIdAndSessionDateBetween(
             UUID teacherId, LocalDate fromDate, LocalDate toDate);
 

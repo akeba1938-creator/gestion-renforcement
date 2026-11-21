@@ -1058,6 +1058,119 @@ class CommunicationIntegrationTest {
                 .andExpect(status().isOk());
     }
 
+    @Test
+    void shouldAggregateSummaryViaSqlUpdateAtomicCountersOnMarkAllReadAndKeepContiguousEventSequences()
+            throws Exception {
+        School school = createSchool("COMM-M8", SchoolType.PRIVATE_SCHOOL);
+        createSubscription(school, SubscriptionStatus.ACTIVE, Instant.now().plus(30, ChronoUnit.DAYS));
+
+        User directorUser = createTenantUser(school.getId(), "dir@m8.sn", "Dir", "M8", RoleCode.DIRECTOR);
+        User parentUser = createTenantUser(school.getId(), "parent@m8.sn", "Aminata", "Diallo", RoleCode.PARENT);
+        String directorToken = tenantTokenForUser(school.getId(), directorUser.getId(), RoleCode.DIRECTOR);
+        String parentToken = tenantTokenForUser(school.getId(), parentUser.getId(), RoleCode.PARENT);
+
+        // 1. Synthèse SQL sur tenant vierge -> tous compteurs à 0
+        mockMvc.perform(get("/api/v1/communication/summary")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(directorToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalCampaigns").value(0))
+                .andExpect(jsonPath("$.totalDeliveries").value(0))
+                .andExpect(jsonPath("$.totalEstimatedCostXof").value(0))
+                .andExpect(jsonPath("$.totalActualCostXof").value(0))
+                .andExpect(jsonPath("$.deliveriesByStatus.QUEUED").value(0))
+                .andExpect(jsonPath("$.deliveriesByChannel.IN_APP").value(0));
+
+        UUID guardianId = createGuardianViaApi(
+                directorToken, null, "Aminata", "Diallo", "+221777770001", "parent@m8.sn");
+        linkUserToGuardian(school.getId(), guardianId, parentUser.getId());
+
+        // 2. Campagne IN_APP immédiate + campagne IN_APP brouillon puis dispatch différé (découplé)
+        MvcResult c1Res = mockMvc.perform(post("/api/v1/communication/campaigns")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(directorToken))
+                        .header("Idempotency-Key", "m8-inapp-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "title", "Info 1",
+                                "category", "GENERAL",
+                                "channel", "IN_APP",
+                                "audienceType", "GUARDIAN",
+                                "audienceTargetId", guardianId,
+                                "subject", "Objet 1",
+                                "body", "Message 1",
+                                "dispatchImmediately", true))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("COMPLETED"))
+                .andExpect(jsonPath("$.deliveredCount").value(1))
+                .andReturn();
+        UUID campaign1Id = UUID.fromString(readJson(c1Res).get("id").asString());
+
+        MvcResult c2DraftRes = mockMvc.perform(post("/api/v1/communication/campaigns")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(directorToken))
+                        .header("Idempotency-Key", "m8-inapp-2")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "title", "Info 2",
+                                "category", "ANNOUNCEMENT",
+                                "channel", "IN_APP",
+                                "audienceType", "GUARDIAN",
+                                "audienceTargetId", guardianId,
+                                "subject", "Objet 2",
+                                "body", "Message 2",
+                                "dispatchImmediately", false))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("DRAFT"))
+                .andReturn();
+        UUID campaign2Id = UUID.fromString(readJson(c2DraftRes).get("id").asString());
+
+        mockMvc.perform(post("/api/v1/communication/campaigns/" + campaign2Id + "/dispatch")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(directorToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("COMPLETED"))
+                .andExpect(jsonPath("$.deliveredCount").value(1));
+
+        // 3. Lecture groupée (markAllAsRead) -> incréments atomiques SQL sur les 2 campagnes + séquences contiguës 1, 2, 3
+        mockMvc.perform(post("/api/v1/communication/inbox/read-all")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(parentToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.markedCount").value(2));
+
+        for (UUID cid : List.of(campaign1Id, campaign2Id)) {
+            mockMvc.perform(get("/api/v1/communication/campaigns/" + cid)
+                            .header(HttpHeaders.AUTHORIZATION, bearer(directorToken)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.deliveredCount").value(0))
+                    .andExpect(jsonPath("$.readCount").value(1))
+                    .andExpect(jsonPath("$.status").value("COMPLETED"));
+
+            MvcResult deliveriesRes = mockMvc.perform(get("/api/v1/communication/campaigns/" + cid + "/deliveries")
+                            .header(HttpHeaders.AUTHORIZATION, bearer(directorToken)))
+                    .andExpect(status().isOk())
+                    .andReturn();
+            UUID deliveryId = UUID.fromString(readJson(deliveriesRes).get("content").get(0).get("id").asString());
+
+            MvcResult eventsRes = mockMvc.perform(get("/api/v1/communication/deliveries/" + deliveryId + "/events")
+                            .header(HttpHeaders.AUTHORIZATION, bearer(directorToken)))
+                    .andExpect(status().isOk())
+                    .andReturn();
+            JsonNode events = readJson(eventsRes);
+            assertThat(events.size()).isEqualTo(3);
+            assertThat(events.get(0).get("sequenceNo").asInt()).isEqualTo(1);
+            assertThat(events.get(1).get("sequenceNo").asInt()).isEqualTo(2);
+            assertThat(events.get(2).get("sequenceNo").asInt()).isEqualTo(3);
+        }
+
+        // 4. Vérification de l'agrégation SQL sur /summary
+        mockMvc.perform(get("/api/v1/communication/summary")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(directorToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalCampaigns").value(2))
+                .andExpect(jsonPath("$.totalDeliveries").value(2))
+                .andExpect(jsonPath("$.deliveriesByStatus.READ").value(2))
+                .andExpect(jsonPath("$.deliveriesByStatus.DELIVERED").value(0))
+                .andExpect(jsonPath("$.deliveriesByChannel.IN_APP").value(2))
+                .andExpect(jsonPath("$.totalActualCostXof").value(0));
+    }
+
     // --- Helpers ---
 
     private School createSchool(String prefix, SchoolType type) {

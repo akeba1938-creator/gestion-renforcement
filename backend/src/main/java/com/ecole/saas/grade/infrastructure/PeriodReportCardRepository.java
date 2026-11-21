@@ -1,6 +1,7 @@
 package com.ecole.saas.grade.infrastructure;
 
 import com.ecole.saas.grade.domain.PeriodReportCard;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -11,6 +12,9 @@ public interface PeriodReportCardRepository
         extends JpaRepository<PeriodReportCard, UUID>, JpaSpecificationExecutor<PeriodReportCard> {
 
     Optional<PeriodReportCard> findByEvaluationPeriodIdAndStudentId(UUID evaluationPeriodId, UUID studentId);
+
+    List<PeriodReportCard> findByEvaluationPeriodIdAndStudentIdIn(
+            UUID evaluationPeriodId, Collection<UUID> studentIds);
 
     List<PeriodReportCard> findByEvaluationPeriodIdAndClassRoomIdOrderByRankInClassAscStudentIdAsc(
             UUID evaluationPeriodId, UUID classRoomId);

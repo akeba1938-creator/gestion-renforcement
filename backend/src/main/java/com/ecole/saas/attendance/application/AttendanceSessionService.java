@@ -38,6 +38,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
@@ -166,7 +167,7 @@ public class AttendanceSessionService {
             }
             return cb.and(predicates.toArray(Predicate[]::new));
         };
-        return sessionRepository.findAll(spec, pageable).map(s -> toSessionView(s, List.of()));
+        return enrichSessionPage(sessionRepository.findAll(spec, pageable));
     }
 
     @PreAuthorize(AttendanceRoles.READ_ROLES)
@@ -705,6 +706,42 @@ public class AttendanceSessionService {
                         "La feuille d'appel demandée est introuvable."));
     }
 
+    private Page<AttendanceSessionView> enrichSessionPage(Page<AttendanceSession> page) {
+        if (page.isEmpty()) {
+            return page.map(s -> buildSessionView(s, null, null, null, null, List.of()));
+        }
+        List<AttendanceSession> content = page.getContent();
+        Set<UUID> classRoomIds = content.stream()
+                .map(AttendanceSession::getClassRoomId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Set<UUID> periodIds = content.stream()
+                .map(AttendanceSession::getEvaluationPeriodId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Set<UUID> subjectIds = content.stream()
+                .map(AttendanceSession::getSubjectId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Set<UUID> teacherIds = content.stream()
+                .map(AttendanceSession::getTeacherId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+
+        Map<UUID, ClassRoomSummary> roomsById = academicStructurePort.findClassRoomsByIds(classRoomIds);
+        Map<UUID, EvaluationPeriodSummary> periodsById = academicStructurePort.findEvaluationPeriodsByIds(periodIds);
+        Map<UUID, SubjectSummary> subjectsById = academicStructurePort.findSubjectsByIds(subjectIds);
+        Map<UUID, TeacherSummary> teachersById = teacherDirectoryPort.findTeachersByIds(teacherIds);
+
+        return page.map(session -> buildSessionView(
+                session,
+                roomsById.get(session.getClassRoomId()),
+                session.getEvaluationPeriodId() != null ? periodsById.get(session.getEvaluationPeriodId()) : null,
+                session.getSubjectId() != null ? subjectsById.get(session.getSubjectId()) : null,
+                session.getTeacherId() != null ? teachersById.get(session.getTeacherId()) : null,
+                List.of()));
+    }
+
     private AttendanceSessionView toSessionView(AttendanceSession session, List<AttendanceRecordView> records) {
         ClassRoomSummary room = academicStructurePort.findClassRoomById(session.getClassRoomId()).orElse(null);
         EvaluationPeriodSummary period = session.getEvaluationPeriodId() != null
@@ -716,6 +753,16 @@ public class AttendanceSessionService {
         TeacherSummary teacher = session.getTeacherId() != null
                 ? teacherDirectoryPort.findTeacherById(session.getTeacherId()).orElse(null)
                 : null;
+        return buildSessionView(session, room, period, subject, teacher, records);
+    }
+
+    private static AttendanceSessionView buildSessionView(
+            AttendanceSession session,
+            ClassRoomSummary room,
+            EvaluationPeriodSummary period,
+            SubjectSummary subject,
+            TeacherSummary teacher,
+            List<AttendanceRecordView> records) {
         return new AttendanceSessionView(
                 session,
                 room != null ? room.code() : null,

@@ -12,11 +12,26 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Query;
 
 public interface MessageDeliveryRepository
         extends JpaRepository<MessageDelivery, UUID>, JpaSpecificationExecutor<MessageDelivery> {
 
+    interface DeliveryStatusCount {
+        DeliveryStatus getStatus();
+
+        long getDeliveryCount();
+    }
+
+    interface DeliveryChannelCount {
+        CommunicationChannel getChannel();
+
+        long getDeliveryCount();
+    }
+
     List<MessageDelivery> findByCampaignIdOrderByCreatedAtAsc(UUID campaignId);
+
+    List<MessageDelivery> findByCampaignIdAndStatusOrderByCreatedAtAsc(UUID campaignId, DeliveryStatus status);
 
     Page<MessageDelivery> findByCampaignId(UUID campaignId, Pageable pageable);
 
@@ -60,4 +75,10 @@ public interface MessageDeliveryRepository
     long countByStatus(DeliveryStatus status);
 
     long countByChannel(CommunicationChannel channel);
+
+    @Query("SELECT d.status AS status, COUNT(d.id) AS deliveryCount FROM MessageDelivery d GROUP BY d.status")
+    List<DeliveryStatusCount> countGroupedByStatus();
+
+    @Query("SELECT d.channel AS channel, COUNT(d.id) AS deliveryCount FROM MessageDelivery d GROUP BY d.channel")
+    List<DeliveryChannelCount> countGroupedByChannel();
 }

@@ -41,6 +41,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
@@ -173,7 +174,7 @@ public class EvaluationService {
             }
             return cb.and(predicates.toArray(Predicate[]::new));
         };
-        return evaluationRepository.findAll(spec, pageable).map(this::toEvaluationView);
+        return enrichEvaluationPage(evaluationRepository.findAll(spec, pageable));
     }
 
     @PreAuthorize(GradeRoles.READ_ROLES)
@@ -558,6 +559,41 @@ public class EvaluationService {
                         "La période d'évaluation demandée est introuvable."));
     }
 
+    private Page<EvaluationView> enrichEvaluationPage(Page<Evaluation> page) {
+        if (page.isEmpty()) {
+            return page.map(e -> buildEvaluationView(e, null, null, null, null));
+        }
+        List<Evaluation> content = page.getContent();
+        Set<UUID> periodIds = content.stream()
+                .map(Evaluation::getEvaluationPeriodId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Set<UUID> classRoomIds = content.stream()
+                .map(Evaluation::getClassRoomId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Set<UUID> subjectIds = content.stream()
+                .map(Evaluation::getSubjectId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Set<UUID> teacherIds = content.stream()
+                .map(Evaluation::getTeacherId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+
+        Map<UUID, EvaluationPeriodSummary> periodsById = academicStructurePort.findEvaluationPeriodsByIds(periodIds);
+        Map<UUID, ClassRoomSummary> roomsById = academicStructurePort.findClassRoomsByIds(classRoomIds);
+        Map<UUID, SubjectSummary> subjectsById = academicStructurePort.findSubjectsByIds(subjectIds);
+        Map<UUID, TeacherSummary> teachersById = teacherDirectoryPort.findTeachersByIds(teacherIds);
+
+        return page.map(evaluation -> buildEvaluationView(
+                evaluation,
+                periodsById.get(evaluation.getEvaluationPeriodId()),
+                roomsById.get(evaluation.getClassRoomId()),
+                subjectsById.get(evaluation.getSubjectId()),
+                evaluation.getTeacherId() != null ? teachersById.get(evaluation.getTeacherId()) : null));
+    }
+
     private EvaluationView toEvaluationView(Evaluation evaluation) {
         EvaluationPeriodSummary period = academicStructurePort
                 .findEvaluationPeriodById(evaluation.getEvaluationPeriodId()).orElse(null);
@@ -566,6 +602,15 @@ public class EvaluationService {
         TeacherSummary teacher = evaluation.getTeacherId() != null
                 ? teacherDirectoryPort.findTeacherById(evaluation.getTeacherId()).orElse(null)
                 : null;
+        return buildEvaluationView(evaluation, period, room, subject, teacher);
+    }
+
+    private static EvaluationView buildEvaluationView(
+            Evaluation evaluation,
+            EvaluationPeriodSummary period,
+            ClassRoomSummary room,
+            SubjectSummary subject,
+            TeacherSummary teacher) {
         return new EvaluationView(
                 evaluation,
                 period != null ? period.code() : null,

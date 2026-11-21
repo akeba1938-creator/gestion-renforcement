@@ -84,7 +84,19 @@ class CenterDirectoryQueryService implements CenterDirectoryPort {
     public List<CenterGroupSummary> findActiveGroupsByAcademicYear(UUID academicYearId) {
         List<CenterGroup> groups =
                 groupRepository.findByAcademicYearIdAndStatusOrderByCodeAsc(academicYearId, CenterGroupStatus.ACTIVE);
-        return groups.stream().map(this::toGroupSummary).toList();
+        if (groups.isEmpty()) {
+            return List.of();
+        }
+        Set<UUID> groupIds = groups.stream().map(CenterGroup::getId).collect(Collectors.toSet());
+        Map<UUID, Long> activeCountsByGroup = enrollmentRepository
+                .countByGroupIdInAndStatus(groupIds, CenterGroupEnrollmentStatus.ACTIVE)
+                .stream()
+                .collect(Collectors.toMap(
+                        CenterGroupEnrollmentRepository.GroupEnrollmentCount::getGroupId,
+                        CenterGroupEnrollmentRepository.GroupEnrollmentCount::getEnrollmentCount));
+        return groups.stream()
+                .map(group -> toGroupSummary(group, activeCountsByGroup.getOrDefault(group.getId(), 0L)))
+                .toList();
     }
 
     @Override
@@ -280,6 +292,10 @@ class CenterDirectoryQueryService implements CenterDirectoryPort {
     private CenterGroupSummary toGroupSummary(CenterGroup group) {
         long activeCount =
                 enrollmentRepository.countByGroupIdAndStatus(group.getId(), CenterGroupEnrollmentStatus.ACTIVE);
+        return toGroupSummary(group, activeCount);
+    }
+
+    private CenterGroupSummary toGroupSummary(CenterGroup group, long activeCount) {
         return new CenterGroupSummary(
                 group.getId(),
                 group.getAcademicYearId(),
