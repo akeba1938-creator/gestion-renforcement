@@ -9,6 +9,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
@@ -68,6 +69,10 @@ public class FeeAdjustment extends TenantScopedEntity {
 
     @Column(name = "decision_note", length = 500)
     private String decisionNote;
+
+    @Version
+    @Column(name = "version", nullable = false)
+    private long version;
 
     protected FeeAdjustment() {
     }
@@ -150,6 +155,10 @@ public class FeeAdjustment extends TenantScopedEntity {
     public void approve(UUID actorId, Instant decidedAt, String decisionNote) {
         requirePending();
         UUID validatedActor = Objects.requireNonNull(actorId, "Le valideur est obligatoire.");
+        if (validatedActor.equals(this.requestedBy)) {
+            throw new FinanceForbiddenException(
+                    "L'auteur d'une demande de remise ou bourse ne peut pas l'approuver lui-même.");
+        }
         Instant validatedDecidedAt = Objects.requireNonNull(decidedAt, "La date de décision est obligatoire.");
         String validatedNote = normalizeOptional(decisionNote);
         this.status = ApprovalStatus.APPROVED;
@@ -264,5 +273,9 @@ public class FeeAdjustment extends TenantScopedEntity {
 
     public String getDecisionNote() {
         return decisionNote;
+    }
+
+    public long getVersion() {
+        return version;
     }
 }

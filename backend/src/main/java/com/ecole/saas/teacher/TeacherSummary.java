@@ -14,6 +14,7 @@ public record TeacherSummary(
         String teacherType,
         String phone,
         String email,
+        Long hourlyRateXof,
         String status,
         boolean active) {
 }

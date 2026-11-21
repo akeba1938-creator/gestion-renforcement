@@ -12,6 +12,7 @@ import com.ecole.saas.center.domain.CenterConflictException;
 import com.ecole.saas.center.domain.CenterGroup;
 import com.ecole.saas.center.domain.CenterGroupEnrollment;
 import com.ecole.saas.center.domain.CenterGroupEnrollmentStatus;
+import com.ecole.saas.center.domain.CenterGroupTutor;
 import com.ecole.saas.center.domain.CenterNotFoundException;
 import com.ecole.saas.center.domain.CenterPackConsumptionPolicy;
 import com.ecole.saas.center.domain.CenterScheduleConflictChecker;
@@ -25,6 +26,7 @@ import com.ecole.saas.center.domain.CenterStudentPackStatus;
 import com.ecole.saas.center.domain.CenterValidationException;
 import com.ecole.saas.center.infrastructure.CenterGroupEnrollmentRepository;
 import com.ecole.saas.center.infrastructure.CenterGroupRepository;
+import com.ecole.saas.center.infrastructure.CenterGroupTutorRepository;
 import com.ecole.saas.center.infrastructure.CenterScheduleSlotRepository;
 import com.ecole.saas.center.infrastructure.CenterSessionAttendanceRepository;
 import com.ecole.saas.center.infrastructure.CenterSessionRepository;
@@ -34,14 +36,15 @@ import com.ecole.saas.student.StudentSummary;
 import com.ecole.saas.teacher.TeacherDirectoryPort;
 import com.ecole.saas.teacher.TeacherSummary;
 import jakarta.persistence.criteria.Predicate;
+import java.time.Clock;
 import java.time.DayOfWeek;
-import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
@@ -61,6 +64,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class CenterSessionService {
 
     private final CenterGroupRepository groupRepository;
+    private final CenterGroupTutorRepository groupTutorRepository;
     private final CenterGroupEnrollmentRepository enrollmentRepository;
     private final CenterScheduleSlotRepository scheduleSlotRepository;
     private final CenterSessionRepository sessionRepository;
@@ -73,9 +77,11 @@ public class CenterSessionService {
     private final CenterSchoolGuard schoolGuard;
     private final CenterTutorScopeGuard tutorScopeGuard;
     private final AuditLogPort auditLogPort;
+    private final Clock clock;
 
     public CenterSessionService(
             CenterGroupRepository groupRepository,
+            CenterGroupTutorRepository groupTutorRepository,
             CenterGroupEnrollmentRepository enrollmentRepository,
             CenterScheduleSlotRepository scheduleSlotRepository,
             CenterSessionRepository sessionRepository,
@@ -87,8 +93,10 @@ public class CenterSessionService {
             CenterSubscriptionGuard subscriptionGuard,
             CenterSchoolGuard schoolGuard,
             CenterTutorScopeGuard tutorScopeGuard,
-            AuditLogPort auditLogPort) {
+            AuditLogPort auditLogPort,
+            Clock clock) {
         this.groupRepository = groupRepository;
+        this.groupTutorRepository = groupTutorRepository;
         this.enrollmentRepository = enrollmentRepository;
         this.scheduleSlotRepository = scheduleSlotRepository;
         this.sessionRepository = sessionRepository;
@@ -101,6 +109,7 @@ public class CenterSessionService {
         this.schoolGuard = schoolGuard;
         this.tutorScopeGuard = tutorScopeGuard;
         this.auditLogPort = auditLogPort;
+        this.clock = clock;
     }
 
     // --- Créneaux récurrents ---
@@ -380,7 +389,8 @@ public class CenterSessionService {
         schoolGuard.requireActiveSchoolForWrite();
         CenterSession session = requireSession(sessionId);
         tutorScopeGuard.assertCanAccessSession(session);
-        session.complete(actorId, Instant.now(), topic, notes);
+        Long hourlyRateSnapshot = resolveHourlyRateSnapshot(session);
+        session.complete(actorId, clock.instant(), topic, notes, hourlyRateSnapshot);
         CenterSession saved = sessionRepository.save(session);
         auditLogPort.recordTenantEvent(AuditRecordCommand.success(
                 AuditCategory.CENTER,
@@ -390,6 +400,37 @@ public class CenterSessionService {
                 "Clôture d'une séance de renforcement.",
                 Map.of("groupId", saved.getGroupId().toString(), "sessionDate", saved.getSessionDate().toString())));
         return toSessionView(saved, true);
+    }
+
+    private Long resolveHourlyRateSnapshot(CenterSession session) {
+        if (session.getTeacherId() == null) {
+            return null;
+        }
+        List<CenterGroupTutor> assignments = groupTutorRepository
+                .findByGroupIdAndTeacherIdOrderByActiveDescUpdatedAtDesc(
+                        session.getGroupId(), session.getTeacherId());
+        if (session.getSubjectId() != null) {
+            for (CenterGroupTutor assignment : assignments) {
+                if (assignment.isActive()
+                        && Objects.equals(session.getSubjectId(), assignment.getSubjectId())
+                        && assignment.getHourlyRateXof() != null) {
+                    return assignment.getHourlyRateXof();
+                }
+            }
+        }
+        for (CenterGroupTutor assignment : assignments) {
+            if (assignment.isActive() && assignment.getHourlyRateXof() != null) {
+                return assignment.getHourlyRateXof();
+            }
+        }
+        for (CenterGroupTutor assignment : assignments) {
+            if (assignment.getHourlyRateXof() != null) {
+                return assignment.getHourlyRateXof();
+            }
+        }
+        return teacherDirectoryPort.findTeacherById(session.getTeacherId())
+                .map(TeacherSummary::hourlyRateXof)
+                .orElse(null);
     }
 
     @PreAuthorize(CenterRoles.GROUP_MANAGE_ROLES)
@@ -405,7 +446,7 @@ public class CenterSessionService {
                 attendanceRepository.findBySessionIdOrderByCreatedAtAsc(sessionId);
         for (CenterSessionAttendance attendance : existingAttendances) {
             if (attendance.getConsumedStudentPackId() != null) {
-                studentPackRepository.findById(attendance.getConsumedStudentPackId()).ifPresent(pack -> {
+                studentPackRepository.findByIdForUpdate(attendance.getConsumedStudentPackId()).ifPresent(pack -> {
                     CenterPackConsumptionPolicy.refundOnSessionCancellation(
                             attendance, pack, session.getSessionDate());
                     studentPackRepository.save(pack);
@@ -507,9 +548,10 @@ public class CenterSessionService {
             }
 
             CenterStudentPack previousPack = previousPackId != null
-                    ? studentPackRepository.findById(previousPackId).orElse(null)
+                    ? studentPackRepository.findByIdForUpdate(previousPackId).orElse(null)
                     : null;
-            CenterStudentPack eligiblePack = resolveEligiblePack(enrollment, session.getGroupId(), session.getSessionDate());
+            CenterStudentPack eligiblePack = resolveEligiblePack(
+                    enrollment, session.getGroupId(), session.getSessionDate(), previousPack);
 
             CenterPackConsumptionPolicy.reconcileAttendancePack(
                     attendance, previousPack, eligiblePack, session.getSessionDate());
@@ -537,21 +579,34 @@ public class CenterSessionService {
     }
 
     private CenterStudentPack resolveEligiblePack(
-            CenterGroupEnrollment enrollment, UUID groupId, LocalDate sessionDate) {
+            CenterGroupEnrollment enrollment,
+            UUID groupId,
+            LocalDate sessionDate,
+            CenterStudentPack alreadyLockedPack) {
         if (enrollment.getStudentPackId() != null) {
-            return studentPackRepository.findById(enrollment.getStudentPackId()).orElse(null);
+            if (alreadyLockedPack != null && enrollment.getStudentPackId().equals(alreadyLockedPack.getId())) {
+                return alreadyLockedPack;
+            }
+            return studentPackRepository.findByIdForUpdate(enrollment.getStudentPackId()).orElse(null);
         }
         List<CenterStudentPack> activePacks = studentPackRepository
                 .findByStudentIdAndStatusOrderByStartDateAsc(
                         enrollment.getStudentId(), CenterStudentPackStatus.ACTIVE);
         // Préférer un pack explicitement lié à la cohorte, sinon un pack global élève valide à la date de séance
-        return activePacks.stream()
+        CenterStudentPack candidate = activePacks.stream()
                 .filter(p -> groupId.equals(p.getGroupId()) && p.isValidOnDate(sessionDate))
                 .findFirst()
                 .or(() -> activePacks.stream()
                         .filter(p -> p.getGroupId() == null && p.isValidOnDate(sessionDate))
                         .findFirst())
                 .orElse(null);
+        if (candidate == null) {
+            return null;
+        }
+        if (alreadyLockedPack != null && candidate.getId().equals(alreadyLockedPack.getId())) {
+            return alreadyLockedPack;
+        }
+        return studentPackRepository.findByIdForUpdate(candidate.getId()).orElse(null);
     }
 
     private void assertNoSlotConflicts(

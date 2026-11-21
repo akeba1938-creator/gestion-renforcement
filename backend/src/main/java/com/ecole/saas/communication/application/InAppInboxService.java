@@ -9,6 +9,7 @@ import com.ecole.saas.communication.domain.MessageDelivery;
 import com.ecole.saas.communication.infrastructure.CommunicationCampaignRepository;
 import com.ecole.saas.communication.infrastructure.DeliveryEventRepository;
 import com.ecole.saas.communication.infrastructure.MessageDeliveryRepository;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
@@ -34,16 +35,19 @@ public class InAppInboxService {
     private final DeliveryEventRepository deliveryEventRepository;
     private final CommunicationCampaignRepository campaignRepository;
     private final CommunicationSubscriptionGuard subscriptionGuard;
+    private final Clock clock;
 
     public InAppInboxService(
             MessageDeliveryRepository deliveryRepository,
             DeliveryEventRepository deliveryEventRepository,
             CommunicationCampaignRepository campaignRepository,
-            CommunicationSubscriptionGuard subscriptionGuard) {
+            CommunicationSubscriptionGuard subscriptionGuard,
+            Clock clock) {
         this.deliveryRepository = deliveryRepository;
         this.deliveryEventRepository = deliveryEventRepository;
         this.campaignRepository = campaignRepository;
         this.subscriptionGuard = subscriptionGuard;
+        this.clock = clock;
     }
 
     @PreAuthorize(CommunicationRoles.INBOX_ROLES)
@@ -96,7 +100,7 @@ public class InAppInboxService {
         if (delivery.getStatus() == DeliveryStatus.READ) {
             return delivery;
         }
-        Instant now = Instant.now();
+        Instant now = clock.instant();
         DeliveryStatus previous = delivery.markRead(now);
         MessageDelivery saved = deliveryRepository.save(delivery);
         appendEvent(saved, previous, DeliveryStatus.READ, "READ", "Notification marquée comme lue dans la boîte de réception.", now);
@@ -113,7 +117,7 @@ public class InAppInboxService {
         if (unread.isEmpty()) {
             return 0;
         }
-        Instant now = Instant.now();
+        Instant now = clock.instant();
         Set<UUID> touchedCampaignIds = new HashSet<>();
         int updated = 0;
         for (MessageDelivery delivery : unread) {

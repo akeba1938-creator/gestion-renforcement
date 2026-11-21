@@ -12,7 +12,11 @@ public interface CenterGroupTutorRepository extends JpaRepository<CenterGroupTut
 
     List<CenterGroupTutor> findByGroupIdAndActiveTrue(UUID groupId);
 
+    List<CenterGroupTutor> findByTeacherId(UUID teacherId);
+
     List<CenterGroupTutor> findByTeacherIdAndActiveTrue(UUID teacherId);
+
+    List<CenterGroupTutor> findByGroupIdAndTeacherIdOrderByActiveDescUpdatedAtDesc(UUID groupId, UUID teacherId);
 
     Optional<CenterGroupTutor> findByGroupIdAndLeadTutorTrueAndActiveTrue(UUID groupId);
 

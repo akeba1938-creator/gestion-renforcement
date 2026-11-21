@@ -187,7 +187,7 @@ public class PaymentReversalService {
                     "Cet encaissement a déjà été contre-passé.");
         }
 
-        StudentInvoice invoice = invoiceRepository.findById(payment.getInvoiceId())
+        StudentInvoice invoice = invoiceRepository.findByIdForUpdate(payment.getInvoiceId())
                 .orElseThrow(() -> new FinanceNotFoundException(
                         "invoice-not-found", "Facture introuvable", "La facture associée est introuvable."));
 

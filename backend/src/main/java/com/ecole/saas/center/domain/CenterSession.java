@@ -78,6 +78,9 @@ public class CenterSession extends TenantScopedEntity {
     @Column(name = "notes", length = 500)
     private String notes;
 
+    @Column(name = "hourly_rate_xof_snapshot")
+    private Long hourlyRateXofSnapshot;
+
     protected CenterSession() {
     }
 
@@ -124,11 +127,22 @@ public class CenterSession extends TenantScopedEntity {
     }
 
     public void complete(UUID actorId, Instant now, String topicOverride, String notesOverride) {
+        complete(actorId, now, topicOverride, notesOverride, null);
+    }
+
+    public void complete(
+            UUID actorId, Instant now, String topicOverride, String notesOverride, Long hourlyRateXofSnapshot) {
         if (this.status != CenterSessionStatus.SCHEDULED && this.status != CenterSessionStatus.IN_PROGRESS) {
             throw new CenterConflictException(
                     "center-session-invalid-transition",
                     "Transition de séance invalide",
                     "Seule une séance SCHEDULED ou IN_PROGRESS peut être clôturée (statut actuel : " + this.status + ").");
+        }
+        if (hourlyRateXofSnapshot != null && hourlyRateXofSnapshot < 0L) {
+            throw new CenterValidationException(
+                    "center-session-invalid",
+                    "Taux horaire invalide",
+                    "Le taux horaire figé à la clôture en FCFA doit être positif ou nul.");
         }
         if (topicOverride != null && !topicOverride.isBlank()) {
             this.topic = normalizeOptional(topicOverride, 200);
@@ -139,6 +153,7 @@ public class CenterSession extends TenantScopedEntity {
         this.status = CenterSessionStatus.COMPLETED;
         this.completedBy = Objects.requireNonNull(actorId, "L'acteur de clôture est obligatoire.");
         this.completedAt = Objects.requireNonNull(now, "L'horodatage de clôture est obligatoire.");
+        this.hourlyRateXofSnapshot = hourlyRateXofSnapshot;
     }
 
     public void cancel(String reason) {
@@ -259,5 +274,9 @@ public class CenterSession extends TenantScopedEntity {
 
     public String getNotes() {
         return notes;
+    }
+
+    public Long getHourlyRateXofSnapshot() {
+        return hourlyRateXofSnapshot;
     }
 }

@@ -9,7 +9,7 @@ public record ChangeSubscriptionPlanRequest(
         @NotNull(message = "L'identifiant du nouveau forfait est obligatoire.")
         UUID planId,
         BillingCycle billingCycle,
-        boolean resetExtraQuotas,
+        Boolean resetExtraQuotas,
         @Size(max = 255, message = "Le motif ne peut pas dépasser 255 caractères.")
         String reason) {
 }

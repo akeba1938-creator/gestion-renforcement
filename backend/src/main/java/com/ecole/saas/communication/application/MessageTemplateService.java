@@ -7,6 +7,7 @@ import com.ecole.saas.audit.AuditRecordCommand;
 import com.ecole.saas.communication.CommunicationChannel;
 import com.ecole.saas.communication.MessageCategory;
 import com.ecole.saas.communication.domain.CommunicationConflictException;
+import com.ecole.saas.communication.domain.CommunicationForbiddenException;
 import com.ecole.saas.communication.domain.CommunicationNotFoundException;
 import com.ecole.saas.communication.domain.MessageTemplate;
 import com.ecole.saas.communication.domain.SmsSegmentCalculator;
@@ -154,7 +155,7 @@ public class MessageTemplateService {
             String query,
             Pageable pageable) {
         subscriptionGuard.requireReadAccess();
-        Boolean effectiveActive = (!scopeGuard.hasFullAdminScope() && active == null) ? Boolean.TRUE : active;
+        Boolean effectiveActive = scopeGuard.hasFullAdminScope() ? active : Boolean.TRUE;
         Specification<MessageTemplate> spec = (root, cq, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
             if (channel != null) {
@@ -181,7 +182,12 @@ public class MessageTemplateService {
     @Transactional(readOnly = true)
     public MessageTemplate getTemplate(UUID templateId) {
         subscriptionGuard.requireReadAccess();
-        return requireTemplate(templateId);
+        MessageTemplate template = requireTemplate(templateId);
+        if (!scopeGuard.hasFullAdminScope() && !template.isActive()) {
+            throw new CommunicationForbiddenException(
+                    "Vous ne pouvez consulter que des modèles de messages actifs.");
+        }
+        return template;
     }
 
     @PreAuthorize(CommunicationRoles.TEMPLATE_READ_ROLES)
@@ -189,6 +195,10 @@ public class MessageTemplateService {
     public TemplatePreview previewTemplate(UUID templateId, Map<String, String> variables, boolean strict) {
         subscriptionGuard.requireReadAccess();
         MessageTemplate template = requireTemplate(templateId);
+        if (!scopeGuard.hasFullAdminScope() && !template.isActive()) {
+            throw new CommunicationForbiddenException(
+                    "Vous ne pouvez prévisualiser que des modèles de messages actifs.");
+        }
         String renderedSubject = TemplateRenderer.render(template.getSubjectTemplate(), variables, strict);
         String renderedBody = TemplateRenderer.render(template.getBodyTemplate(), variables, strict);
         int smsSegments = template.getChannel() == CommunicationChannel.SMS

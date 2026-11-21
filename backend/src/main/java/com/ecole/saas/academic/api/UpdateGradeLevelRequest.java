@@ -12,6 +12,7 @@ public record UpdateGradeLevelRequest(
         String name,
         @NotNull(message = "Le cycle pédagogique est obligatoire.")
         EducationCycle cycle,
+        @NotNull(message = "L'ordre d'affichage est obligatoire.")
         @Min(value = 1, message = "L'ordre d'affichage doit être strictement positif.")
-        int displayOrder) {
+        Integer displayOrder) {
 }

@@ -8,6 +8,8 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.PreRemove;
+import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.Objects;
@@ -105,6 +107,17 @@ public class LedgerEntry extends TenantScopedEntity {
      */
     public long signedBalanceDeltaXof() {
         return this.direction == LedgerDirection.DEBIT ? this.amountXof : -this.amountXof;
+    }
+
+    @Override
+    @PreUpdate
+    protected void onUpdate() {
+        throw new UnsupportedOperationException("Le registre comptable est strictement immuable (ajout seul).");
+    }
+
+    @PreRemove
+    protected void onRemove() {
+        throw new UnsupportedOperationException("Les écritures comptables ne peuvent jamais être supprimées.");
     }
 
     public UUID getId() {

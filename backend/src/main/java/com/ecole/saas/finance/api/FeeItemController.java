@@ -71,7 +71,7 @@ public class FeeItemController {
                 request.category(),
                 request.frequency(),
                 request.amountXof(),
-                request.mandatory(),
+                Boolean.TRUE.equals(request.mandatory()),
                 request.description());
         return ResponseEntity.created(URI.create("/api/v1/finance/fee-items/" + created.getId()))
                 .cacheControl(CacheControl.noStore())
@@ -89,7 +89,7 @@ public class FeeItemController {
                 request.category(),
                 request.frequency(),
                 request.amountXof(),
-                request.mandatory(),
+                Boolean.TRUE.equals(request.mandatory()),
                 request.description());
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())

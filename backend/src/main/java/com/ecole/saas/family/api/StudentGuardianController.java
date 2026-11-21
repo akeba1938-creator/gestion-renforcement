@@ -79,11 +79,11 @@ public class StudentGuardianController {
                 studentId,
                 linkId,
                 request.relationshipType(),
-                request.primaryContact(),
-                request.financialResponsible(),
-                request.legalCustody(),
-                request.emergencyContact(),
-                request.authorizedPickup(),
+                Boolean.TRUE.equals(request.primaryContact()),
+                Boolean.TRUE.equals(request.financialResponsible()),
+                Boolean.TRUE.equals(request.legalCustody()),
+                Boolean.TRUE.equals(request.emergencyContact()),
+                Boolean.TRUE.equals(request.authorizedPickup()),
                 request.notes());
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())

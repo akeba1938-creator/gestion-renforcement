@@ -8,6 +8,8 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.PreRemove;
+import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.Objects;
@@ -110,13 +112,29 @@ public class Payment extends TenantScopedEntity {
             long amountXof,
             PaymentMethod paymentMethod,
             String externalReference,
-            UUID requestedScheduleId) {
+            UUID requestedScheduleId,
+            UUID payerGuardianId,
+            String notes) {
         String normalizedRef = normalizeOptional(externalReference, 120);
+        String normalizedNotes = normalizeOptional(notes, 500);
         return Objects.equals(this.invoiceId, invoiceId)
                 && this.amountXof == amountXof
                 && this.paymentMethod == paymentMethod
                 && Objects.equals(this.externalReference, normalizedRef)
-                && Objects.equals(this.requestedScheduleId, requestedScheduleId);
+                && Objects.equals(this.requestedScheduleId, requestedScheduleId)
+                && Objects.equals(this.payerGuardianId, payerGuardianId)
+                && Objects.equals(this.notes, normalizedNotes);
+    }
+
+    @Override
+    @PreUpdate
+    protected void onUpdate() {
+        throw new UnsupportedOperationException("Les encaissements sont strictement immuables (ajout seul).");
+    }
+
+    @PreRemove
+    protected void onRemove() {
+        throw new UnsupportedOperationException("Les encaissements ne peuvent jamais être supprimés.");
     }
 
     public static String normalizeIdempotencyKey(String rawKey) {

@@ -13,9 +13,11 @@ import com.ecole.saas.family.FamilyDirectoryPort;
 import com.ecole.saas.family.FamilySummary;
 import com.ecole.saas.family.GuardianSummary;
 import com.ecole.saas.family.StudentGuardianSummary;
+import com.ecole.saas.identity.application.UserAccountService;
 import com.ecole.saas.identity.domain.AccountRef;
 import com.ecole.saas.identity.domain.RoleCode;
 import com.ecole.saas.identity.domain.TokenIssuer;
+import com.ecole.saas.identity.domain.User;
 import com.ecole.saas.school.application.SchoolService;
 import com.ecole.saas.school.domain.School;
 import com.ecole.saas.school.domain.SchoolType;
@@ -35,6 +37,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -69,6 +76,7 @@ class StudentFamilyIntegrationTest {
     private final ObjectMapper objectMapper;
     private final SchoolService schoolService;
     private final SubscriptionService subscriptionService;
+    private final UserAccountService userAccountService;
     private final StudentDirectoryPort studentDirectoryPort;
     private final FamilyDirectoryPort familyDirectoryPort;
     private final TokenIssuer tokenIssuer;
@@ -81,6 +89,7 @@ class StudentFamilyIntegrationTest {
             ObjectMapper objectMapper,
             SchoolService schoolService,
             SubscriptionService subscriptionService,
+            UserAccountService userAccountService,
             StudentDirectoryPort studentDirectoryPort,
             FamilyDirectoryPort familyDirectoryPort,
             TokenIssuer tokenIssuer,
@@ -90,6 +99,7 @@ class StudentFamilyIntegrationTest {
         this.objectMapper = objectMapper;
         this.schoolService = schoolService;
         this.subscriptionService = subscriptionService;
+        this.userAccountService = userAccountService;
         this.studentDirectoryPort = studentDirectoryPort;
         this.familyDirectoryPort = familyDirectoryPort;
         this.tokenIssuer = tokenIssuer;
@@ -731,13 +741,22 @@ class StudentFamilyIntegrationTest {
             assertThat(jdbcTemplate.update("UPDATE families SET name = 'Piraté' WHERE id = ?", familyB)).isZero();
             assertThat(jdbcTemplate.update("UPDATE guardians SET first_name = 'Piraté' WHERE id = ?", guardianB)).isZero();
             assertThat(jdbcTemplate.update("UPDATE student_guardians SET notes = 'Piraté' WHERE id = ?", linkB)).isZero();
-
-            assertThat(jdbcTemplate.update("DELETE FROM student_guardians WHERE id = ?", linkB)).isZero();
-            assertThat(jdbcTemplate.update("DELETE FROM guardians WHERE id = ?", guardianB)).isZero();
-            assertThat(jdbcTemplate.update("DELETE FROM families WHERE id = ?", familyB)).isZero();
-            assertThat(jdbcTemplate.update("DELETE FROM student_enrollments WHERE id = ?", enrollmentB)).isZero();
-            assertThat(jdbcTemplate.update("DELETE FROM students WHERE id = ?", studentB)).isZero();
         }));
+
+        // V12 : REVOKE DELETE pour ecole_app sur les tables à archivage logique du module student/family
+        for (Map.Entry<String, UUID> target : List.of(
+                Map.entry("student_guardians", linkB),
+                Map.entry("guardians", guardianB),
+                Map.entry("families", familyB),
+                Map.entry("student_enrollments", enrollmentB),
+                Map.entry("students", studentB))) {
+            TenantContext.runWithTenant(tenantA, () -> assertThatThrownBy(() ->
+                    transactionTemplate.executeWithoutResult(status -> {
+                        jdbcTemplate.execute("SET LOCAL ROLE ecole_app");
+                        jdbcTemplate.update("DELETE FROM " + target.getKey() + " WHERE id = ?", target.getValue());
+                    }))
+                    .isInstanceOf(DataAccessException.class));
+        }
 
         // Tentative d'INSERT cross-tenant bloquée par WITH CHECK
         TenantContext.runWithTenant(tenantA, () -> assertThatThrownBy(() ->
@@ -771,6 +790,243 @@ class StudentFamilyIntegrationTest {
             assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM guardians", Integer.class)).isZero();
             assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM student_guardians", Integer.class)).isZero();
         });
+    }
+
+    @Test
+    void shouldRestrictTeacherScopeInFamilyModuleAndMaskNationalIdNumberByRole() throws Exception {
+        School school = createSchool("FAM-SCOPE", SchoolType.PRIVATE_SCHOOL);
+        createActiveSubscription(school, 50);
+        String directorToken = tenantToken(school.getId(), RoleCode.DIRECTOR);
+        String secretaryToken = tenantToken(school.getId(), RoleCode.SECRETARY);
+        String cashierToken = tenantToken(school.getId(), RoleCode.CASHIER);
+        String promoterToken = tenantToken(school.getId(), RoleCode.PROMOTER);
+
+        UUID yearId = createAcademicYearViaApi(
+                directorToken, "2026-2027", "Année 2026-2027", "2026-10-01", "2027-07-31");
+        mockMvc.perform(post("/api/v1/academic/years/" + yearId + "/activate")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(directorToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("makeCurrent", true))))
+                .andExpect(status().isOk());
+        UUID levelId = createGradeLevelViaApi(directorToken, "6E", "Sixième", "MIDDLE_SCHOOL", 1);
+        UUID class1Id = createClassViaApi(directorToken, yearId, levelId, "6E-A", "Sixième A", 30);
+        UUID class2Id = createClassViaApi(directorToken, yearId, levelId, "6E-B", "Sixième B", 30);
+
+        UUID student1Id = UUID.fromString(createStudentViaApi(
+                directorToken, "Aminata", "Sow", "FEMALE", "2014-03-10", null, "2026-10-01").get("id").asString());
+        UUID student2Id = UUID.fromString(createStudentViaApi(
+                directorToken, "Ibrahima", "Fall", "MALE", "2014-05-12", null, "2026-10-01").get("id").asString());
+        enrollStudentViaApi(directorToken, student1Id, yearId, class1Id, "NEW_ADMISSION", "2026-10-01");
+        enrollStudentViaApi(directorToken, student2Id, yearId, class2Id, "NEW_ADMISSION", "2026-10-01");
+
+        UUID family1Id = createFamilyViaApi(directorToken, "FAM-SOW", "Famille Sow", "+221771110001", "Dakar");
+        UUID family2Id = createFamilyViaApi(directorToken, "FAM-FALL", "Famille Fall", "+221771110002", "Thiès");
+
+        // Créer les tuteurs avec CNI (nationalIdNumber)
+        MvcResult g1Res = mockMvc.perform(post("/api/v1/guardians")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(directorToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "familyId", family1Id,
+                                "firstName", "Mamadou",
+                                "lastName", "Sow",
+                                "phone", "+221771110011",
+                                "nationalIdNumber", "CNI-SN-1985-0001"))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.nationalIdNumber").value("CNI-SN-1985-0001"))
+                .andReturn();
+        UUID guardian1Id = UUID.fromString(readJson(g1Res).get("id").asString());
+
+        MvcResult g2Res = mockMvc.perform(post("/api/v1/guardians")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(directorToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "familyId", family2Id,
+                                "firstName", "Fatou",
+                                "lastName", "Fall",
+                                "phone", "+221771110022",
+                                "nationalIdNumber", "CNI-SN-1987-0002"))))
+                .andExpect(status().isCreated())
+                .andReturn();
+        UUID guardian2Id = UUID.fromString(readJson(g2Res).get("id").asString());
+
+        linkGuardianViaApi(directorToken, student1Id, guardian1Id, "FATHER", true, true);
+        linkGuardianViaApi(directorToken, student2Id, guardian2Id, "MOTHER", true, true);
+
+        // Créer une matière sur class1Id, un compte utilisateur et un enseignant affecté uniquement à class1Id
+        MvcResult subjectRes = mockMvc.perform(post("/api/v1/academic/subjects")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(directorToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "code", "MATH",
+                                "name", "Mathématiques",
+                                "category", "SCIENTIFIC",
+                                "defaultCoefficient", 4))))
+                .andExpect(status().isCreated())
+                .andReturn();
+        UUID subjectId = UUID.fromString(readJson(subjectRes).get("id").asString());
+
+        mockMvc.perform(post("/api/v1/academic/classes/" + class1Id + "/subjects")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(directorToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("subjectId", subjectId, "coefficient", 4, "mandatory", true))))
+                .andExpect(status().isCreated());
+
+        User teacherUser = TenantContext.executeWithTenant(
+                TenantId.of(school.getId()),
+                () -> userAccountService.createUserWithRole(
+                        "prof.diallo@ecole.sn",
+                        "+221772223344",
+                        "Cheikh",
+                        "Diallo",
+                        "hash-fictif-teacher",
+                        RoleCode.TEACHER));
+        UUID teacherUserId = teacherUser.getId();
+        MvcResult teacherRes = mockMvc.perform(post("/api/v1/teachers")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(directorToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "employeeCode", "ENS-SCOPE-01",
+                                "firstName", "Cheikh",
+                                "lastName", "Diallo",
+                                "teacherType", "PERMANENT",
+                                "phone", "+221772223344",
+                                "userId", teacherUserId))))
+                .andExpect(status().isCreated())
+                .andReturn();
+        UUID teacherId = UUID.fromString(readJson(teacherRes).get("id").asString());
+
+        mockMvc.perform(post("/api/v1/teacher-assignments")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(directorToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "teacherId", teacherId,
+                                "academicYearId", yearId,
+                                "classRoomId", class1Id,
+                                "subjectId", subjectId,
+                                "homeroomTeacher", true,
+                                "weeklyHours", 4))))
+                .andExpect(status().isCreated());
+
+        String teacherToken = tokenIssuer
+                .issueAccessToken(AccountRef.user(teacherUserId, school.getId()), Set.of(RoleCode.TEACHER.name()))
+                .value();
+
+        // C1 — TEACHER ne voit que family1 et guardian1 dans les listes, et reçoit 403 sur family2 / guardian2 / student2
+        mockMvc.perform(get("/api/v1/families").header(HttpHeaders.AUTHORIZATION, bearer(teacherToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].id").value(family1Id.toString()));
+
+        mockMvc.perform(get("/api/v1/families/" + family1Id).header(HttpHeaders.AUTHORIZATION, bearer(teacherToken)))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/families/" + family2Id).header(HttpHeaders.AUTHORIZATION, bearer(teacherToken)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.type").value("urn:ecole:problem:family-scope-forbidden"));
+        mockMvc.perform(get("/api/v1/families/" + family2Id + "/guardians")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(teacherToken)))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/families/" + family2Id + "/students")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(teacherToken)))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(get("/api/v1/guardians").header(HttpHeaders.AUTHORIZATION, bearer(teacherToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].id").value(guardian1Id.toString()))
+                .andExpect(jsonPath("$.content[0].nationalIdNumber").isEmpty());
+
+        mockMvc.perform(get("/api/v1/guardians/" + guardian1Id).header(HttpHeaders.AUTHORIZATION, bearer(teacherToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.nationalIdNumber").isEmpty());
+        mockMvc.perform(get("/api/v1/guardians/" + guardian2Id).header(HttpHeaders.AUTHORIZATION, bearer(teacherToken)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.type").value("urn:ecole:problem:family-scope-forbidden"));
+        mockMvc.perform(get("/api/v1/guardians/" + guardian2Id + "/students")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(teacherToken)))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(get("/api/v1/students/" + student1Id + "/guardians")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(teacherToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1));
+        mockMvc.perform(get("/api/v1/students/" + student2Id + "/guardians")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(teacherToken)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.type").value("urn:ecole:problem:family-scope-forbidden"));
+
+        // C1 — nationalIdNumber visible uniquement pour DIRECTOR / CENTER_MANAGER / SECRETARY, masqué (null) pour PROMOTER / CASHIER / TEACHER
+        mockMvc.perform(get("/api/v1/guardians/" + guardian1Id).header(HttpHeaders.AUTHORIZATION, bearer(secretaryToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.nationalIdNumber").value("CNI-SN-1985-0001"));
+        mockMvc.perform(get("/api/v1/guardians/" + guardian1Id).header(HttpHeaders.AUTHORIZATION, bearer(cashierToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.nationalIdNumber").isEmpty());
+        mockMvc.perform(get("/api/v1/guardians/" + guardian1Id).header(HttpHeaders.AUTHORIZATION, bearer(promoterToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.nationalIdNumber").isEmpty());
+        mockMvc.perform(get("/api/v1/families/" + family1Id + "/guardians")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(cashierToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].nationalIdNumber").isEmpty());
+    }
+
+    @Test
+    void shouldSerializeConcurrentEnrollmentsAgainstClassRoomCapacity() throws Exception {
+        School school = createSchool("CAP-CONC", SchoolType.PRIVATE_SCHOOL);
+        createActiveSubscription(school, 50);
+        String directorToken = tenantToken(school.getId(), RoleCode.DIRECTOR);
+
+        UUID yearId = createAcademicYearViaApi(
+                directorToken, "2026-2027", "Année 2026-2027", "2026-10-01", "2027-07-31");
+        UUID levelId = createGradeLevelViaApi(directorToken, "CP", "Cours Préparatoire", "PRIMARY", 1);
+        UUID smallClassId = createClassViaApi(directorToken, yearId, levelId, "CP-1", "CP Unique", 1);
+
+        UUID s1 = UUID.fromString(createStudentViaApi(
+                directorToken, "Awa", "Ba", "FEMALE", "2019-01-10", null, "2026-10-01").get("id").asString());
+        UUID s2 = UUID.fromString(createStudentViaApi(
+                directorToken, "Modou", "Ba", "MALE", "2019-02-11", null, "2026-10-01").get("id").asString());
+
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        try {
+            Future<Integer> f1 = pool.submit(() -> enrollConcurrently(directorToken, s1, yearId, smallClassId, ready, start));
+            Future<Integer> f2 = pool.submit(() -> enrollConcurrently(directorToken, s2, yearId, smallClassId, ready, start));
+            assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+
+            List<Integer> statuses = List.of(f1.get(15, TimeUnit.SECONDS), f2.get(15, TimeUnit.SECONDS));
+            assertThat(statuses).containsExactlyInAnyOrder(201, 409);
+
+            TenantContext.runWithTenant(TenantId.of(school.getId()), () ->
+                    assertThat(studentDirectoryPort.findActiveEnrollmentsByClassRoom(smallClassId)).hasSize(1));
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    private int enrollConcurrently(
+            String token,
+            UUID studentId,
+            UUID yearId,
+            UUID classId,
+            CountDownLatch ready,
+            CountDownLatch start) throws Exception {
+        ready.countDown();
+        start.await(5, TimeUnit.SECONDS);
+        return mockMvc.perform(post("/api/v1/enrollments")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "studentId", studentId,
+                                "academicYearId", yearId,
+                                "classRoomId", classId,
+                                "enrollmentType", "NEW_ADMISSION",
+                                "enrollmentDate", "2026-10-01"))))
+                .andReturn()
+                .getResponse()
+                .getStatus();
     }
 
     private void createActiveSubscription(School school, int maxStudents) {

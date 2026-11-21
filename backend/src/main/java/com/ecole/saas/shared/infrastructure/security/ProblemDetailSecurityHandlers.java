@@ -5,6 +5,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.net.URI;
 import java.time.Instant;
+import org.slf4j.MDC;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ProblemDetail;
@@ -78,6 +79,10 @@ public class ProblemDetailSecurityHandlers implements AuthenticationEntryPoint, 
         problem.setTitle(title);
         problem.setInstance(URI.create(request.getRequestURI()));
         problem.setProperty("timestamp", Instant.now().toString());
+        String requestId = MDC.get("requestId");
+        if (requestId != null && !requestId.isBlank()) {
+            problem.setProperty("requestId", requestId);
+        }
 
         response.setStatus(status.value());
         response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);

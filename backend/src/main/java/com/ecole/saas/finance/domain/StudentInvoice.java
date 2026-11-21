@@ -9,6 +9,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Objects;
@@ -94,6 +95,10 @@ public class StudentInvoice extends TenantScopedEntity {
 
     @Column(name = "created_by", updatable = false)
     private UUID createdBy;
+
+    @Version
+    @Column(name = "version", nullable = false)
+    private long version;
 
     protected StudentInvoice() {
     }
@@ -365,6 +370,10 @@ public class StudentInvoice extends TenantScopedEntity {
 
     public UUID getCreatedBy() {
         return createdBy;
+    }
+
+    public long getVersion() {
+        return version;
     }
 
     private static String requireNonBlank(String raw, String message, int maxLength) {

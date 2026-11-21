@@ -9,6 +9,8 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.PreRemove;
+import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.Objects;
@@ -102,6 +104,19 @@ public class SubscriptionEvent extends TenantScopedEntity {
         this.reason = (reason == null || reason.isBlank()) ? null : reason.trim();
         this.actorId = actorId;
         this.occurredAt = Objects.requireNonNull(occurredAt, "La date d'événement est obligatoire.");
+    }
+
+    @Override
+    @PreUpdate
+    protected void onUpdate() {
+        throw new UnsupportedOperationException(
+                "Le journal des événements d'abonnement est strictement immuable : toute modification est interdite.");
+    }
+
+    @PreRemove
+    protected void onRemove() {
+        throw new UnsupportedOperationException(
+                "Le journal des événements d'abonnement est strictement immuable : toute suppression est interdite.");
     }
 
     public UUID getId() {

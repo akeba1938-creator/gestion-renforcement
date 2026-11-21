@@ -594,6 +594,16 @@ class SubscriptionIntegrationTest {
                 }))
                 .isInstanceOf(DataAccessException.class));
 
+        // M1 (V12) : le trigger BEFORE UPDATE OR DELETE protège subscription_events même sous le propriétaire de table
+        assertThatThrownBy(() -> transactionTemplate.executeWithoutResult(status -> jdbcTemplate.update(
+                "UPDATE subscription_events SET reason = 'Altération propriétaire' WHERE subscription_id = ?",
+                subAId)))
+                .isInstanceOf(DataAccessException.class);
+        assertThatThrownBy(() -> transactionTemplate.executeWithoutResult(status -> jdbcTemplate.update(
+                "DELETE FROM subscription_events WHERE subscription_id = ?",
+                subAId)))
+                .isInstanceOf(DataAccessException.class);
+
         // Fail-closed sans TenantContext
         transactionTemplate.executeWithoutResult(status -> {
             jdbcTemplate.execute("SET LOCAL ROLE ecole_app");

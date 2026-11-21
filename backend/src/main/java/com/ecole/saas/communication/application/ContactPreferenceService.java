@@ -16,6 +16,7 @@ import com.ecole.saas.student.StudentContactSummary;
 import com.ecole.saas.student.StudentDirectoryPort;
 import com.ecole.saas.teacher.TeacherDirectoryPort;
 import com.ecole.saas.teacher.TeacherSummary;
+import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalTime;
 import java.util.Map;
@@ -35,6 +36,7 @@ public class ContactPreferenceService {
     private final TeacherDirectoryPort teacherDirectoryPort;
     private final CommunicationSubscriptionGuard subscriptionGuard;
     private final AuditLogPort auditLogPort;
+    private final Clock clock;
 
     public ContactPreferenceService(
             ContactPreferenceRepository preferenceRepository,
@@ -43,7 +45,8 @@ public class ContactPreferenceService {
             StudentDirectoryPort studentDirectoryPort,
             TeacherDirectoryPort teacherDirectoryPort,
             CommunicationSubscriptionGuard subscriptionGuard,
-            AuditLogPort auditLogPort) {
+            AuditLogPort auditLogPort,
+            Clock clock) {
         this.preferenceRepository = preferenceRepository;
         this.audienceResolver = audienceResolver;
         this.familyDirectoryPort = familyDirectoryPort;
@@ -51,6 +54,7 @@ public class ContactPreferenceService {
         this.teacherDirectoryPort = teacherDirectoryPort;
         this.subscriptionGuard = subscriptionGuard;
         this.auditLogPort = auditLogPort;
+        this.clock = clock;
     }
 
     @PreAuthorize(CommunicationRoles.PREFERENCE_ADMIN_ROLES)
@@ -152,7 +156,7 @@ public class ContactPreferenceService {
             LocalTime quietHoursEnd,
             ConsentSource consentSource,
             UUID actorUserId) {
-        Instant now = Instant.now();
+        Instant now = clock.instant();
         Optional<ContactPreference> existing =
                 preferenceRepository.findByContactTypeAndContactId(contactType, contactId);
         ContactPreference preference;

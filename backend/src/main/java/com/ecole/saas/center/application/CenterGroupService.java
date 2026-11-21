@@ -24,14 +24,16 @@ import com.ecole.saas.center.domain.CenterValidationException;
 import com.ecole.saas.center.infrastructure.CenterGroupEnrollmentRepository;
 import com.ecole.saas.center.infrastructure.CenterGroupRepository;
 import com.ecole.saas.center.infrastructure.CenterGroupTutorRepository;
+import com.ecole.saas.center.infrastructure.CenterLockRepository;
 import com.ecole.saas.center.infrastructure.CenterSessionPackRepository;
 import com.ecole.saas.center.infrastructure.CenterStudentPackRepository;
+import com.ecole.saas.school.SchoolProfileSnapshot;
 import com.ecole.saas.student.StudentDirectoryPort;
 import com.ecole.saas.student.StudentSummary;
 import com.ecole.saas.teacher.TeacherDirectoryPort;
 import com.ecole.saas.teacher.TeacherSummary;
 import jakarta.persistence.criteria.Predicate;
-import java.time.Instant;
+import java.time.Clock;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
@@ -58,6 +60,7 @@ public class CenterGroupService {
     private final CenterGroupEnrollmentRepository enrollmentRepository;
     private final CenterSessionPackRepository packRepository;
     private final CenterStudentPackRepository studentPackRepository;
+    private final CenterLockRepository centerLockRepository;
     private final AcademicStructurePort academicStructurePort;
     private final TeacherDirectoryPort teacherDirectoryPort;
     private final StudentDirectoryPort studentDirectoryPort;
@@ -65,6 +68,7 @@ public class CenterGroupService {
     private final CenterSchoolGuard schoolGuard;
     private final CenterTutorScopeGuard tutorScopeGuard;
     private final AuditLogPort auditLogPort;
+    private final Clock clock;
 
     public CenterGroupService(
             CenterGroupRepository groupRepository,
@@ -72,18 +76,21 @@ public class CenterGroupService {
             CenterGroupEnrollmentRepository enrollmentRepository,
             CenterSessionPackRepository packRepository,
             CenterStudentPackRepository studentPackRepository,
+            CenterLockRepository centerLockRepository,
             AcademicStructurePort academicStructurePort,
             TeacherDirectoryPort teacherDirectoryPort,
             StudentDirectoryPort studentDirectoryPort,
             CenterSubscriptionGuard subscriptionGuard,
             CenterSchoolGuard schoolGuard,
             CenterTutorScopeGuard tutorScopeGuard,
-            AuditLogPort auditLogPort) {
+            AuditLogPort auditLogPort,
+            Clock clock) {
         this.groupRepository = groupRepository;
         this.groupTutorRepository = groupTutorRepository;
         this.enrollmentRepository = enrollmentRepository;
         this.packRepository = packRepository;
         this.studentPackRepository = studentPackRepository;
+        this.centerLockRepository = centerLockRepository;
         this.academicStructurePort = academicStructurePort;
         this.teacherDirectoryPort = teacherDirectoryPort;
         this.studentDirectoryPort = studentDirectoryPort;
@@ -91,6 +98,7 @@ public class CenterGroupService {
         this.schoolGuard = schoolGuard;
         this.tutorScopeGuard = tutorScopeGuard;
         this.auditLogPort = auditLogPort;
+        this.clock = clock;
     }
 
     @PreAuthorize(CenterRoles.READ_ROLES)
@@ -279,7 +287,7 @@ public class CenterGroupService {
         subscriptionGuard.requireWriteAccess();
         schoolGuard.requireActiveSchoolForWrite();
         CenterGroup group = requireGroup(groupId);
-        group.archive(reason, Instant.now());
+        group.archive(reason, clock.instant());
         CenterGroup saved = groupRepository.save(group);
         auditLogPort.recordTenantEvent(AuditRecordCommand.warning(
                 AuditCategory.CENTER,
@@ -421,7 +429,7 @@ public class CenterGroupService {
             LocalDate enrolledAt,
             String notes) {
         subscriptionGuard.requireWriteAccess();
-        schoolGuard.requireActiveSchoolForWrite();
+        SchoolProfileSnapshot school = schoolGuard.requireActiveSchoolForWrite();
         CenterGroup group = requireGroup(groupId);
         if (!group.isOperationalForEnrollmentsAndPlanning()) {
             throw new CenterConflictException(
@@ -438,6 +446,7 @@ public class CenterGroupService {
                     "Élève inactif",
                     "Seul un élève au statut ACTIVE peut être inscrit à une cohorte.");
         }
+        centerLockRepository.lockGroupCapacity(groupId);
         if (enrollmentRepository.existsByGroupIdAndStudentIdAndStatus(
                 groupId, studentId, CenterGroupEnrollmentStatus.ACTIVE)) {
             throw new CenterConflictException(
@@ -478,7 +487,7 @@ public class CenterGroupService {
                         "Seul un forfait élève ACTIVE peut être rattaché lors d'une inscription.");
             }
         }
-        LocalDate effectiveDate = enrolledAt != null ? enrolledAt : LocalDate.now();
+        LocalDate effectiveDate = enrolledAt != null ? enrolledAt : schoolGuard.todayInSchoolZone(clock, school);
         CenterGroupEnrollment enrollment = new CenterGroupEnrollment(
                 groupId, studentId, studentPackId, effectiveDate, notes);
         CenterGroupEnrollment saved = enrollmentRepository.save(enrollment);

@@ -25,6 +25,8 @@ import com.ecole.saas.center.infrastructure.CenterSessionAttendanceRepository;
 import com.ecole.saas.center.infrastructure.CenterSessionPackRepository;
 import com.ecole.saas.center.infrastructure.CenterSessionRepository;
 import com.ecole.saas.center.infrastructure.CenterStudentPackRepository;
+import com.ecole.saas.teacher.TeacherDirectoryPort;
+import com.ecole.saas.teacher.TeacherSummary;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -52,6 +54,7 @@ class CenterDirectoryQueryService implements CenterDirectoryPort {
     private final CenterStudentPackRepository studentPackRepository;
     private final CenterSessionRepository sessionRepository;
     private final CenterSessionAttendanceRepository attendanceRepository;
+    private final TeacherDirectoryPort teacherDirectoryPort;
 
     CenterDirectoryQueryService(
             CenterGroupRepository groupRepository,
@@ -60,7 +63,8 @@ class CenterDirectoryQueryService implements CenterDirectoryPort {
             CenterSessionPackRepository packRepository,
             CenterStudentPackRepository studentPackRepository,
             CenterSessionRepository sessionRepository,
-            CenterSessionAttendanceRepository attendanceRepository) {
+            CenterSessionAttendanceRepository attendanceRepository,
+            TeacherDirectoryPort teacherDirectoryPort) {
         this.groupRepository = groupRepository;
         this.groupTutorRepository = groupTutorRepository;
         this.enrollmentRepository = enrollmentRepository;
@@ -68,6 +72,7 @@ class CenterDirectoryQueryService implements CenterDirectoryPort {
         this.studentPackRepository = studentPackRepository;
         this.sessionRepository = sessionRepository;
         this.attendanceRepository = attendanceRepository;
+        this.teacherDirectoryPort = teacherDirectoryPort;
     }
 
     @Override
@@ -154,17 +159,26 @@ class CenterDirectoryQueryService implements CenterDirectoryPort {
     @Override
     public TutorCenterWorkloadSummary getTutorWorkloadSummary(
             UUID teacherId, LocalDate fromDate, LocalDate toDate) {
-        List<CenterGroupTutor> activeAssignments = groupTutorRepository.findByTeacherIdAndActiveTrue(teacherId);
-        Set<UUID> activeGroupIds = activeAssignments.stream()
+        List<CenterGroupTutor> allAssignments = groupTutorRepository.findByTeacherId(teacherId);
+        Set<UUID> activeGroupIds = allAssignments.stream()
+                .filter(CenterGroupTutor::isActive)
                 .map(CenterGroupTutor::getGroupId)
                 .collect(Collectors.toSet());
 
         Map<UUID, Long> hourlyRateByGroupId = new HashMap<>();
-        for (CenterGroupTutor assignment : activeAssignments) {
-            if (assignment.getHourlyRateXof() != null) {
+        for (CenterGroupTutor assignment : allAssignments) {
+            if (assignment.isActive() && assignment.getHourlyRateXof() != null) {
                 hourlyRateByGroupId.putIfAbsent(assignment.getGroupId(), assignment.getHourlyRateXof());
             }
         }
+        for (CenterGroupTutor assignment : allAssignments) {
+            if (!assignment.isActive() && assignment.getHourlyRateXof() != null) {
+                hourlyRateByGroupId.putIfAbsent(assignment.getGroupId(), assignment.getHourlyRateXof());
+            }
+        }
+        Long defaultTeacherHourlyRate = teacherDirectoryPort.findTeacherById(teacherId)
+                .map(TeacherSummary::hourlyRateXof)
+                .orElse(null);
 
         List<CenterSession> sessions = (fromDate != null && toDate != null)
                 ? sessionRepository.findByTeacherIdAndSessionDateBetween(teacherId, fromDate, toDate)
@@ -185,7 +199,12 @@ class CenterDirectoryQueryService implements CenterDirectoryPort {
                 case COMPLETED -> {
                     completedCount++;
                     completedMinutes = Math.addExact(completedMinutes, session.getDurationMinutes());
-                    long rate = hourlyRateByGroupId.getOrDefault(session.getGroupId(), 0L);
+                    long fallbackRate = hourlyRateByGroupId.getOrDefault(
+                            session.getGroupId(),
+                            defaultTeacherHourlyRate != null ? defaultTeacherHourlyRate : 0L);
+                    long rate = session.getHourlyRateXofSnapshot() != null
+                            ? session.getHourlyRateXofSnapshot()
+                            : fallbackRate;
                     completedWork.add(new CenterParticipationCalculator.CompletedSessionWork(
                             session.getDurationMinutes(), rate));
                 }

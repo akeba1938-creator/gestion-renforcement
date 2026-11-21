@@ -29,9 +29,13 @@ public class SubjectService {
     private static final String WRITE_ROLES = "hasAnyRole('DIRECTOR', 'CENTER_MANAGER')";
 
     private final SubjectRepository subjectRepository;
+    private final AcademicSubscriptionGuard subscriptionGuard;
 
-    public SubjectService(SubjectRepository subjectRepository) {
+    public SubjectService(
+            SubjectRepository subjectRepository,
+            AcademicSubscriptionGuard subscriptionGuard) {
         this.subjectRepository = subjectRepository;
+        this.subscriptionGuard = subscriptionGuard;
     }
 
     @PreAuthorize(READ_ROLES)
@@ -42,6 +46,7 @@ public class SubjectService {
             String search,
             Pageable pageable) {
         TenantContext.requireCurrent();
+        subscriptionGuard.requireReadAccess();
         Specification<Subject> spec = (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
             if (category != null) {
@@ -65,6 +70,7 @@ public class SubjectService {
     @Transactional(readOnly = true)
     public Subject getSubject(UUID subjectId) {
         TenantContext.requireCurrent();
+        subscriptionGuard.requireReadAccess();
         return requireSubject(subjectId);
     }
 
@@ -77,6 +83,7 @@ public class SubjectService {
             SubjectCategory category,
             Integer defaultCoefficient) {
         TenantContext.requireCurrent();
+        subscriptionGuard.requireWriteAccess();
         String normalizedCode = Subject.normalizeCode(code);
         if (subjectRepository.existsByCode(normalizedCode)) {
             throw new SubjectAlreadyExistsException(
@@ -95,6 +102,7 @@ public class SubjectService {
             SubjectCategory category,
             int defaultCoefficient) {
         TenantContext.requireCurrent();
+        subscriptionGuard.requireWriteAccess();
         Subject subject = requireSubject(subjectId);
         subject.update(name, shortName, category, defaultCoefficient);
         return subjectRepository.save(subject);
@@ -104,6 +112,7 @@ public class SubjectService {
     @Transactional
     public Subject activateSubject(UUID subjectId) {
         TenantContext.requireCurrent();
+        subscriptionGuard.requireWriteAccess();
         Subject subject = requireSubject(subjectId);
         subject.activate();
         return subjectRepository.save(subject);
@@ -113,6 +122,7 @@ public class SubjectService {
     @Transactional
     public Subject deactivateSubject(UUID subjectId) {
         TenantContext.requireCurrent();
+        subscriptionGuard.requireWriteAccess();
         Subject subject = requireSubject(subjectId);
         subject.deactivate();
         return subjectRepository.save(subject);

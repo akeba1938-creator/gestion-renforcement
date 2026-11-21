@@ -9,9 +9,10 @@ import java.util.UUID;
 
 public record InvoiceLineRequest(
         @NotNull(message = "Le frais est obligatoire.") UUID feeItemId,
-        @Min(value = 1, message = "La quantité doit être au moins égale à 1.")
+        @NotNull(message = "La quantité est obligatoire.")
+                @Min(value = 1, message = "La quantité doit être au moins égale à 1.")
                 @Max(value = 1000, message = "La quantité ne doit pas dépasser 1000.")
-                int quantity,
+                Integer quantity,
         @Min(value = 0, message = "Le montant unitaire doit être positif ou nul.") Long unitAmountXofOverride,
         @Size(max = 150, message = "Le libellé ne doit pas dépasser 150 caractères.") String labelOverride) {
 

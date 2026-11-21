@@ -41,6 +41,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
@@ -148,21 +149,44 @@ public class PaymentService {
         Optional<Payment> existingOpt = paymentRepository.findByIdempotencyKey(normalizedIdempotencyKey);
         if (existingOpt.isPresent()) {
             Payment existing = existingOpt.get();
-            if (!existing.matchesIdempotentRequest(
-                    invoiceId, amountXof, paymentMethod, externalReference, paymentScheduleId)) {
+            if (!Objects.equals(existing.getInvoiceId(), invoiceId)) {
                 throw new FinanceConflictException(
                         "idempotency-key-conflict",
                         "Conflit d'idempotence",
                         "Cette clé d'idempotence a déjà été utilisée pour un encaissement différent.");
             }
-            return buildView(existing, true);
+            UUID effectivePayerGuardianId = payerGuardianId != null
+                    ? payerGuardianId
+                    : invoiceRepository.findById(invoiceId).map(StudentInvoice::getPayerGuardianId).orElse(null);
+            return replayOrConflict(
+                    existing,
+                    invoiceId,
+                    amountXof,
+                    paymentMethod,
+                    externalReference,
+                    paymentScheduleId,
+                    effectivePayerGuardianId,
+                    notes);
         }
 
-        StudentInvoice invoice = invoiceRepository.findById(invoiceId)
+        StudentInvoice invoice = invoiceRepository.findByIdForUpdate(invoiceId)
                 .orElseThrow(() -> new FinanceNotFoundException(
                         "invoice-not-found", "Facture introuvable", "La facture demandée est introuvable."));
 
         UUID resolvedPayerGuardianId = resolvePayerGuardian(payerGuardianId, invoice.getPayerGuardianId());
+        Optional<Payment> concurrentExisting = paymentRepository.findByIdempotencyKey(normalizedIdempotencyKey);
+        if (concurrentExisting.isPresent()) {
+            return replayOrConflict(
+                    concurrentExisting.get(),
+                    invoiceId,
+                    amountXof,
+                    paymentMethod,
+                    externalReference,
+                    paymentScheduleId,
+                    resolvedPayerGuardianId,
+                    notes);
+        }
+
         String normalizedRef = Payment.normalizeOptional(externalReference, 120);
         if (normalizedRef != null
                 && paymentRepository.existsByPaymentMethodAndExternalReference(paymentMethod, normalizedRef)) {
@@ -192,7 +216,7 @@ public class PaymentService {
         List<ScheduleAllocator.AllocationPlan> plans =
                 ScheduleAllocator.allocatePayment(schedules, amountXof, paymentScheduleId);
 
-        payment = paymentRepository.save(payment);
+        payment = paymentRepository.saveAndFlush(payment);
         invoiceRepository.save(invoice);
         scheduleRepository.saveAll(schedules);
 
@@ -355,6 +379,31 @@ public class PaymentService {
                 studentMatricule,
                 reversal.isPresent(),
                 reversal.map(PaymentReversal::getReversedAt).orElse(null));
+    }
+
+    private PaymentView replayOrConflict(
+            Payment existing,
+            UUID invoiceId,
+            long amountXof,
+            PaymentMethod paymentMethod,
+            String externalReference,
+            UUID paymentScheduleId,
+            UUID resolvedPayerGuardianId,
+            String notes) {
+        if (!existing.matchesIdempotentRequest(
+                invoiceId,
+                amountXof,
+                paymentMethod,
+                externalReference,
+                paymentScheduleId,
+                resolvedPayerGuardianId,
+                notes)) {
+            throw new FinanceConflictException(
+                    "idempotency-key-conflict",
+                    "Conflit d'idempotence",
+                    "Cette clé d'idempotence a déjà été utilisée pour un encaissement différent.");
+        }
+        return buildView(existing, true);
     }
 
     private PaymentView buildView(Payment payment, boolean idempotentReplay) {

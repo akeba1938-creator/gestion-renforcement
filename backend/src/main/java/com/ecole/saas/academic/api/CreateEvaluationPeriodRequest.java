@@ -16,8 +16,9 @@ public record CreateEvaluationPeriodRequest(
         @Size(max = 100, message = "Le nom de la période ne peut pas dépasser 100 caractères.")
         String name,
         PeriodSystem periodType,
+        @NotNull(message = "L'ordre de la période est obligatoire.")
         @Min(value = 1, message = "L'ordre de la période doit être strictement positif.")
-        int sequenceOrder,
+        Integer sequenceOrder,
         @NotNull(message = "La date de début de période est obligatoire.")
         LocalDate startDate,
         @NotNull(message = "La date de fin de période est obligatoire.")

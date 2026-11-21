@@ -17,7 +17,9 @@ import com.ecole.saas.student.infrastructure.StudentRepository;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -151,6 +153,29 @@ public class StudentDirectoryQueryService implements StudentDirectoryPort {
                 .stream()
                 .map(StudentDirectoryQueryService::toEnrollmentSummary)
                 .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Set<UUID> findActiveStudentIdsByClassRooms(Collection<UUID> classRoomIds) {
+        TenantContext.requireCurrent();
+        if (classRoomIds == null || classRoomIds.isEmpty()) {
+            return Set.of();
+        }
+        return enrollmentRepository.findByClassRoomIdInAndStatus(classRoomIds, EnrollmentStatus.ACTIVE).stream()
+                .map(StudentEnrollment::getStudentId)
+                .collect(Collectors.toUnmodifiableSet());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public boolean isStudentActivelyEnrolledInAnyClass(UUID studentId, Collection<UUID> classRoomIds) {
+        TenantContext.requireCurrent();
+        if (studentId == null || classRoomIds == null || classRoomIds.isEmpty()) {
+            return false;
+        }
+        return enrollmentRepository.existsByStudentIdAndClassRoomIdInAndStatus(
+                studentId, classRoomIds, EnrollmentStatus.ACTIVE);
     }
 
     @Override

@@ -15,7 +15,9 @@ public record UpdateFeeItemRequest(
                 String label,
         @NotNull(message = "La catégorie du frais est obligatoire.") FeeCategory category,
         @NotNull(message = "La périodicité du frais est obligatoire.") FeeFrequency frequency,
-        @Min(value = 0, message = "Le montant en FCFA doit être positif ou nul.") long amountXof,
-        boolean mandatory,
+        @NotNull(message = "Le montant en FCFA est obligatoire.")
+                @Min(value = 0, message = "Le montant en FCFA doit être positif ou nul.")
+                Long amountXof,
+        Boolean mandatory,
         @Size(max = 2000, message = "La description est trop longue.") String description) {
 }

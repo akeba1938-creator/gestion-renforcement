@@ -12,7 +12,9 @@ public record ScheduleItemRequest(
                 @Size(max = 120, message = "Le libellé ne doit pas dépasser 120 caractères.")
                 String label,
         @NotNull(message = "La date d'échéance est obligatoire.") LocalDate dueDate,
-        @Min(value = 0, message = "Le montant d'échéance doit être positif ou nul.") long amountXof) {
+        @NotNull(message = "Le montant d'échéance en FCFA est obligatoire.")
+                @Min(value = 0, message = "Le montant d'échéance doit être positif ou nul.")
+                Long amountXof) {
 
     public StudentInvoiceService.ScheduleItemInput toInput() {
         return new StudentInvoiceService.ScheduleItemInput(label, dueDate, amountXof);

@@ -40,6 +40,7 @@ public class StudentGuardianService {
     private final GuardianRepository guardianRepository;
     private final StudentDirectoryPort studentDirectoryPort;
     private final FamilySubscriptionGuard subscriptionGuard;
+    private final FamilyTeacherScopeGuard teacherScopeGuard;
     private final AuditLogPort auditLogPort;
 
     public StudentGuardianService(
@@ -47,11 +48,13 @@ public class StudentGuardianService {
             GuardianRepository guardianRepository,
             StudentDirectoryPort studentDirectoryPort,
             FamilySubscriptionGuard subscriptionGuard,
+            FamilyTeacherScopeGuard teacherScopeGuard,
             AuditLogPort auditLogPort) {
         this.linkRepository = linkRepository;
         this.guardianRepository = guardianRepository;
         this.studentDirectoryPort = studentDirectoryPort;
         this.subscriptionGuard = subscriptionGuard;
+        this.teacherScopeGuard = teacherScopeGuard;
         this.auditLogPort = auditLogPort;
     }
 
@@ -63,6 +66,7 @@ public class StudentGuardianService {
         subscriptionGuard.requireReadAccess();
 
         StudentSummary student = requireStudent(studentId);
+        teacherScopeGuard.assertCanAccessStudent(student.id());
         Page<StudentGuardianLink> page = Boolean.TRUE.equals(activeOnly)
                 ? linkRepository.findByStudentIdAndActiveTrue(studentId, pageable)
                 : linkRepository.findByStudentId(studentId, pageable);

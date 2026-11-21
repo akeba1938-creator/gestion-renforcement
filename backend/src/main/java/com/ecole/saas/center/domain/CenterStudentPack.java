@@ -9,6 +9,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import java.time.LocalDate;
 import java.util.Objects;
 import java.util.UUID;
@@ -70,6 +71,10 @@ public class CenterStudentPack extends TenantScopedEntity {
 
     @Column(name = "notes", length = 500)
     private String notes;
+
+    @Version
+    @Column(name = "version", nullable = false)
+    private long version;
 
     protected CenterStudentPack() {
     }
@@ -303,5 +308,9 @@ public class CenterStudentPack extends TenantScopedEntity {
 
     public String getNotes() {
         return notes;
+    }
+
+    public long getVersion() {
+        return version;
     }
 }

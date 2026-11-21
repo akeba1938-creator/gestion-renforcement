@@ -17,7 +17,8 @@ public record UpdateClassRoomRequest(
         String series,
         @Size(max = 60, message = "Le nom de la salle ne peut pas dépasser 60 caractères.")
         String roomName,
+        @NotNull(message = "La capacité de la classe est obligatoire.")
         @Min(value = 1, message = "La capacité doit être comprise entre 1 et 500 élèves.")
         @Max(value = 500, message = "La capacité doit être comprise entre 1 et 500 élèves.")
-        int capacity) {
+        Integer capacity) {
 }

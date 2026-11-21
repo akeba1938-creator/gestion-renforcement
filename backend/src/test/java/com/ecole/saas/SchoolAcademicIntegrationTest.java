@@ -24,6 +24,12 @@ import com.ecole.saas.school.domain.School;
 import com.ecole.saas.school.domain.SchoolType;
 import com.ecole.saas.shared.domain.TenantContext;
 import com.ecole.saas.shared.domain.TenantId;
+import com.ecole.saas.subscription.application.SubscriptionService;
+import com.ecole.saas.subscription.domain.BillingCycle;
+import com.ecole.saas.subscription.domain.SubscriptionPlan;
+import com.ecole.saas.subscription.domain.SubscriptionStatus;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -62,6 +68,7 @@ class SchoolAcademicIntegrationTest {
     private final ObjectMapper objectMapper;
     private final SchoolService schoolService;
     private final SchoolDirectory schoolDirectory;
+    private final SubscriptionService subscriptionService;
     private final AcademicStructurePort academicStructurePort;
     private final TokenIssuer tokenIssuer;
     private final TransactionTemplate transactionTemplate;
@@ -73,6 +80,7 @@ class SchoolAcademicIntegrationTest {
             ObjectMapper objectMapper,
             SchoolService schoolService,
             SchoolDirectory schoolDirectory,
+            SubscriptionService subscriptionService,
             AcademicStructurePort academicStructurePort,
             TokenIssuer tokenIssuer,
             TransactionTemplate transactionTemplate,
@@ -81,6 +89,7 @@ class SchoolAcademicIntegrationTest {
         this.objectMapper = objectMapper;
         this.schoolService = schoolService;
         this.schoolDirectory = schoolDirectory;
+        this.subscriptionService = subscriptionService;
         this.academicStructurePort = academicStructurePort;
         this.tokenIssuer = tokenIssuer;
         this.transactionTemplate = transactionTemplate;
@@ -681,13 +690,22 @@ class SchoolAcademicIntegrationTest {
             assertThat(jdbcTemplate.update("UPDATE subjects SET name = 'Piraté' WHERE id = ?", subjectB)).isZero();
             assertThat(jdbcTemplate.update("UPDATE class_rooms SET name = 'Piraté' WHERE id = ?", classB)).isZero();
             assertThat(jdbcTemplate.update("UPDATE class_subjects SET coefficient = 9 WHERE id = ?", classSubjectB)).isZero();
-
-            assertThat(jdbcTemplate.update("DELETE FROM class_subjects WHERE id = ?", classSubjectB)).isZero();
-            assertThat(jdbcTemplate.update("DELETE FROM class_rooms WHERE id = ?", classB)).isZero();
-            assertThat(jdbcTemplate.update("DELETE FROM subjects WHERE id = ?", subjectB)).isZero();
-            assertThat(jdbcTemplate.update("DELETE FROM grade_levels WHERE id = ?", levelB)).isZero();
-            assertThat(jdbcTemplate.update("DELETE FROM evaluation_periods WHERE id = ?", periodB)).isZero();
         }));
+
+        // V12 : REVOKE DELETE pour ecole_app sur toutes les tables académiques à archivage logique
+        for (Map.Entry<String, UUID> target : List.of(
+                Map.entry("class_subjects", classSubjectB),
+                Map.entry("class_rooms", classB),
+                Map.entry("subjects", subjectB),
+                Map.entry("grade_levels", levelB),
+                Map.entry("evaluation_periods", periodB))) {
+            TenantContext.runWithTenant(tenantA, () -> assertThatThrownBy(() ->
+                    transactionTemplate.executeWithoutResult(status -> {
+                        jdbcTemplate.execute("SET LOCAL ROLE ecole_app");
+                        jdbcTemplate.update("DELETE FROM " + target.getKey() + " WHERE id = ?", target.getValue());
+                    }))
+                    .isInstanceOf(DataAccessException.class));
+        }
 
         // Tentative d'INSERT cross-tenant sous RLS -> bloquée par WITH CHECK sur chaque nouvelle table
         TenantContext.runWithTenant(tenantA, () -> assertThatThrownBy(() ->
@@ -859,7 +877,71 @@ class SchoolAcademicIntegrationTest {
         return UUID.fromString(readJson(res).get("id").asString());
     }
 
+    @Test
+    void shouldEnforceSubscriptionGuardOnAcademicEndpoints() throws Exception {
+        // 1. École sans abonnement -> lecture ET écriture académiques bloquées (403)
+        School noSubSchool = createSchoolWithoutSubscription("NO-SUB-ACAD", SchoolType.PRIVATE_SCHOOL);
+        String noSubDirector = tenantToken(noSubSchool.getId(), RoleCode.DIRECTOR);
+
+        mockMvc.perform(get("/api/v1/academic/years")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(noSubDirector)))
+                .andExpect(status().isForbidden())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
+        mockMvc.perform(post("/api/v1/academic/grade-levels")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(noSubDirector))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("code", "6E", "name", "Sixième", "cycle", "MIDDLE_SCHOOL", "displayOrder", 1))))
+                .andExpect(status().isForbidden());
+
+        // 2. Abonnement expiré (ACTIVE dont endsAt est dépassée) -> lecture autorisée (200), écriture bloquée (403)
+        School expiredSchool = createSchoolWithoutSubscription("EXP-ACAD", SchoolType.PRIVATE_SCHOOL);
+        provisionSubscription(
+                expiredSchool.getId(),
+                SubscriptionStatus.ACTIVE,
+                Instant.now().minus(60, ChronoUnit.DAYS),
+                Instant.now().minus(1, ChronoUnit.DAYS));
+        String expiredDirector = tenantToken(expiredSchool.getId(), RoleCode.DIRECTOR);
+
+        mockMvc.perform(get("/api/v1/academic/years")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(expiredDirector)))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/academic/grade-levels")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(expiredDirector))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("code", "6E", "name", "Sixième", "cycle", "MIDDLE_SCHOOL", "displayOrder", 1))))
+                .andExpect(status().isForbidden());
+
+        // 3. Abonnement SUSPENDED -> lecture ET écriture bloquées (403)
+        School suspendedSchool = createSchoolWithoutSubscription("SUSP-ACAD", SchoolType.PRIVATE_SCHOOL);
+        provisionSubscription(
+                suspendedSchool.getId(),
+                SubscriptionStatus.SUSPENDED,
+                Instant.now().minus(1, ChronoUnit.DAYS),
+                Instant.now().plus(365, ChronoUnit.DAYS));
+        String suspendedDirector = tenantToken(suspendedSchool.getId(), RoleCode.DIRECTOR);
+
+        mockMvc.perform(get("/api/v1/academic/years")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(suspendedDirector)))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/v1/academic/grade-levels")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(suspendedDirector))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("code", "6E", "name", "Sixième", "cycle", "MIDDLE_SCHOOL", "displayOrder", 1))))
+                .andExpect(status().isForbidden());
+    }
+
     private School createSchool(String prefix, SchoolType type) {
+        School school = createSchoolWithoutSubscription(prefix, type);
+        Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+        provisionSubscription(
+                school.getId(),
+                SubscriptionStatus.ACTIVE,
+                now.minus(1, ChronoUnit.DAYS),
+                now.plus(365, ChronoUnit.DAYS));
+        return school;
+    }
+
+    private School createSchoolWithoutSubscription(String prefix, SchoolType type) {
         String code = uniqueCode(prefix);
         return schoolService.createSchool(
                 code,
@@ -868,6 +950,13 @@ class SchoolAcademicIntegrationTest {
                 "+221770000000",
                 "contact@" + code.toLowerCase() + ".sn",
                 "Dakar");
+    }
+
+    private void provisionSubscription(UUID schoolId, SubscriptionStatus status, Instant startsAt, Instant endsAt) {
+        SubscriptionPlan plan = subscriptionService.createPlan(
+                uniqueCode("PLAN"), "Forfait Académique", 50_000L, 500_000L, 500, 30, 10_240);
+        TenantContext.runWithTenant(TenantId.of(schoolId), () -> subscriptionService.createSubscription(
+                plan.getId(), status, BillingCycle.YEARLY, startsAt.truncatedTo(ChronoUnit.SECONDS), endsAt.truncatedTo(ChronoUnit.SECONDS)));
     }
 
     private String platformAdminToken() {

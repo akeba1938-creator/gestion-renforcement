@@ -29,6 +29,14 @@ public interface StudentGuardianLinkRepository extends JpaRepository<StudentGuar
 
     Page<StudentGuardianLink> findByGuardianIdAndActiveTrue(UUID guardianId, Pageable pageable);
 
+    Page<StudentGuardianLink> findByGuardianIdAndStudentIdIn(
+            UUID guardianId, Collection<UUID> studentIds, Pageable pageable);
+
+    Page<StudentGuardianLink> findByGuardianIdAndStudentIdInAndActiveTrue(
+            UUID guardianId, Collection<UUID> studentIds, Pageable pageable);
+
+    boolean existsByGuardianIdAndStudentIdInAndActiveTrue(UUID guardianId, Collection<UUID> studentIds);
+
     List<StudentGuardianLink> findByGuardianIdAndActiveTrue(UUID guardianId);
 
     List<StudentGuardianLink> findByGuardianIdInAndActiveTrue(Collection<UUID> guardianIds);

@@ -3,6 +3,7 @@ package com.ecole.saas.student;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -29,6 +30,10 @@ public interface StudentDirectoryPort {
     Optional<StudentEnrollmentSummary> findCurrentEnrollmentForStudent(UUID studentId);
 
     List<StudentEnrollmentSummary> findActiveEnrollmentsByClassRoom(UUID classRoomId);
+
+    Set<UUID> findActiveStudentIdsByClassRooms(Collection<UUID> classRoomIds);
+
+    boolean isStudentActivelyEnrolledInAnyClass(UUID studentId, Collection<UUID> classRoomIds);
 
     long countActiveStudents();
 }

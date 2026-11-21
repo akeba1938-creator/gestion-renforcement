@@ -38,16 +38,19 @@ public class EvaluationPeriodService {
 
     private final AcademicYearRepository academicYearRepository;
     private final EvaluationPeriodRepository evaluationPeriodRepository;
+    private final AcademicSubscriptionGuard subscriptionGuard;
     private final AuditLogPort auditLogPort;
     private final Clock clock;
 
     public EvaluationPeriodService(
             AcademicYearRepository academicYearRepository,
             EvaluationPeriodRepository evaluationPeriodRepository,
+            AcademicSubscriptionGuard subscriptionGuard,
             AuditLogPort auditLogPort,
             Clock clock) {
         this.academicYearRepository = academicYearRepository;
         this.evaluationPeriodRepository = evaluationPeriodRepository;
+        this.subscriptionGuard = subscriptionGuard;
         this.auditLogPort = auditLogPort;
         this.clock = clock;
     }
@@ -56,6 +59,7 @@ public class EvaluationPeriodService {
     @Transactional(readOnly = true)
     public Page<EvaluationPeriod> listPeriodsForYear(UUID academicYearId, Pageable pageable) {
         TenantContext.requireCurrent();
+        subscriptionGuard.requireReadAccess();
         requireAcademicYear(academicYearId);
         return evaluationPeriodRepository.findByAcademicYearIdOrderBySequenceOrderAsc(academicYearId, pageable);
     }
@@ -64,6 +68,7 @@ public class EvaluationPeriodService {
     @Transactional(readOnly = true)
     public EvaluationPeriod getPeriod(UUID periodId) {
         TenantContext.requireCurrent();
+        subscriptionGuard.requireReadAccess();
         return requirePeriod(periodId);
     }
 
@@ -79,6 +84,7 @@ public class EvaluationPeriodService {
             LocalDate endDate,
             Integer weight) {
         TenantContext.requireCurrent();
+        subscriptionGuard.requireWriteAccess();
         AcademicYear year = requireAcademicYear(academicYearId);
         year.assertMutable();
 
@@ -125,6 +131,7 @@ public class EvaluationPeriodService {
     @Transactional
     public List<EvaluationPeriod> generateStandardPeriods(UUID academicYearId) {
         TenantContext.requireCurrent();
+        subscriptionGuard.requireWriteAccess();
         AcademicYear year = requireAcademicYear(academicYearId);
         year.assertMutable();
 
@@ -154,6 +161,7 @@ public class EvaluationPeriodService {
             LocalDate endDate,
             int weight) {
         TenantContext.requireCurrent();
+        subscriptionGuard.requireWriteAccess();
         EvaluationPeriod period = requirePeriod(periodId);
         AcademicYear year = requireAcademicYear(period.getAcademicYearId());
         year.assertMutable();
@@ -177,6 +185,7 @@ public class EvaluationPeriodService {
     @Transactional
     public EvaluationPeriod openPeriod(UUID periodId) {
         TenantContext.requireCurrent();
+        subscriptionGuard.requireWriteAccess();
         EvaluationPeriod period = requirePeriod(periodId);
         requireAcademicYear(period.getAcademicYearId()).assertMutable();
         period.open();
@@ -195,6 +204,7 @@ public class EvaluationPeriodService {
     @Transactional
     public EvaluationPeriod closePeriod(UUID periodId) {
         TenantContext.requireCurrent();
+        subscriptionGuard.requireWriteAccess();
         EvaluationPeriod period = requirePeriod(periodId);
         requireAcademicYear(period.getAcademicYearId()).assertMutable();
         period.close();
@@ -214,6 +224,7 @@ public class EvaluationPeriodService {
     @Transactional
     public EvaluationPeriod reopenPeriod(UUID periodId) {
         TenantContext.requireCurrent();
+        subscriptionGuard.requireWriteAccess();
         EvaluationPeriod period = requirePeriod(periodId);
         requireAcademicYear(period.getAcademicYearId()).assertMutable();
         period.reopen();
@@ -233,6 +244,7 @@ public class EvaluationPeriodService {
     @Transactional
     public EvaluationPeriod lockPeriod(UUID periodId) {
         TenantContext.requireCurrent();
+        subscriptionGuard.requireWriteAccess();
         EvaluationPeriod period = requirePeriod(periodId);
         requireAcademicYear(period.getAcademicYearId()).assertMutable();
         period.lock(clock.instant());

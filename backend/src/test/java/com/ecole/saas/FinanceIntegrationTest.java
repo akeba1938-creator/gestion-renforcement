@@ -33,6 +33,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -277,11 +282,25 @@ class FinanceIntegrationTest {
                         .content(json(Map.of(
                                 "invoiceId", invoiceId,
                                 "amountXof", 50_000L,
-                                "paymentMethod", "CASH"))))
+                                "paymentMethod", "CASH",
+                                "notes", "Paiement guichet espèces"))))
                 .andExpect(status().isOk())
                 .andExpect(header().string("X-Idempotent-Replay", "true"))
                 .andExpect(jsonPath("$.id").value(cashPaymentId.toString()))
                 .andExpect(jsonPath("$.receipt.receiptNumber").value(cashReceiptNo));
+
+        // Conflit d'idempotence (même clé, notes différentes) -> 409
+        mockMvc.perform(post("/api/v1/finance/payments")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(cashierToken))
+                        .header("Idempotency-Key", "pay-cash-flow-0001")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "invoiceId", invoiceId,
+                                "amountXof", 50_000L,
+                                "paymentMethod", "CASH",
+                                "notes", "Note altérée"))))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type").value("urn:ecole:problem:idempotency-key-conflict"));
 
         // Conflit d'idempotence (même clé, montant différent) -> 409
         mockMvc.perform(post("/api/v1/finance/payments")
@@ -866,6 +885,159 @@ class FinanceIntegrationTest {
                         "INSERT INTO finance_sequences (tenant_id, sequence_type, sequence_year, last_value) VALUES (?, 'LEDGER', 2099, 1)",
                         schoolB.getId())))
                 .isInstanceOf(DataAccessException.class);
+    }
+
+    @Test
+    void shouldEnforceConcurrentPaymentIntegrityMakerCheckerValidationAndRequestId() throws Exception {
+        School school = createSchool("FIN-HARD", SchoolType.PRIVATE_SCHOOL);
+        createActiveSubscription(school, 50);
+        String directorToken = tenantToken(school.getId(), RoleCode.DIRECTOR);
+        String cashierToken = tenantToken(school.getId(), RoleCode.CASHIER);
+        String multiRoleToken = tokenIssuer
+                .issueAccessToken(
+                        AccountRef.user(UUID.randomUUID(), school.getId()),
+                        Set.of(RoleCode.CENTER_MANAGER.name(), RoleCode.DIRECTOR.name()))
+                .value();
+
+        Fixture fix = createIssuedInvoiceFixture(school, directorToken, 100_000L);
+
+        // m1 + m3 : omettre amountXof sur POST /api/v1/finance/fee-items -> 400 Bad Request avec requestId MDC
+        mockMvc.perform(post("/api/v1/finance/fee-items")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(directorToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "academicYearId", fix.yearId(),
+                                "code", "MISSING-AMT",
+                                "label", "Frais sans montant",
+                                "category", "TUITION",
+                                "frequency", "ANNUAL"))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.requestId").isNotEmpty());
+
+        // C2 (a) : deux encaissements concurrents de 70 000 FCFA sur solde 100 000 FCFA -> 1 seul passe (201), l'autre échoue (409)
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            CountDownLatch readyDistinct = new CountDownLatch(2);
+            CountDownLatch startDistinct = new CountDownLatch(1);
+            Future<Integer> p1 = pool.submit(() -> recordPaymentConcurrently(
+                    cashierToken, fix.invoiceId(), 70_000L, "conc-distinct-key-01", readyDistinct, startDistinct));
+            Future<Integer> p2 = pool.submit(() -> recordPaymentConcurrently(
+                    cashierToken, fix.invoiceId(), 70_000L, "conc-distinct-key-02", readyDistinct, startDistinct));
+            assertThat(readyDistinct.await(5, TimeUnit.SECONDS)).isTrue();
+            startDistinct.countDown();
+
+            List<Integer> distinctStatuses = List.of(p1.get(15, TimeUnit.SECONDS), p2.get(15, TimeUnit.SECONDS));
+            assertThat(distinctStatuses).containsExactlyInAnyOrder(201, 409);
+
+            // C2 (b) : deux encaissements concurrents de 20 000 FCFA avec la MÊME Idempotency-Key -> {201, 200}, aucun 500, 1 seul paiement
+            CountDownLatch readySame = new CountDownLatch(2);
+            CountDownLatch startSame = new CountDownLatch(1);
+            Future<Integer> s1 = pool.submit(() -> recordPaymentConcurrently(
+                    cashierToken, fix.invoiceId(), 20_000L, "conc-same-idem-key-01", readySame, startSame));
+            Future<Integer> s2 = pool.submit(() -> recordPaymentConcurrently(
+                    cashierToken, fix.invoiceId(), 20_000L, "conc-same-idem-key-01", readySame, startSame));
+            assertThat(readySame.await(5, TimeUnit.SECONDS)).isTrue();
+            startSame.countDown();
+
+            List<Integer> sameStatuses = List.of(s1.get(15, TimeUnit.SECONDS), s2.get(15, TimeUnit.SECONDS));
+            assertThat(sameStatuses).containsExactlyInAnyOrder(201, 200);
+        } finally {
+            pool.shutdownNow();
+        }
+
+        // Vérifier l'invariant facture / registre : 70 000 + 20 000 = 90 000 payés, solde = 10 000, exactement 2 paiements
+        mockMvc.perform(get("/api/v1/finance/invoices/" + fix.invoiceId())
+                        .header(HttpHeaders.AUTHORIZATION, bearer(directorToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.invoice.paidAmountXof").value(90_000))
+                .andExpect(jsonPath("$.invoice.balanceXof").value(10_000));
+
+        MvcResult paymentsList = mockMvc.perform(get("/api/v1/finance/payments")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(directorToken))
+                        .param("invoiceId", fix.invoiceId().toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(2))
+                .andReturn();
+        UUID firstPaymentId = UUID.fromString(readJson(paymentsList).get("content").get(0).get("id").asString());
+
+        TenantContext.runWithTenant(TenantId.of(school.getId()), () -> {
+            StudentFinancialSummary summary =
+                    financeAccountPort.getStudentFinancialSummary(fix.studentId(), fix.yearId());
+            assertThat(summary.totalPaidXof()).isEqualTo(90_000L);
+            assertThat(summary.totalBalanceXof()).isEqualTo(10_000L);
+            assertThat(summary.ledgerBalanceXof()).isEqualTo(10_000L);
+        });
+
+        // M5 : interdiction d'auto-approbation (Maker-Checker) sur remise, contre-passation et clôture de caisse
+        MvcResult adjRes = mockMvc.perform(post("/api/v1/finance/invoices/" + fix.invoiceId() + "/adjustments")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(multiRoleToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "adjustmentType", "DISCOUNT",
+                                "calculationMode", "FIXED_AMOUNT",
+                                "fixedAmountXof", 5_000L,
+                                "reason", "Remise demandée par acteur multi-rôle"))))
+                .andExpect(status().isCreated())
+                .andReturn();
+        UUID selfAdjId = UUID.fromString(readJson(adjRes).get("id").asString());
+
+        mockMvc.perform(post("/api/v1/finance/adjustments/" + selfAdjId + "/approve")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(multiRoleToken)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.type").value("urn:ecole:problem:finance-self-approval-forbidden"))
+                .andExpect(jsonPath("$.requestId").isNotEmpty());
+
+        MvcResult revRes = mockMvc.perform(post("/api/v1/finance/payment-reversals")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(multiRoleToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "paymentId", firstPaymentId,
+                                "reason", "Contre-passation demandée par acteur multi-rôle"))))
+                .andExpect(status().isCreated())
+                .andReturn();
+        UUID selfRevId = UUID.fromString(readJson(revRes).get("id").asString());
+
+        mockMvc.perform(post("/api/v1/finance/payment-reversals/" + selfRevId + "/approve")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(multiRoleToken)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.type").value("urn:ecole:problem:finance-self-approval-forbidden"));
+
+        MvcResult closingRes = mockMvc.perform(post("/api/v1/finance/cash-closings")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(multiRoleToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "closingDate", LocalDate.now(ZoneId.of("Africa/Dakar")).toString(),
+                                "countedCashXof", 90_000L))))
+                .andExpect(status().isCreated())
+                .andReturn();
+        UUID selfClosingId = UUID.fromString(readJson(closingRes).get("id").asString());
+
+        mockMvc.perform(post("/api/v1/finance/cash-closings/" + selfClosingId + "/validate")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(multiRoleToken)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.type").value("urn:ecole:problem:finance-self-approval-forbidden"));
+    }
+
+    private int recordPaymentConcurrently(
+            String token,
+            UUID invoiceId,
+            long amountXof,
+            String idempotencyKey,
+            CountDownLatch ready,
+            CountDownLatch start) throws Exception {
+        ready.countDown();
+        start.await(5, TimeUnit.SECONDS);
+        return mockMvc.perform(post("/api/v1/finance/payments")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(token))
+                        .header("Idempotency-Key", idempotencyKey)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "invoiceId", invoiceId,
+                                "amountXof", amountXof,
+                                "paymentMethod", "CASH"))))
+                .andReturn()
+                .getResponse()
+                .getStatus();
     }
 
     private record Fixture(UUID yearId, UUID gradeLevelId, UUID studentId, UUID feeItemId, UUID invoiceId) {

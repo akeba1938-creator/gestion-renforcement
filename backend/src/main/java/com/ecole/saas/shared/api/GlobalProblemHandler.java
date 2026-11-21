@@ -9,8 +9,11 @@ import java.time.Instant;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -172,14 +175,47 @@ public class GlobalProblemHandler {
                 request);
     }
 
+    @ExceptionHandler(OptimisticLockingFailureException.class)
+    public ProblemDetail handleOptimisticLock(OptimisticLockingFailureException ex, HttpServletRequest request) {
+        log.warn(
+                "Conflit de modification concurrente sur {} {} (requestId={})",
+                request.getMethod(),
+                request.getRequestURI(),
+                MDC.get("requestId"));
+        return createProblem(
+                HttpStatus.CONFLICT,
+                "urn:ecole:problem:concurrent-modification",
+                "Conflit de modification concurrente",
+                "La ressource a été modifiée simultanément par une autre opération. Veuillez réessayer.",
+                request);
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ProblemDetail handleDataIntegrityViolation(
+            DataIntegrityViolationException ex,
+            HttpServletRequest request) {
+        log.warn(
+                "Conflit d'intégrité des données sur {} {} (requestId={})",
+                request.getMethod(),
+                request.getRequestURI(),
+                MDC.get("requestId"));
+        return createProblem(
+                HttpStatus.CONFLICT,
+                "urn:ecole:problem:data-conflict",
+                "Conflit d'intégrité",
+                "L'opération entre en conflit avec l'état courant ou une contrainte d'unicité.",
+                request);
+    }
+
     @ExceptionHandler(Exception.class)
     public ProblemDetail handleUnexpected(Exception ex, HttpServletRequest request) {
         // Ne journaliser ni corps, ni en-têtes, ni message potentiellement sensible.
         log.error(
-                "Erreur interne non gérée sur {} {} (type={})",
+                "Erreur interne non gérée sur {} {} (type={}, requestId={})",
                 request.getMethod(),
                 request.getRequestURI(),
-                ex.getClass().getSimpleName());
+                ex.getClass().getSimpleName(),
+                MDC.get("requestId"));
         return createProblem(
                 HttpStatus.INTERNAL_SERVER_ERROR,
                 "urn:ecole:problem:internal-error",
@@ -199,6 +235,10 @@ public class GlobalProblemHandler {
         problem.setTitle(title);
         problem.setInstance(URI.create(request.getRequestURI()));
         problem.setProperty("timestamp", Instant.now().toString());
+        String requestId = MDC.get("requestId");
+        if (requestId != null && !requestId.isBlank()) {
+            problem.setProperty("requestId", requestId);
+        }
         return problem;
     }
 

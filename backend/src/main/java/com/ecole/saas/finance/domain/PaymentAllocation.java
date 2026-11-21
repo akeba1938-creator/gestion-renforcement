@@ -6,6 +6,8 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.PreRemove;
+import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import java.util.Objects;
 import java.util.UUID;
@@ -37,6 +39,17 @@ public class PaymentAllocation extends TenantScopedEntity {
         this.paymentId = Objects.requireNonNull(paymentId, "L'identifiant du paiement est obligatoire.");
         this.scheduleId = Objects.requireNonNull(scheduleId, "L'identifiant de l'échéance est obligatoire.");
         this.amountXof = MoneyMath.requirePositive(amountXof, "Le montant imputé");
+    }
+
+    @Override
+    @PreUpdate
+    protected void onUpdate() {
+        throw new UnsupportedOperationException("Les imputations d'encaissement sont strictement immuables.");
+    }
+
+    @PreRemove
+    protected void onRemove() {
+        throw new UnsupportedOperationException("Les imputations d'encaissement ne peuvent jamais être supprimées.");
     }
 
     public UUID getId() {

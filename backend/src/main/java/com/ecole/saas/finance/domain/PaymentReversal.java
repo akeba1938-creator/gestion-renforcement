@@ -8,6 +8,8 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.PreRemove;
+import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.Objects;
@@ -78,6 +80,17 @@ public class PaymentReversal extends TenantScopedEntity {
         this.reason = reason.trim();
         this.approvedBy = Objects.requireNonNull(approvedBy, "Le valideur est obligatoire.");
         this.reversedAt = Objects.requireNonNull(reversedAt, "La date de contre-passation est obligatoire.");
+    }
+
+    @Override
+    @PreUpdate
+    protected void onUpdate() {
+        throw new UnsupportedOperationException("Les contre-passations validées sont strictement immuables.");
+    }
+
+    @PreRemove
+    protected void onRemove() {
+        throw new UnsupportedOperationException("Les contre-passations validées ne peuvent jamais être supprimées.");
     }
 
     public UUID getId() {
