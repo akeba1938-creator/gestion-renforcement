@@ -16,6 +16,8 @@ public interface TeacherDirectoryPort {
 
     Optional<TeacherSummary> findTeacherByUserId(UUID userId);
 
+    List<TeacherSummary> findAllActiveTeachers();
+
     List<TeacherAssignmentSummary> findActiveAssignmentsByTeacherId(UUID teacherId);
 
     List<TeacherAssignmentSummary> findActiveAssignmentsByUserId(UUID userId);

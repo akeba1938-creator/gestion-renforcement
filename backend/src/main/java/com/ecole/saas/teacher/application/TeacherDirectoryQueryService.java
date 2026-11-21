@@ -6,6 +6,7 @@ import com.ecole.saas.teacher.TeacherDirectoryPort;
 import com.ecole.saas.teacher.TeacherSummary;
 import com.ecole.saas.teacher.domain.Teacher;
 import com.ecole.saas.teacher.domain.TeacherAssignment;
+import com.ecole.saas.teacher.domain.TeacherStatus;
 import com.ecole.saas.teacher.infrastructure.TeacherAssignmentRepository;
 import com.ecole.saas.teacher.infrastructure.TeacherRepository;
 import java.util.List;
@@ -53,6 +54,15 @@ public class TeacherDirectoryQueryService implements TeacherDirectoryPort {
             return Optional.empty();
         }
         return teacherRepository.findByUserId(userId).map(TeacherDirectoryQueryService::toTeacherSummary);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<TeacherSummary> findAllActiveTeachers() {
+        TenantContext.requireCurrent();
+        return teacherRepository.findByStatusOrderByLastNameAscFirstNameAsc(TeacherStatus.ACTIVE).stream()
+                .map(TeacherDirectoryQueryService::toTeacherSummary)
+                .toList();
     }
 
     @Override

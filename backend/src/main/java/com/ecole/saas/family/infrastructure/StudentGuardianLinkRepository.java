@@ -32,4 +32,7 @@ public interface StudentGuardianLinkRepository extends JpaRepository<StudentGuar
     List<StudentGuardianLink> findByGuardianIdAndActiveTrue(UUID guardianId);
 
     List<StudentGuardianLink> findByGuardianIdInAndActiveTrue(Collection<UUID> guardianIds);
+
+    List<StudentGuardianLink> findByStudentIdInAndActiveTrueOrderByPrimaryContactDescCreatedAtAsc(
+            Collection<UUID> studentIds);
 }

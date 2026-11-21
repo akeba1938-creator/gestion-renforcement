@@ -18,6 +18,12 @@ public interface StudentDirectoryPort {
 
     List<StudentSummary> findStudentsByIds(Collection<UUID> studentIds);
 
+    Optional<StudentContactSummary> findStudentContactById(UUID studentId);
+
+    Optional<StudentContactSummary> findStudentContactByUserId(UUID userId);
+
+    List<StudentContactSummary> findStudentContactsByIds(Collection<UUID> studentIds);
+
     Optional<StudentEnrollmentSummary> findEnrollmentByStudentAndYear(UUID studentId, UUID academicYearId);
 
     Optional<StudentEnrollmentSummary> findCurrentEnrollmentForStudent(UUID studentId);

@@ -13,5 +13,6 @@ public enum AuditCategory {
     GRADE,
     ATTENDANCE,
     CENTER,
+    COMMUNICATION,
     AUDIT
 }

@@ -11,5 +11,7 @@ public interface StudentRepository extends JpaRepository<Student, UUID>, JpaSpec
 
     Optional<Student> findByMatricule(String matricule);
 
+    Optional<Student> findByUserId(UUID userId);
+
     long countByStatus(StudentStatus status);
 }
