@@ -1,9 +1,14 @@
 package com.ecole.saas.subscription.application;
 
+import com.ecole.saas.audit.AuditAction;
+import com.ecole.saas.audit.AuditCategory;
+import com.ecole.saas.audit.AuditLogPort;
+import com.ecole.saas.audit.PlatformAuditRecordCommand;
 import com.ecole.saas.subscription.domain.SubscriptionPlan;
 import com.ecole.saas.subscription.domain.SubscriptionPlanAlreadyExistsException;
 import com.ecole.saas.subscription.domain.SubscriptionPlanNotFoundException;
 import com.ecole.saas.subscription.infrastructure.SubscriptionPlanRepository;
+import java.util.Map;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,9 +24,11 @@ public class SubscriptionPlanService {
     private static final Logger log = LoggerFactory.getLogger(SubscriptionPlanService.class);
 
     private final SubscriptionPlanRepository planRepository;
+    private final AuditLogPort auditLogPort;
 
-    public SubscriptionPlanService(SubscriptionPlanRepository planRepository) {
+    public SubscriptionPlanService(SubscriptionPlanRepository planRepository, AuditLogPort auditLogPort) {
         this.planRepository = planRepository;
+        this.auditLogPort = auditLogPort;
     }
 
     @Transactional(readOnly = true)
@@ -79,6 +86,19 @@ public class SubscriptionPlanService {
                 maxStorageMb,
                 trialDays);
         SubscriptionPlan saved = planRepository.save(plan);
+        auditLogPort.recordPlatformEvent(PlatformAuditRecordCommand.success(
+                AuditCategory.SUBSCRIPTION,
+                AuditAction.SUBSCRIPTION_PLAN_CREATED,
+                null,
+                "SUBSCRIPTION_PLAN",
+                saved.getId(),
+                "Création d'un forfait d'abonnement SaaS.",
+                null,
+                Map.of(
+                        "planCode", saved.getCode(),
+                        "monthlyPriceXof", saved.getMonthlyPriceXof(),
+                        "yearlyPriceXof", saved.getYearlyPriceXof(),
+                        "maxStudents", saved.getMaxStudents())));
         log.info("Forfait créé (planId={}, code={})", saved.getId(), saved.getCode());
         return saved;
     }
@@ -106,6 +126,19 @@ public class SubscriptionPlanService {
                 maxStorageMb,
                 trialDays);
         SubscriptionPlan saved = planRepository.save(plan);
+        auditLogPort.recordPlatformEvent(PlatformAuditRecordCommand.success(
+                AuditCategory.SUBSCRIPTION,
+                AuditAction.SUBSCRIPTION_PLAN_UPDATED,
+                null,
+                "SUBSCRIPTION_PLAN",
+                saved.getId(),
+                "Mise à jour d'un forfait d'abonnement SaaS.",
+                null,
+                Map.of(
+                        "planCode", saved.getCode(),
+                        "monthlyPriceXof", saved.getMonthlyPriceXof(),
+                        "yearlyPriceXof", saved.getYearlyPriceXof(),
+                        "maxStudents", saved.getMaxStudents())));
         log.info("Forfait mis à jour (planId={}, code={})", saved.getId(), saved.getCode());
         return saved;
     }
@@ -116,6 +149,15 @@ public class SubscriptionPlanService {
         SubscriptionPlan plan = getPlan(planId);
         plan.activate();
         SubscriptionPlan saved = planRepository.save(plan);
+        auditLogPort.recordPlatformEvent(PlatformAuditRecordCommand.success(
+                AuditCategory.SUBSCRIPTION,
+                AuditAction.SUBSCRIPTION_PLAN_ACTIVATED,
+                null,
+                "SUBSCRIPTION_PLAN",
+                saved.getId(),
+                "Activation d'un forfait d'abonnement SaaS.",
+                null,
+                Map.of("planCode", saved.getCode())));
         log.info("Forfait activé (planId={}, code={})", saved.getId(), saved.getCode());
         return saved;
     }
@@ -126,6 +168,15 @@ public class SubscriptionPlanService {
         SubscriptionPlan plan = getPlan(planId);
         plan.deactivate();
         SubscriptionPlan saved = planRepository.save(plan);
+        auditLogPort.recordPlatformEvent(PlatformAuditRecordCommand.success(
+                AuditCategory.SUBSCRIPTION,
+                AuditAction.SUBSCRIPTION_PLAN_DEACTIVATED,
+                null,
+                "SUBSCRIPTION_PLAN",
+                saved.getId(),
+                "Désactivation d'un forfait d'abonnement SaaS.",
+                null,
+                Map.of("planCode", saved.getCode())));
         log.info("Forfait désactivé (planId={}, code={})", saved.getId(), saved.getCode());
         return saved;
     }

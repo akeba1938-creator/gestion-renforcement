@@ -3,6 +3,11 @@ package com.ecole.saas.finance.application;
 import com.ecole.saas.academic.AcademicStructurePort;
 import com.ecole.saas.academic.AcademicYearSummary;
 import com.ecole.saas.academic.GradeLevelSummary;
+import com.ecole.saas.audit.AuditAction;
+import com.ecole.saas.audit.AuditCategory;
+import com.ecole.saas.audit.AuditLogPort;
+import com.ecole.saas.audit.AuditOutcome;
+import com.ecole.saas.audit.AuditRecordCommand;
 import com.ecole.saas.finance.domain.FeeCategory;
 import com.ecole.saas.finance.domain.FeeFrequency;
 import com.ecole.saas.finance.domain.FeeItem;
@@ -15,6 +20,7 @@ import jakarta.persistence.criteria.Predicate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -32,14 +38,17 @@ public class FeeItemService {
     private final FeeItemRepository feeItemRepository;
     private final AcademicStructurePort academicStructurePort;
     private final FinanceSubscriptionGuard subscriptionGuard;
+    private final AuditLogPort auditLogPort;
 
     public FeeItemService(
             FeeItemRepository feeItemRepository,
             AcademicStructurePort academicStructurePort,
-            FinanceSubscriptionGuard subscriptionGuard) {
+            FinanceSubscriptionGuard subscriptionGuard,
+            AuditLogPort auditLogPort) {
         this.feeItemRepository = feeItemRepository;
         this.academicStructurePort = academicStructurePort;
         this.subscriptionGuard = subscriptionGuard;
+        this.auditLogPort = auditLogPort;
     }
 
     @PreAuthorize(FinanceRoles.READ_ROLES)
@@ -125,7 +134,15 @@ public class FeeItemService {
                 amountXof,
                 mandatory,
                 description);
-        return feeItemRepository.save(item);
+        FeeItem saved = feeItemRepository.save(item);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.FINANCE,
+                AuditAction.FEE_ITEM_CREATED,
+                "FEE_ITEM",
+                saved.getId(),
+                "Création d'un frais dans le catalogue financier.",
+                Map.of("code", saved.getCode(), "amountXof", saved.getAmountXof(), "category", saved.getCategory().name())));
+        return saved;
     }
 
     @PreAuthorize(FinanceRoles.CATALOG_WRITE_ROLES)
@@ -171,7 +188,16 @@ public class FeeItemService {
         FeeItem existing = requireFeeItem(feeItemId);
         requireMutableAcademicYear(existing.getAcademicYearId());
         existing.deactivate();
-        return feeItemRepository.save(existing);
+        FeeItem saved = feeItemRepository.save(existing);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.warning(
+                AuditCategory.FINANCE,
+                AuditAction.FEE_ITEM_DEACTIVATED,
+                AuditOutcome.SUCCESS,
+                "FEE_ITEM",
+                saved.getId(),
+                "Désactivation d'un frais du catalogue financier.",
+                Map.of("code", saved.getCode())));
+        return saved;
     }
 
     private FeeItem requireFeeItem(UUID feeItemId) {

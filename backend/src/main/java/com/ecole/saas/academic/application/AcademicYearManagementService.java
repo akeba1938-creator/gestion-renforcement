@@ -10,11 +10,17 @@ import com.ecole.saas.academic.domain.EvaluationPeriodPolicy;
 import com.ecole.saas.academic.domain.PeriodSystem;
 import com.ecole.saas.academic.infrastructure.AcademicYearRepository;
 import com.ecole.saas.academic.infrastructure.EvaluationPeriodRepository;
+import com.ecole.saas.audit.AuditAction;
+import com.ecole.saas.audit.AuditCategory;
+import com.ecole.saas.audit.AuditLogPort;
+import com.ecole.saas.audit.AuditOutcome;
+import com.ecole.saas.audit.AuditRecordCommand;
 import com.ecole.saas.school.SchoolDirectory;
 import com.ecole.saas.shared.domain.TenantContext;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,16 +46,19 @@ public class AcademicYearManagementService {
     private final AcademicYearRepository academicYearRepository;
     private final EvaluationPeriodRepository evaluationPeriodRepository;
     private final SchoolDirectory schoolDirectory;
+    private final AuditLogPort auditLogPort;
     private final Clock clock;
 
     public AcademicYearManagementService(
             AcademicYearRepository academicYearRepository,
             EvaluationPeriodRepository evaluationPeriodRepository,
             SchoolDirectory schoolDirectory,
+            AuditLogPort auditLogPort,
             Clock clock) {
         this.academicYearRepository = academicYearRepository;
         this.evaluationPeriodRepository = evaluationPeriodRepository;
         this.schoolDirectory = schoolDirectory;
+        this.auditLogPort = auditLogPort;
         this.clock = clock;
     }
 
@@ -102,6 +111,13 @@ public class AcademicYearManagementService {
                 AcademicYearStatus.DRAFT,
                 false);
         AcademicYear saved = academicYearRepository.save(year);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.ACADEMIC,
+                AuditAction.ACADEMIC_YEAR_CREATED,
+                "ACADEMIC_YEAR",
+                saved.getId(),
+                "Création d'une année scolaire.",
+                Map.of("code", saved.getCode(), "periodSystem", resolvedSystem.name())));
         log.info("Année scolaire créée (yearId={}, code={}, system={})", saved.getId(), saved.getCode(), resolvedSystem);
         return saved;
     }
@@ -141,6 +157,13 @@ public class AcademicYearManagementService {
         }
         year.activate(makeCurrent);
         AcademicYear saved = academicYearRepository.save(year);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.ACADEMIC,
+                AuditAction.ACADEMIC_YEAR_ACTIVATED,
+                "ACADEMIC_YEAR",
+                saved.getId(),
+                "Activation d'une année scolaire.",
+                Map.of("code", saved.getCode(), "current", saved.isCurrent())));
         log.info("Année scolaire activée (yearId={}, current={})", saved.getId(), saved.isCurrent());
         return saved;
     }
@@ -160,6 +183,13 @@ public class AcademicYearManagementService {
         clearCurrentYearIfOther(yearId);
         year.markAsCurrent();
         AcademicYear saved = academicYearRepository.save(year);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.ACADEMIC,
+                AuditAction.ACADEMIC_YEAR_SET_CURRENT,
+                "ACADEMIC_YEAR",
+                saved.getId(),
+                "Définition de l'année scolaire courante.",
+                Map.of("code", saved.getCode())));
         log.info("Année scolaire définie comme courante (yearId={})", saved.getId());
         return saved;
     }
@@ -171,6 +201,14 @@ public class AcademicYearManagementService {
         AcademicYear year = requireAcademicYear(yearId);
         year.close(clock.instant());
         AcademicYear saved = academicYearRepository.save(year);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.warning(
+                AuditCategory.ACADEMIC,
+                AuditAction.ACADEMIC_YEAR_CLOSED,
+                AuditOutcome.SUCCESS,
+                "ACADEMIC_YEAR",
+                saved.getId(),
+                "Clôture d'une année scolaire.",
+                Map.of("code", saved.getCode())));
         log.info("Année scolaire clôturée (yearId={})", saved.getId());
         return saved;
     }
@@ -182,6 +220,14 @@ public class AcademicYearManagementService {
         AcademicYear year = requireAcademicYear(yearId);
         year.archive(clock.instant());
         AcademicYear saved = academicYearRepository.save(year);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.critical(
+                AuditCategory.ACADEMIC,
+                AuditAction.ACADEMIC_YEAR_ARCHIVED,
+                AuditOutcome.SUCCESS,
+                "ACADEMIC_YEAR",
+                saved.getId(),
+                "Archivage définitif d'une année scolaire.",
+                Map.of("code", saved.getCode())));
         log.info("Année scolaire archivée (yearId={})", saved.getId());
         return saved;
     }

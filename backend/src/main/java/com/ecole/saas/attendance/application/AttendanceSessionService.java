@@ -6,6 +6,11 @@ import com.ecole.saas.academic.ClassRoomSummary;
 import com.ecole.saas.academic.EvaluationPeriodSummary;
 import com.ecole.saas.academic.SubjectSummary;
 import com.ecole.saas.attendance.StudentAttendanceSummary;
+import com.ecole.saas.audit.AuditAction;
+import com.ecole.saas.audit.AuditCategory;
+import com.ecole.saas.audit.AuditLogPort;
+import com.ecole.saas.audit.AuditOutcome;
+import com.ecole.saas.audit.AuditRecordCommand;
 import com.ecole.saas.attendance.domain.AttendanceConflictException;
 import com.ecole.saas.attendance.domain.AttendanceForbiddenException;
 import com.ecole.saas.attendance.domain.AttendanceNotFoundException;
@@ -83,6 +88,7 @@ public class AttendanceSessionService {
     private final TeacherDirectoryPort teacherDirectoryPort;
     private final AttendanceSubscriptionGuard subscriptionGuard;
     private final AttendanceTeacherScopeGuard teacherScopeGuard;
+    private final AuditLogPort auditLogPort;
     private final Clock clock;
 
     public AttendanceSessionService(
@@ -93,6 +99,7 @@ public class AttendanceSessionService {
             TeacherDirectoryPort teacherDirectoryPort,
             AttendanceSubscriptionGuard subscriptionGuard,
             AttendanceTeacherScopeGuard teacherScopeGuard,
+            AuditLogPort auditLogPort,
             Clock clock) {
         this.sessionRepository = sessionRepository;
         this.recordRepository = recordRepository;
@@ -101,6 +108,7 @@ public class AttendanceSessionService {
         this.teacherDirectoryPort = teacherDirectoryPort;
         this.subscriptionGuard = subscriptionGuard;
         this.teacherScopeGuard = teacherScopeGuard;
+        this.auditLogPort = auditLogPort;
         this.clock = clock;
     }
 
@@ -261,6 +269,16 @@ public class AttendanceSessionService {
             }
         }
 
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.ATTENDANCE,
+                AuditAction.ATTENDANCE_SESSION_CREATED,
+                "ATTENDANCE_SESSION",
+                saved.getId(),
+                "Ouverture d'une séance d'appel.",
+                Map.of(
+                        "classRoomId", classRoomId.toString(),
+                        "sessionDate", sessionDate.toString(),
+                        "timeSlot", timeSlot.name())));
         return toSessionView(saved, enrichRecordViews(initialRecords));
     }
 
@@ -349,6 +367,13 @@ public class AttendanceSessionService {
 
         session.submit(clock.instant());
         AttendanceSession saved = sessionRepository.save(session);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.ATTENDANCE,
+                AuditAction.ATTENDANCE_SESSION_SUBMITTED,
+                "ATTENDANCE_SESSION",
+                saved.getId(),
+                "Soumission d'une feuille d'appel.",
+                Map.of("classRoomId", saved.getClassRoomId().toString(), "sessionDate", saved.getSessionDate().toString())));
         List<AttendanceRecord> records = recordRepository.findBySessionIdOrderByCreatedAtAsc(sessionId);
         return toSessionView(saved, enrichRecordViews(records));
     }
@@ -362,6 +387,14 @@ public class AttendanceSessionService {
         AttendanceSession session = requireSession(sessionId);
         session.lock(actorId, clock.instant());
         AttendanceSession saved = sessionRepository.save(session);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.critical(
+                AuditCategory.ATTENDANCE,
+                AuditAction.ATTENDANCE_SESSION_LOCKED,
+                AuditOutcome.SUCCESS,
+                "ATTENDANCE_SESSION",
+                saved.getId(),
+                "Verrouillage définitif d'une feuille d'appel.",
+                Map.of("classRoomId", saved.getClassRoomId().toString(), "sessionDate", saved.getSessionDate().toString())));
         List<AttendanceRecord> records = recordRepository.findBySessionIdOrderByCreatedAtAsc(sessionId);
         return toSessionView(saved, enrichRecordViews(records));
     }
@@ -375,6 +408,14 @@ public class AttendanceSessionService {
         AttendanceSession session = requireSession(sessionId);
         session.cancel(reason);
         AttendanceSession saved = sessionRepository.save(session);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.warning(
+                AuditCategory.ATTENDANCE,
+                AuditAction.ATTENDANCE_SESSION_CANCELLED,
+                AuditOutcome.SUCCESS,
+                "ATTENDANCE_SESSION",
+                saved.getId(),
+                "Annulation d'une feuille d'appel.",
+                Map.of("classRoomId", saved.getClassRoomId().toString(), "sessionDate", saved.getSessionDate().toString())));
         List<AttendanceRecord> records = recordRepository.findBySessionIdOrderByCreatedAtAsc(sessionId);
         return toSessionView(saved, enrichRecordViews(records));
     }
@@ -401,6 +442,15 @@ public class AttendanceSessionService {
 
         record.justify(reason, documentRef, actorId, clock.instant());
         AttendanceRecord saved = recordRepository.save(record);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.ATTENDANCE,
+                AuditAction.ATTENDANCE_JUSTIFIED,
+                "ATTENDANCE_RECORD",
+                saved.getId(),
+                "Justification d'une absence ou d'un retard élève.",
+                Map.of(
+                        "sessionId", saved.getSessionId().toString(),
+                        "studentId", saved.getStudentId().toString())));
         return enrichRecordViews(List.of(saved)).getFirst();
     }
 

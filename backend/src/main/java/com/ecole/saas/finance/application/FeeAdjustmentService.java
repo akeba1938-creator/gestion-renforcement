@@ -1,5 +1,10 @@
 package com.ecole.saas.finance.application;
 
+import com.ecole.saas.audit.AuditAction;
+import com.ecole.saas.audit.AuditCategory;
+import com.ecole.saas.audit.AuditLogPort;
+import com.ecole.saas.audit.AuditOutcome;
+import com.ecole.saas.audit.AuditRecordCommand;
 import com.ecole.saas.finance.domain.AdjustmentCalculationMode;
 import com.ecole.saas.finance.domain.AdjustmentType;
 import com.ecole.saas.finance.domain.ApprovalStatus;
@@ -21,6 +26,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -40,6 +46,7 @@ public class FeeAdjustmentService {
     private final PaymentScheduleRepository scheduleRepository;
     private final LedgerPostingHelper ledgerPostingHelper;
     private final FinanceSubscriptionGuard subscriptionGuard;
+    private final AuditLogPort auditLogPort;
     private final Clock clock;
 
     public FeeAdjustmentService(
@@ -48,12 +55,14 @@ public class FeeAdjustmentService {
             PaymentScheduleRepository scheduleRepository,
             LedgerPostingHelper ledgerPostingHelper,
             FinanceSubscriptionGuard subscriptionGuard,
+            AuditLogPort auditLogPort,
             Clock clock) {
         this.adjustmentRepository = adjustmentRepository;
         this.invoiceRepository = invoiceRepository;
         this.scheduleRepository = scheduleRepository;
         this.ledgerPostingHelper = ledgerPostingHelper;
         this.subscriptionGuard = subscriptionGuard;
+        this.auditLogPort = auditLogPort;
         this.clock = clock;
     }
 
@@ -160,7 +169,18 @@ public class FeeAdjustmentService {
                             + " FCFA) dépasse le solde restant dû (" + invoice.getBalanceXof() + " FCFA).");
         }
 
-        return adjustmentRepository.save(adjustment);
+        FeeAdjustment saved = adjustmentRepository.save(adjustment);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.FINANCE,
+                AuditAction.FEE_ADJUSTMENT_REQUESTED,
+                "FEE_ADJUSTMENT",
+                saved.getId(),
+                "Demande de remise ou bourse sur une facture.",
+                Map.of(
+                        "invoiceId", saved.getInvoiceId().toString(),
+                        "adjustmentType", saved.getAdjustmentType().name(),
+                        "resolvedAmountXof", saved.getResolvedAmountXof())));
+        return saved;
     }
 
     @PreAuthorize(FinanceRoles.APPROVAL_ROLES)
@@ -197,6 +217,18 @@ public class FeeAdjustmentService {
                 actorId,
                 now);
 
+        auditLogPort.recordTenantEvent(AuditRecordCommand.warning(
+                AuditCategory.FINANCE,
+                AuditAction.FEE_ADJUSTMENT_APPROVED,
+                AuditOutcome.SUCCESS,
+                "FEE_ADJUSTMENT",
+                adjustment.getId(),
+                "Approbation d'une remise ou bourse financière.",
+                Map.of(
+                        "invoiceId", invoice.getId().toString(),
+                        "adjustmentType", adjustment.getAdjustmentType().name(),
+                        "resolvedAmountXof", adjustment.getResolvedAmountXof())));
+
         return adjustment;
     }
 
@@ -208,7 +240,17 @@ public class FeeAdjustmentService {
 
         FeeAdjustment adjustment = requireAdjustment(adjustmentId);
         adjustment.reject(actorId, clock.instant(), decisionNote);
-        return adjustmentRepository.save(adjustment);
+        FeeAdjustment saved = adjustmentRepository.save(adjustment);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.FINANCE,
+                AuditAction.FEE_ADJUSTMENT_REJECTED,
+                "FEE_ADJUSTMENT",
+                saved.getId(),
+                "Rejet d'une demande de remise ou bourse financière.",
+                Map.of(
+                        "invoiceId", saved.getInvoiceId().toString(),
+                        "resolvedAmountXof", saved.getResolvedAmountXof())));
+        return saved;
     }
 
     private FeeAdjustment requireAdjustment(UUID adjustmentId) {

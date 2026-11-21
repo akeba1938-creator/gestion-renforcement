@@ -9,10 +9,16 @@ import com.ecole.saas.academic.domain.EvaluationPeriodPolicy;
 import com.ecole.saas.academic.domain.PeriodSystem;
 import com.ecole.saas.academic.infrastructure.AcademicYearRepository;
 import com.ecole.saas.academic.infrastructure.EvaluationPeriodRepository;
+import com.ecole.saas.audit.AuditAction;
+import com.ecole.saas.audit.AuditCategory;
+import com.ecole.saas.audit.AuditLogPort;
+import com.ecole.saas.audit.AuditOutcome;
+import com.ecole.saas.audit.AuditRecordCommand;
 import com.ecole.saas.shared.domain.TenantContext;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -32,14 +38,17 @@ public class EvaluationPeriodService {
 
     private final AcademicYearRepository academicYearRepository;
     private final EvaluationPeriodRepository evaluationPeriodRepository;
+    private final AuditLogPort auditLogPort;
     private final Clock clock;
 
     public EvaluationPeriodService(
             AcademicYearRepository academicYearRepository,
             EvaluationPeriodRepository evaluationPeriodRepository,
+            AuditLogPort auditLogPort,
             Clock clock) {
         this.academicYearRepository = academicYearRepository;
         this.evaluationPeriodRepository = evaluationPeriodRepository;
+        this.auditLogPort = auditLogPort;
         this.clock = clock;
     }
 
@@ -101,7 +110,15 @@ public class EvaluationPeriodService {
                 startDate,
                 endDate,
                 effectiveWeight);
-        return evaluationPeriodRepository.save(period);
+        EvaluationPeriod saved = evaluationPeriodRepository.save(period);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.ACADEMIC,
+                AuditAction.EVALUATION_PERIOD_CREATED,
+                "EVALUATION_PERIOD",
+                saved.getId(),
+                "Création d'une période d'évaluation.",
+                Map.of("academicYearId", academicYearId.toString(), "code", saved.getCode())));
+        return saved;
     }
 
     @PreAuthorize(WRITE_ROLES)
@@ -116,7 +133,15 @@ public class EvaluationPeriodService {
                     "Des périodes d'évaluation existent déjà pour cette année scolaire.");
         }
         List<EvaluationPeriod> generated = EvaluationPeriodPolicy.buildStandardPeriods(year);
-        return evaluationPeriodRepository.saveAll(generated);
+        List<EvaluationPeriod> saved = evaluationPeriodRepository.saveAll(generated);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.ACADEMIC,
+                AuditAction.EVALUATION_PERIOD_CREATED,
+                "ACADEMIC_YEAR",
+                academicYearId,
+                "Génération automatique des périodes d'évaluation standard.",
+                Map.of("periodCount", saved.size(), "periodSystem", year.getPeriodSystem().name())));
+        return saved;
     }
 
     @PreAuthorize(WRITE_ROLES)
@@ -155,7 +180,15 @@ public class EvaluationPeriodService {
         EvaluationPeriod period = requirePeriod(periodId);
         requireAcademicYear(period.getAcademicYearId()).assertMutable();
         period.open();
-        return evaluationPeriodRepository.save(period);
+        EvaluationPeriod saved = evaluationPeriodRepository.save(period);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.ACADEMIC,
+                AuditAction.EVALUATION_PERIOD_OPENED,
+                "EVALUATION_PERIOD",
+                saved.getId(),
+                "Ouverture d'une période d'évaluation.",
+                Map.of("code", saved.getCode(), "academicYearId", saved.getAcademicYearId().toString())));
+        return saved;
     }
 
     @PreAuthorize(WRITE_ROLES)
@@ -165,7 +198,16 @@ public class EvaluationPeriodService {
         EvaluationPeriod period = requirePeriod(periodId);
         requireAcademicYear(period.getAcademicYearId()).assertMutable();
         period.close();
-        return evaluationPeriodRepository.save(period);
+        EvaluationPeriod saved = evaluationPeriodRepository.save(period);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.warning(
+                AuditCategory.ACADEMIC,
+                AuditAction.EVALUATION_PERIOD_CLOSED,
+                AuditOutcome.SUCCESS,
+                "EVALUATION_PERIOD",
+                saved.getId(),
+                "Clôture d'une période d'évaluation.",
+                Map.of("code", saved.getCode(), "academicYearId", saved.getAcademicYearId().toString())));
+        return saved;
     }
 
     @PreAuthorize(WRITE_ROLES)
@@ -175,7 +217,16 @@ public class EvaluationPeriodService {
         EvaluationPeriod period = requirePeriod(periodId);
         requireAcademicYear(period.getAcademicYearId()).assertMutable();
         period.reopen();
-        return evaluationPeriodRepository.save(period);
+        EvaluationPeriod saved = evaluationPeriodRepository.save(period);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.warning(
+                AuditCategory.ACADEMIC,
+                AuditAction.EVALUATION_PERIOD_REOPENED,
+                AuditOutcome.SUCCESS,
+                "EVALUATION_PERIOD",
+                saved.getId(),
+                "Réouverture d'une période d'évaluation clôturée.",
+                Map.of("code", saved.getCode(), "academicYearId", saved.getAcademicYearId().toString())));
+        return saved;
     }
 
     @PreAuthorize(WRITE_ROLES)
@@ -185,7 +236,16 @@ public class EvaluationPeriodService {
         EvaluationPeriod period = requirePeriod(periodId);
         requireAcademicYear(period.getAcademicYearId()).assertMutable();
         period.lock(clock.instant());
-        return evaluationPeriodRepository.save(period);
+        EvaluationPeriod saved = evaluationPeriodRepository.save(period);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.critical(
+                AuditCategory.ACADEMIC,
+                AuditAction.EVALUATION_PERIOD_LOCKED,
+                AuditOutcome.SUCCESS,
+                "EVALUATION_PERIOD",
+                saved.getId(),
+                "Verrouillage définitif d'une période d'évaluation.",
+                Map.of("code", saved.getCode(), "academicYearId", saved.getAcademicYearId().toString())));
+        return saved;
     }
 
     private AcademicYear requireAcademicYear(UUID academicYearId) {

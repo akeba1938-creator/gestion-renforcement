@@ -1,5 +1,13 @@
 package com.ecole.saas.identity.application;
 
+import com.ecole.saas.audit.AuditAction;
+import com.ecole.saas.audit.AuditActorType;
+import com.ecole.saas.audit.AuditCategory;
+import com.ecole.saas.audit.AuditLogPort;
+import com.ecole.saas.audit.AuditOutcome;
+import com.ecole.saas.audit.AuditRecordCommand;
+import com.ecole.saas.audit.AuditSeverity;
+import com.ecole.saas.audit.PlatformAuditRecordCommand;
 import com.ecole.saas.identity.domain.AccountLockedException;
 import com.ecole.saas.identity.domain.AccountRef;
 import com.ecole.saas.identity.domain.AuthenticationFailedException;
@@ -37,6 +45,7 @@ import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.Set;
@@ -70,6 +79,7 @@ public class AuthService {
     private final PasswordHasher passwordHasher;
     private final SecretCipher secretCipher;
     private final TokenIssuer tokenIssuer;
+    private final AuditLogPort auditLogPort;
     private final TransactionTemplate transactionTemplate;
     private final TransactionTemplate readOnlyTransactionTemplate;
     private final Clock clock;
@@ -86,6 +96,7 @@ public class AuthService {
             PasswordHasher passwordHasher,
             SecretCipher secretCipher,
             TokenIssuer tokenIssuer,
+            AuditLogPort auditLogPort,
             PlatformTransactionManager transactionManager,
             Clock clock) {
         this.schoolDirectory = schoolDirectory;
@@ -97,6 +108,7 @@ public class AuthService {
         this.passwordHasher = passwordHasher;
         this.secretCipher = secretCipher;
         this.tokenIssuer = tokenIssuer;
+        this.auditLogPort = auditLogPort;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.readOnlyTransactionTemplate = new TransactionTemplate(transactionManager);
         this.readOnlyTransactionTemplate.setReadOnly(true);
@@ -125,6 +137,13 @@ public class AuthService {
                     }
                     User user = userOpt.get();
                     if (user.getSecurity().isLocked(now)) {
+                        auditTenantAuth(
+                                AuditAction.AUTH_ACCOUNT_LOCKED,
+                                AuditOutcome.DENIED,
+                                AuditSeverity.WARNING,
+                                user.getId(),
+                                "Tentative de connexion sur un compte utilisateur verrouillé.",
+                                Map.of("reason", "ACCOUNT_LOCKED"));
                         return LoginTxOutcome.locked();
                     }
                     if (!user.isActive()) {
@@ -135,9 +154,23 @@ public class AuthService {
                         userRepository.save(user);
                         if (justLocked) {
                             log.warn("Compte utilisateur verrouillé après échecs répétés (accountId={})", user.getId());
+                            auditTenantAuth(
+                                    AuditAction.AUTH_ACCOUNT_LOCKED,
+                                    AuditOutcome.DENIED,
+                                    AuditSeverity.CRITICAL,
+                                    user.getId(),
+                                    "Compte utilisateur verrouillé après échecs d'authentification répétés.",
+                                    Map.of("failedAttempts", user.getSecurity().getFailedLoginAttempts()));
                             return LoginTxOutcome.locked();
                         }
                         log.info("Échec d'authentification utilisateur (accountId={})", user.getId());
+                        auditTenantAuth(
+                                AuditAction.AUTH_LOGIN_FAILED,
+                                AuditOutcome.FAILURE,
+                                AuditSeverity.WARNING,
+                                user.getId(),
+                                "Échec d'authentification d'un utilisateur d'établissement.",
+                                Map.of("failedAttempts", user.getSecurity().getFailedLoginAttempts()));
                         return LoginTxOutcome.invalidCredentials();
                     }
 
@@ -152,6 +185,13 @@ public class AuthService {
                     AccountRef account = AccountRef.user(user.getId(), school.id());
                     if (MfaPolicy.isRequiredForTenantUser(roleCodes, user.getSecurity().isMfaEnabled())) {
                         IssuedToken mfaToken = tokenIssuer.issueMfaPendingToken(account);
+                        auditTenantAuth(
+                                AuditAction.AUTH_MFA_CHALLENGE_ISSUED,
+                                AuditOutcome.SUCCESS,
+                                AuditSeverity.INFO,
+                                user.getId(),
+                                "Défi MFA émis pour un utilisateur d'établissement.",
+                                Map.of("enrollmentRequired", !user.getSecurity().isMfaEnabled()));
                         return LoginTxOutcome.authenticated(AuthOutcome.mfaChallenge(
                                 !user.getSecurity().isMfaEnabled(),
                                 mfaToken.value(),
@@ -159,6 +199,13 @@ public class AuthService {
                     }
 
                     AuthOutcome authOutcome = issueTenantSession(user, school, roleCodes, UUID.randomUUID(), now);
+                    auditTenantAuth(
+                            AuditAction.AUTH_LOGIN_SUCCESS,
+                            AuditOutcome.SUCCESS,
+                            AuditSeverity.INFO,
+                            user.getId(),
+                            "Connexion réussie d'un utilisateur d'établissement.",
+                            Map.of("mfaRequired", false));
                     return LoginTxOutcome.authenticated(authOutcome);
                 }));
 
@@ -176,6 +223,13 @@ public class AuthService {
             }
             PlatformAdmin admin = adminOpt.get();
             if (admin.getSecurity().isLocked(now)) {
+                auditPlatformAuth(
+                        AuditAction.AUTH_ACCOUNT_LOCKED,
+                        AuditOutcome.DENIED,
+                        AuditSeverity.WARNING,
+                        admin.getId(),
+                        "Tentative de connexion sur un compte administrateur SaaS verrouillé.",
+                        Map.of("reason", "ACCOUNT_LOCKED"));
                 return LoginTxOutcome.locked();
             }
             if (!admin.isActive()) {
@@ -186,9 +240,23 @@ public class AuthService {
                 platformAdminRepository.save(admin);
                 if (justLocked) {
                     log.warn("Compte administrateur SaaS verrouillé après échecs répétés (accountId={})", admin.getId());
+                    auditPlatformAuth(
+                            AuditAction.AUTH_ACCOUNT_LOCKED,
+                            AuditOutcome.DENIED,
+                            AuditSeverity.CRITICAL,
+                            admin.getId(),
+                            "Compte administrateur SaaS verrouillé après échecs répétés.",
+                            Map.of("failedAttempts", admin.getSecurity().getFailedLoginAttempts()));
                     return LoginTxOutcome.locked();
                 }
                 log.info("Échec d'authentification administrateur SaaS (accountId={})", admin.getId());
+                auditPlatformAuth(
+                        AuditAction.AUTH_LOGIN_FAILED,
+                        AuditOutcome.FAILURE,
+                        AuditSeverity.WARNING,
+                        admin.getId(),
+                        "Échec d'authentification d'un administrateur SaaS.",
+                        Map.of("failedAttempts", admin.getSecurity().getFailedLoginAttempts()));
                 return LoginTxOutcome.invalidCredentials();
             }
 
@@ -198,6 +266,13 @@ public class AuthService {
             AccountRef account = AccountRef.platformAdmin(admin.getId());
             if (MfaPolicy.isRequiredForPlatformAdmin()) {
                 IssuedToken mfaToken = tokenIssuer.issueMfaPendingToken(account);
+                auditPlatformAuth(
+                        AuditAction.AUTH_MFA_CHALLENGE_ISSUED,
+                        AuditOutcome.SUCCESS,
+                        AuditSeverity.INFO,
+                        admin.getId(),
+                        "Défi MFA émis pour un administrateur SaaS.",
+                        Map.of("enrollmentRequired", !admin.getSecurity().isMfaEnabled()));
                 return LoginTxOutcome.authenticated(AuthOutcome.mfaChallenge(
                         !admin.getSecurity().isMfaEnabled(),
                         mfaToken.value(),
@@ -205,6 +280,13 @@ public class AuthService {
             }
 
             AuthOutcome authOutcome = issuePlatformSession(admin, UUID.randomUUID(), now);
+            auditPlatformAuth(
+                    AuditAction.AUTH_LOGIN_SUCCESS,
+                    AuditOutcome.SUCCESS,
+                    AuditSeverity.INFO,
+                    admin.getId(),
+                    "Connexion réussie d'un administrateur SaaS.",
+                    Map.of("mfaRequired", false));
             return LoginTxOutcome.authenticated(authOutcome);
         });
 
@@ -228,6 +310,13 @@ public class AuthService {
                 user.getSecurity().startMfaEnrollment(encryptedSecret);
                 userRepository.save(user);
                 accountEmail = user.getEmail();
+                auditTenantAuth(
+                        AuditAction.AUTH_MFA_ENROLLED,
+                        AuditOutcome.SUCCESS,
+                        AuditSeverity.INFO,
+                        user.getId(),
+                        "Enrôlement MFA TOTP initié pour un utilisateur d'établissement.",
+                        Map.of("algorithm", "TOTP_SHA1"));
             } else {
                 PlatformAdmin admin = platformAdminRepository.findById(account.accountId())
                         .orElseThrow(() -> new AuthenticationFailedException("Compte introuvable."));
@@ -235,6 +324,13 @@ public class AuthService {
                 admin.getSecurity().startMfaEnrollment(encryptedSecret);
                 platformAdminRepository.save(admin);
                 accountEmail = admin.getEmail();
+                auditPlatformAuth(
+                        AuditAction.AUTH_MFA_ENROLLED,
+                        AuditOutcome.SUCCESS,
+                        AuditSeverity.INFO,
+                        admin.getId(),
+                        "Enrôlement MFA TOTP initié pour un administrateur SaaS.",
+                        Map.of("algorithm", "TOTP_SHA1"));
             }
 
             String otpauthUri = buildOtpauthUri(accountEmail, base32Secret);
@@ -278,9 +374,23 @@ public class AuthService {
                     userRepository.save(user);
                     if (justLocked) {
                         log.warn("Compte utilisateur verrouillé après échecs MFA (accountId={})", user.getId());
+                        auditTenantAuth(
+                                AuditAction.AUTH_ACCOUNT_LOCKED,
+                                AuditOutcome.DENIED,
+                                AuditSeverity.CRITICAL,
+                                user.getId(),
+                                "Compte utilisateur verrouillé après échecs MFA répétés.",
+                                Map.of("failedAttempts", security.getFailedLoginAttempts()));
                         return MfaTxOutcome.locked();
                     }
                     log.info("Code MFA invalide pour utilisateur (accountId={})", user.getId());
+                    auditTenantAuth(
+                            AuditAction.AUTH_MFA_FAILED,
+                            AuditOutcome.FAILURE,
+                            AuditSeverity.WARNING,
+                            user.getId(),
+                            "Échec de vérification du code MFA utilisateur.",
+                            Map.of("failedAttempts", security.getFailedLoginAttempts()));
                     return MfaTxOutcome.invalidCode();
                 }
 
@@ -295,6 +405,13 @@ public class AuthService {
 
                 AuthOutcome authOutcome =
                         issueTenantSession(user, schoolOpt.get(), roleCodes, UUID.randomUUID(), now);
+                auditTenantAuth(
+                        AuditAction.AUTH_MFA_VERIFIED,
+                        AuditOutcome.SUCCESS,
+                        AuditSeverity.INFO,
+                        user.getId(),
+                        "Vérification MFA réussie et session utilisateur ouverte.",
+                        Map.of("mfaEnabled", true));
                 return MfaTxOutcome.success(authOutcome);
             } else {
                 Optional<PlatformAdmin> adminOpt = platformAdminRepository.findById(account.accountId());
@@ -319,9 +436,23 @@ public class AuthService {
                     platformAdminRepository.save(admin);
                     if (justLocked) {
                         log.warn("Compte administrateur SaaS verrouillé après échecs MFA (accountId={})", admin.getId());
+                        auditPlatformAuth(
+                                AuditAction.AUTH_ACCOUNT_LOCKED,
+                                AuditOutcome.DENIED,
+                                AuditSeverity.CRITICAL,
+                                admin.getId(),
+                                "Compte administrateur SaaS verrouillé après échecs MFA répétés.",
+                                Map.of("failedAttempts", security.getFailedLoginAttempts()));
                         return MfaTxOutcome.locked();
                     }
                     log.info("Code MFA invalide pour administrateur SaaS (accountId={})", admin.getId());
+                    auditPlatformAuth(
+                            AuditAction.AUTH_MFA_FAILED,
+                            AuditOutcome.FAILURE,
+                            AuditSeverity.WARNING,
+                            admin.getId(),
+                            "Échec de vérification du code MFA administrateur SaaS.",
+                            Map.of("failedAttempts", security.getFailedLoginAttempts()));
                     return MfaTxOutcome.invalidCode();
                 }
 
@@ -330,6 +461,13 @@ public class AuthService {
                 platformAdminRepository.save(admin);
 
                 AuthOutcome authOutcome = issuePlatformSession(admin, UUID.randomUUID(), now);
+                auditPlatformAuth(
+                        AuditAction.AUTH_MFA_VERIFIED,
+                        AuditOutcome.SUCCESS,
+                        AuditSeverity.INFO,
+                        admin.getId(),
+                        "Vérification MFA réussie et session administrateur SaaS ouverte.",
+                        Map.of("mfaEnabled", true));
                 return MfaTxOutcome.success(authOutcome);
             }
         });
@@ -387,11 +525,29 @@ public class AuthService {
                     TenantId.of(parsed.tenantId()),
                     () -> transactionTemplate.executeWithoutResult(status -> refreshTokenRepository
                             .findByTokenHashForUpdate(parsed.tokenHash())
-                            .ifPresent(token -> revokeTenantFamily(token.getFamilyId(), now))));
+                            .ifPresent(token -> {
+                                revokeTenantFamily(token.getFamilyId(), now);
+                                auditTenantAuth(
+                                        AuditAction.AUTH_LOGOUT,
+                                        AuditOutcome.SUCCESS,
+                                        AuditSeverity.INFO,
+                                        token.getUserId(),
+                                        "Déconnexion et révocation de la famille de sessions utilisateur.",
+                                        Map.of("familyId", token.getFamilyId().toString()));
+                            })));
         } else {
             transactionTemplate.executeWithoutResult(status -> platformRefreshTokenRepository
                     .findByTokenHashForUpdate(parsed.tokenHash())
-                    .ifPresent(token -> revokePlatformFamily(token.getFamilyId(), now)));
+                    .ifPresent(token -> {
+                        revokePlatformFamily(token.getFamilyId(), now);
+                        auditPlatformAuth(
+                                AuditAction.AUTH_LOGOUT,
+                                AuditOutcome.SUCCESS,
+                                AuditSeverity.INFO,
+                                token.getAdminId(),
+                                "Déconnexion et révocation de la famille de sessions administrateur SaaS.",
+                                Map.of("familyId", token.getFamilyId().toString()));
+                    }));
         }
     }
 
@@ -434,6 +590,13 @@ public class AuthService {
             log.warn(
                     "Réutilisation d'un jeton de renouvellement révoqué détectée ; famille révoquée (familyId={})",
                     current.getFamilyId());
+            auditTenantAuth(
+                    AuditAction.AUTH_REFRESH_REUSE_DETECTED,
+                    AuditOutcome.DENIED,
+                    AuditSeverity.CRITICAL,
+                    current.getUserId(),
+                    "Réutilisation d'un jeton de renouvellement révoqué détectée : famille révoquée.",
+                    Map.of("familyId", current.getFamilyId().toString()));
             return RefreshTxOutcome.reused();
         }
         if (current.isExpired(now)) {
@@ -482,6 +645,13 @@ public class AuthService {
             log.warn(
                     "Réutilisation d'un jeton de renouvellement plateforme révoqué détectée ; famille révoquée (familyId={})",
                     current.getFamilyId());
+            auditPlatformAuth(
+                    AuditAction.AUTH_REFRESH_REUSE_DETECTED,
+                    AuditOutcome.DENIED,
+                    AuditSeverity.CRITICAL,
+                    current.getAdminId(),
+                    "Réutilisation d'un jeton de renouvellement plateforme révoqué détectée : famille révoquée.",
+                    Map.of("familyId", current.getFamilyId().toString()));
             return RefreshTxOutcome.reused();
         }
         if (current.isExpired(now)) {
@@ -667,6 +837,50 @@ public class AuthService {
                 null,
                 null,
                 null);
+    }
+
+    private void auditTenantAuth(
+            AuditAction action,
+            AuditOutcome outcome,
+            AuditSeverity severity,
+            UUID userId,
+            String summary,
+            Map<String, Object> metadata) {
+        auditLogPort.recordTenantEvent(new AuditRecordCommand(
+                AuditCategory.AUTH,
+                action,
+                outcome,
+                severity,
+                "USER",
+                userId,
+                summary,
+                userId,
+                userId != null ? AuditActorType.USER : AuditActorType.ANONYMOUS,
+                null,
+                metadata));
+    }
+
+    private void auditPlatformAuth(
+            AuditAction action,
+            AuditOutcome outcome,
+            AuditSeverity severity,
+            UUID adminId,
+            String summary,
+            Map<String, Object> metadata) {
+        auditLogPort.recordPlatformEvent(new PlatformAuditRecordCommand(
+                AuditCategory.AUTH,
+                action,
+                outcome,
+                severity,
+                null,
+                "PLATFORM_ADMIN",
+                adminId,
+                summary,
+                null,
+                adminId,
+                adminId != null ? AuditActorType.PLATFORM_ADMIN : AuditActorType.ANONYMOUS,
+                RoleCode.ADMIN_SAAS.name(),
+                metadata));
     }
 
     private enum LoginState {

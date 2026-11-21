@@ -2,6 +2,11 @@ package com.ecole.saas.center.application;
 
 import com.ecole.saas.academic.AcademicStructurePort;
 import com.ecole.saas.academic.SubjectSummary;
+import com.ecole.saas.audit.AuditAction;
+import com.ecole.saas.audit.AuditCategory;
+import com.ecole.saas.audit.AuditLogPort;
+import com.ecole.saas.audit.AuditOutcome;
+import com.ecole.saas.audit.AuditRecordCommand;
 import com.ecole.saas.center.domain.CenterAttendanceStatus;
 import com.ecole.saas.center.domain.CenterConflictException;
 import com.ecole.saas.center.domain.CenterGroup;
@@ -67,6 +72,7 @@ public class CenterSessionService {
     private final CenterSubscriptionGuard subscriptionGuard;
     private final CenterSchoolGuard schoolGuard;
     private final CenterTutorScopeGuard tutorScopeGuard;
+    private final AuditLogPort auditLogPort;
 
     public CenterSessionService(
             CenterGroupRepository groupRepository,
@@ -80,7 +86,8 @@ public class CenterSessionService {
             StudentDirectoryPort studentDirectoryPort,
             CenterSubscriptionGuard subscriptionGuard,
             CenterSchoolGuard schoolGuard,
-            CenterTutorScopeGuard tutorScopeGuard) {
+            CenterTutorScopeGuard tutorScopeGuard,
+            AuditLogPort auditLogPort) {
         this.groupRepository = groupRepository;
         this.enrollmentRepository = enrollmentRepository;
         this.scheduleSlotRepository = scheduleSlotRepository;
@@ -93,6 +100,7 @@ public class CenterSessionService {
         this.subscriptionGuard = subscriptionGuard;
         this.schoolGuard = schoolGuard;
         this.tutorScopeGuard = tutorScopeGuard;
+        this.auditLogPort = auditLogPort;
     }
 
     // --- Créneaux récurrents ---
@@ -354,7 +362,15 @@ public class CenterSessionService {
         CenterSession session = requireSession(sessionId);
         tutorScopeGuard.assertCanAccessSession(session);
         session.start();
-        return toSessionView(sessionRepository.save(session), true);
+        CenterSession saved = sessionRepository.save(session);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.CENTER,
+                AuditAction.CENTER_SESSION_STARTED,
+                "CENTER_SESSION",
+                saved.getId(),
+                "Démarrage d'une séance de renforcement.",
+                Map.of("groupId", saved.getGroupId().toString(), "sessionDate", saved.getSessionDate().toString())));
+        return toSessionView(saved, true);
     }
 
     @PreAuthorize(CenterRoles.SESSION_CONDUCT_ROLES)
@@ -365,7 +381,15 @@ public class CenterSessionService {
         CenterSession session = requireSession(sessionId);
         tutorScopeGuard.assertCanAccessSession(session);
         session.complete(actorId, Instant.now(), topic, notes);
-        return toSessionView(sessionRepository.save(session), true);
+        CenterSession saved = sessionRepository.save(session);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.CENTER,
+                AuditAction.CENTER_SESSION_COMPLETED,
+                "CENTER_SESSION",
+                saved.getId(),
+                "Clôture d'une séance de renforcement.",
+                Map.of("groupId", saved.getGroupId().toString(), "sessionDate", saved.getSessionDate().toString())));
+        return toSessionView(saved, true);
     }
 
     @PreAuthorize(CenterRoles.GROUP_MANAGE_ROLES)
@@ -376,6 +400,7 @@ public class CenterSessionService {
         CenterSession session = requireSession(sessionId);
         session.cancel(reason);
 
+        int refundedCredits = 0;
         List<CenterSessionAttendance> existingAttendances =
                 attendanceRepository.findBySessionIdOrderByCreatedAtAsc(sessionId);
         for (CenterSessionAttendance attendance : existingAttendances) {
@@ -386,9 +411,22 @@ public class CenterSessionService {
                     studentPackRepository.save(pack);
                     attendanceRepository.save(attendance);
                 });
+                refundedCredits++;
             }
         }
-        return toSessionView(sessionRepository.save(session), true);
+        CenterSession saved = sessionRepository.save(session);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.warning(
+                AuditCategory.CENTER,
+                AuditAction.CENTER_SESSION_CANCELLED,
+                AuditOutcome.SUCCESS,
+                "CENTER_SESSION",
+                saved.getId(),
+                "Annulation d'une séance de renforcement.",
+                Map.of(
+                        "groupId", saved.getGroupId().toString(),
+                        "sessionDate", saved.getSessionDate().toString(),
+                        "refundedCredits", refundedCredits)));
+        return toSessionView(saved, true);
     }
 
     // --- Pointage de participation & consommation de pack ---
@@ -484,6 +522,16 @@ public class CenterSessionService {
             }
             attendanceRepository.save(attendance);
         }
+
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.CENTER,
+                AuditAction.CENTER_ATTENDANCE_RECORDED,
+                "CENTER_SESSION",
+                sessionId,
+                "Enregistrement du pointage de participation d'une séance de renforcement.",
+                Map.of(
+                        "groupId", session.getGroupId().toString(),
+                        "recordedCount", inputs.size())));
 
         return toSessionView(session, true);
     }

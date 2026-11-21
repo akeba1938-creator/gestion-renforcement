@@ -3,6 +3,11 @@ package com.ecole.saas.student.application;
 import com.ecole.saas.academic.AcademicStructurePort;
 import com.ecole.saas.academic.AcademicYearSummary;
 import com.ecole.saas.academic.ClassRoomSummary;
+import com.ecole.saas.audit.AuditAction;
+import com.ecole.saas.audit.AuditCategory;
+import com.ecole.saas.audit.AuditLogPort;
+import com.ecole.saas.audit.AuditOutcome;
+import com.ecole.saas.audit.AuditRecordCommand;
 import com.ecole.saas.school.SchoolDirectory;
 import com.ecole.saas.shared.domain.TenantContext;
 import com.ecole.saas.shared.domain.TenantId;
@@ -53,6 +58,7 @@ public class StudentEnrollmentService {
     private final SchoolDirectory schoolDirectory;
     private final StudentSubscriptionGuard subscriptionGuard;
     private final StudentTeacherScopeGuard teacherScopeGuard;
+    private final AuditLogPort auditLogPort;
     private final Clock clock;
 
     public StudentEnrollmentService(
@@ -62,6 +68,7 @@ public class StudentEnrollmentService {
             SchoolDirectory schoolDirectory,
             StudentSubscriptionGuard subscriptionGuard,
             StudentTeacherScopeGuard teacherScopeGuard,
+            AuditLogPort auditLogPort,
             Clock clock) {
         this.enrollmentRepository = enrollmentRepository;
         this.studentRepository = studentRepository;
@@ -69,6 +76,7 @@ public class StudentEnrollmentService {
         this.schoolDirectory = schoolDirectory;
         this.subscriptionGuard = subscriptionGuard;
         this.teacherScopeGuard = teacherScopeGuard;
+        this.auditLogPort = auditLogPort;
         this.clock = clock;
     }
 
@@ -189,6 +197,16 @@ public class StudentEnrollmentService {
                 previousSchool,
                 isRepeating,
                 notes));
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.STUDENT,
+                AuditAction.STUDENT_ENROLLED,
+                "STUDENT_ENROLLMENT",
+                saved.getId(),
+                "Inscription annuelle d'un élève dans une classe.",
+                Map.of(
+                        "studentId", studentId.toString(),
+                        "academicYearId", academicYearId.toString(),
+                        "classRoomId", classRoomId.toString())));
         return toView(saved, student, year, classRoom);
     }
 
@@ -208,8 +226,19 @@ public class StudentEnrollmentService {
         assertClassRoomUsableForYear(targetClass, enrollment.getAcademicYearId());
         assertClassCapacityAvailable(targetClass);
 
+        UUID previousClassId = enrollment.getClassRoomId();
         enrollment.transferClass(targetClassRoomId, reason);
         StudentEnrollment saved = enrollmentRepository.save(enrollment);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.STUDENT,
+                AuditAction.STUDENT_CLASS_TRANSFERRED,
+                "STUDENT_ENROLLMENT",
+                saved.getId(),
+                "Changement de classe d'un élève inscrit.",
+                Map.of(
+                        "studentId", saved.getStudentId().toString(),
+                        "previousClassRoomId", previousClassId.toString(),
+                        "targetClassRoomId", targetClassRoomId.toString())));
         Student student = studentRepository.findById(saved.getStudentId()).orElse(null);
         return toView(saved, student, year, targetClass);
     }
@@ -227,6 +256,7 @@ public class StudentEnrollmentService {
         LocalDate effectiveEndDate = endDate != null ? endDate : todayForCurrentSchool(tenantId);
         enrollment.complete(effectiveEndDate, reason);
         StudentEnrollment saved = enrollmentRepository.save(enrollment);
+        auditEnrollmentEnded(saved);
         return buildView(saved, year);
     }
 
@@ -243,6 +273,7 @@ public class StudentEnrollmentService {
         LocalDate effectiveEndDate = endDate != null ? endDate : todayForCurrentSchool(tenantId);
         enrollment.withdraw(effectiveEndDate, reason);
         StudentEnrollment saved = enrollmentRepository.save(enrollment);
+        auditEnrollmentEnded(saved);
         return buildView(saved, year);
     }
 
@@ -259,6 +290,7 @@ public class StudentEnrollmentService {
         LocalDate effectiveEndDate = endDate != null ? endDate : todayForCurrentSchool(tenantId);
         enrollment.transferOut(effectiveEndDate, reason);
         StudentEnrollment saved = enrollmentRepository.save(enrollment);
+        auditEnrollmentEnded(saved);
         return buildView(saved, year);
     }
 
@@ -274,7 +306,21 @@ public class StudentEnrollmentService {
 
         enrollment.cancel(reason);
         StudentEnrollment saved = enrollmentRepository.save(enrollment);
+        auditEnrollmentEnded(saved);
         return buildView(saved, year);
+    }
+
+    private void auditEnrollmentEnded(StudentEnrollment saved) {
+        auditLogPort.recordTenantEvent(AuditRecordCommand.warning(
+                AuditCategory.STUDENT,
+                AuditAction.STUDENT_ENROLLMENT_ENDED,
+                AuditOutcome.SUCCESS,
+                "STUDENT_ENROLLMENT",
+                saved.getId(),
+                "Clôture d'une inscription élève (" + saved.getStatus().name() + ").",
+                Map.of(
+                        "studentId", saved.getStudentId().toString(),
+                        "status", saved.getStatus().name())));
     }
 
     private Page<EnrollmentView> enrichPage(Page<StudentEnrollment> page) {

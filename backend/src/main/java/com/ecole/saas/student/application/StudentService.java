@@ -1,5 +1,10 @@
 package com.ecole.saas.student.application;
 
+import com.ecole.saas.audit.AuditAction;
+import com.ecole.saas.audit.AuditCategory;
+import com.ecole.saas.audit.AuditLogPort;
+import com.ecole.saas.audit.AuditOutcome;
+import com.ecole.saas.audit.AuditRecordCommand;
 import com.ecole.saas.school.SchoolDirectory;
 import com.ecole.saas.school.SchoolProfileSnapshot;
 import com.ecole.saas.shared.domain.TenantContext;
@@ -19,6 +24,7 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
@@ -45,6 +51,7 @@ public class StudentService {
     private final SchoolDirectory schoolDirectory;
     private final StudentSubscriptionGuard subscriptionGuard;
     private final StudentTeacherScopeGuard teacherScopeGuard;
+    private final AuditLogPort auditLogPort;
     private final Clock clock;
 
     public StudentService(
@@ -53,12 +60,14 @@ public class StudentService {
             SchoolDirectory schoolDirectory,
             StudentSubscriptionGuard subscriptionGuard,
             StudentTeacherScopeGuard teacherScopeGuard,
+            AuditLogPort auditLogPort,
             Clock clock) {
         this.studentRepository = studentRepository;
         this.matriculeSequenceRepository = matriculeSequenceRepository;
         this.schoolDirectory = schoolDirectory;
         this.subscriptionGuard = subscriptionGuard;
         this.teacherScopeGuard = teacherScopeGuard;
+        this.auditLogPort = auditLogPort;
         this.clock = clock;
     }
 
@@ -167,7 +176,15 @@ public class StudentService {
                 medicalNotes,
                 effectiveAdmissionDate,
                 today);
-        return studentRepository.save(student);
+        Student saved = studentRepository.save(student);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.STUDENT,
+                AuditAction.STUDENT_CREATED,
+                "STUDENT",
+                saved.getId(),
+                "Création d'un dossier élève.",
+                Map.of("matricule", saved.getMatricule(), "status", saved.getStatus().name())));
+        return saved;
     }
 
     @PreAuthorize(WRITE_ROLES)
@@ -213,7 +230,16 @@ public class StudentService {
         subscriptionGuard.requireWriteAccess();
         Student student = requireStudent(studentId);
         student.markTransferred(reason);
-        return studentRepository.save(student);
+        Student saved = studentRepository.save(student);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.warning(
+                AuditCategory.STUDENT,
+                AuditAction.STUDENT_STATUS_CHANGED,
+                AuditOutcome.SUCCESS,
+                "STUDENT",
+                saved.getId(),
+                "Changement de statut d'un élève (TRANSFERRED).",
+                Map.of("matricule", saved.getMatricule(), "status", saved.getStatus().name())));
+        return saved;
     }
 
     @PreAuthorize(WRITE_ROLES)
@@ -223,7 +249,15 @@ public class StudentService {
         subscriptionGuard.requireWriteAccess();
         Student student = requireStudent(studentId);
         student.markGraduated(reason);
-        return studentRepository.save(student);
+        Student saved = studentRepository.save(student);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.STUDENT,
+                AuditAction.STUDENT_STATUS_CHANGED,
+                "STUDENT",
+                saved.getId(),
+                "Changement de statut d'un élève (GRADUATED).",
+                Map.of("matricule", saved.getMatricule(), "status", saved.getStatus().name())));
+        return saved;
     }
 
     @PreAuthorize(WRITE_ROLES)
@@ -233,7 +267,16 @@ public class StudentService {
         subscriptionGuard.requireWriteAccess();
         Student student = requireStudent(studentId);
         student.markWithdrawn(reason);
-        return studentRepository.save(student);
+        Student saved = studentRepository.save(student);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.warning(
+                AuditCategory.STUDENT,
+                AuditAction.STUDENT_STATUS_CHANGED,
+                AuditOutcome.SUCCESS,
+                "STUDENT",
+                saved.getId(),
+                "Changement de statut d'un élève (WITHDRAWN).",
+                Map.of("matricule", saved.getMatricule(), "status", saved.getStatus().name())));
+        return saved;
     }
 
     @PreAuthorize(WRITE_ROLES)
@@ -243,7 +286,16 @@ public class StudentService {
         subscriptionGuard.requireWriteAccess();
         Student student = requireStudent(studentId);
         student.archive(reason, clock.instant());
-        return studentRepository.save(student);
+        Student saved = studentRepository.save(student);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.critical(
+                AuditCategory.STUDENT,
+                AuditAction.STUDENT_ARCHIVED,
+                AuditOutcome.SUCCESS,
+                "STUDENT",
+                saved.getId(),
+                "Archivage logique d'un dossier élève.",
+                Map.of("matricule", saved.getMatricule(), "status", saved.getStatus().name())));
+        return saved;
     }
 
     @PreAuthorize(WRITE_ROLES)
@@ -255,7 +307,15 @@ public class StudentService {
 
         Student student = requireStudent(studentId);
         student.reactivate();
-        return studentRepository.save(student);
+        Student saved = studentRepository.save(student);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.STUDENT,
+                AuditAction.STUDENT_STATUS_CHANGED,
+                "STUDENT",
+                saved.getId(),
+                "Réactivation d'un dossier élève.",
+                Map.of("matricule", saved.getMatricule(), "status", saved.getStatus().name())));
+        return saved;
     }
 
     private Student requireStudent(UUID studentId) {

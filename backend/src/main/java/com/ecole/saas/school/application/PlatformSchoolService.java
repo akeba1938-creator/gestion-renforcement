@@ -1,5 +1,11 @@
 package com.ecole.saas.school.application;
 
+import com.ecole.saas.audit.AuditAction;
+import com.ecole.saas.audit.AuditCategory;
+import com.ecole.saas.audit.AuditLogPort;
+import com.ecole.saas.audit.AuditOutcome;
+import com.ecole.saas.audit.AuditRecordCommand;
+import com.ecole.saas.audit.PlatformAuditRecordCommand;
 import com.ecole.saas.school.domain.GradingPeriodSystem;
 import com.ecole.saas.school.domain.School;
 import com.ecole.saas.school.domain.SchoolAlreadyExistsException;
@@ -12,6 +18,7 @@ import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,10 +39,15 @@ public class PlatformSchoolService {
     private static final Logger log = LoggerFactory.getLogger(PlatformSchoolService.class);
 
     private final SchoolRepository schoolRepository;
+    private final AuditLogPort auditLogPort;
     private final Clock clock;
 
-    public PlatformSchoolService(SchoolRepository schoolRepository, Clock clock) {
+    public PlatformSchoolService(
+            SchoolRepository schoolRepository,
+            AuditLogPort auditLogPort,
+            Clock clock) {
         this.schoolRepository = schoolRepository;
+        this.auditLogPort = auditLogPort;
         this.clock = clock;
     }
 
@@ -111,6 +123,18 @@ public class PlatformSchoolService {
                 gradingPeriodSystem,
                 gradingScale);
         School saved = schoolRepository.save(school);
+        auditLogPort.recordPlatformEvent(PlatformAuditRecordCommand.success(
+                AuditCategory.SCHOOL,
+                AuditAction.SCHOOL_CREATED,
+                saved.getId(),
+                "SCHOOL",
+                saved.getId(),
+                "Création d'un établissement sur la plateforme.",
+                null,
+                Map.of(
+                        "schoolCode", saved.getCode(),
+                        "schoolType", saved.getSchoolType().name(),
+                        "currency", saved.getCurrency())));
         log.info("Établissement créé (schoolId={}, code={}, type={})", saved.getId(), saved.getCode(), saved.getSchoolType());
         return saved;
     }
@@ -152,7 +176,19 @@ public class PlatformSchoolService {
                 currency,
                 gradingPeriodSystem,
                 gradingScale);
-        return schoolRepository.save(school);
+        School saved = schoolRepository.save(school);
+        auditLogPort.recordPlatformEvent(PlatformAuditRecordCommand.success(
+                AuditCategory.SCHOOL,
+                AuditAction.SCHOOL_UPDATED,
+                saved.getId(),
+                "SCHOOL",
+                saved.getId(),
+                "Mise à jour plateforme d'un établissement.",
+                null,
+                Map.of(
+                        "schoolCode", saved.getCode(),
+                        "schoolType", saved.getSchoolType().name())));
+        return saved;
     }
 
     @Transactional
@@ -160,6 +196,26 @@ public class PlatformSchoolService {
         School school = requireSchool(schoolId);
         school.suspend(reason, clock.instant());
         School saved = schoolRepository.save(school);
+        auditLogPort.recordPlatformEvent(PlatformAuditRecordCommand.critical(
+                AuditCategory.SCHOOL,
+                AuditAction.SCHOOL_SUSPENDED,
+                AuditOutcome.SUCCESS,
+                saved.getId(),
+                "SCHOOL",
+                saved.getId(),
+                "Suspension plateforme d'un établissement.",
+                reason,
+                Map.of("schoolCode", saved.getCode(), "status", saved.getStatus().name())));
+        auditLogPort.recordTenantEventForSchool(
+                saved.getId(),
+                AuditRecordCommand.critical(
+                        AuditCategory.SCHOOL,
+                        AuditAction.SCHOOL_SUSPENDED,
+                        AuditOutcome.SUCCESS,
+                        "SCHOOL",
+                        saved.getId(),
+                        "Établissement suspendu par l'administration plateforme.",
+                        Map.of("schoolCode", saved.getCode(), "status", saved.getStatus().name())));
         log.info("Établissement suspendu (schoolId={}, code={})", saved.getId(), saved.getCode());
         return saved;
     }
@@ -169,6 +225,24 @@ public class PlatformSchoolService {
         School school = requireSchool(schoolId);
         school.activate();
         School saved = schoolRepository.save(school);
+        auditLogPort.recordPlatformEvent(PlatformAuditRecordCommand.success(
+                AuditCategory.SCHOOL,
+                AuditAction.SCHOOL_REACTIVATED,
+                saved.getId(),
+                "SCHOOL",
+                saved.getId(),
+                "Réactivation plateforme d'un établissement.",
+                null,
+                Map.of("schoolCode", saved.getCode(), "status", saved.getStatus().name())));
+        auditLogPort.recordTenantEventForSchool(
+                saved.getId(),
+                AuditRecordCommand.success(
+                        AuditCategory.SCHOOL,
+                        AuditAction.SCHOOL_REACTIVATED,
+                        "SCHOOL",
+                        saved.getId(),
+                        "Établissement réactivé par l'administration plateforme.",
+                        Map.of("schoolCode", saved.getCode(), "status", saved.getStatus().name())));
         log.info("Établissement réactivé (schoolId={}, code={})", saved.getId(), saved.getCode());
         return saved;
     }
@@ -178,6 +252,26 @@ public class PlatformSchoolService {
         School school = requireSchool(schoolId);
         school.archive(reason, clock.instant());
         School saved = schoolRepository.save(school);
+        auditLogPort.recordPlatformEvent(PlatformAuditRecordCommand.critical(
+                AuditCategory.SCHOOL,
+                AuditAction.SCHOOL_ARCHIVED,
+                AuditOutcome.SUCCESS,
+                saved.getId(),
+                "SCHOOL",
+                saved.getId(),
+                "Archivage définitif d'un établissement sur la plateforme.",
+                reason,
+                Map.of("schoolCode", saved.getCode(), "status", saved.getStatus().name())));
+        auditLogPort.recordTenantEventForSchool(
+                saved.getId(),
+                AuditRecordCommand.critical(
+                        AuditCategory.SCHOOL,
+                        AuditAction.SCHOOL_ARCHIVED,
+                        AuditOutcome.SUCCESS,
+                        "SCHOOL",
+                        saved.getId(),
+                        "Établissement archivé par l'administration plateforme.",
+                        Map.of("schoolCode", saved.getCode(), "status", saved.getStatus().name())));
         log.info("Établissement archivé (schoolId={}, code={})", saved.getId(), saved.getCode());
         return saved;
     }

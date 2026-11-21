@@ -4,6 +4,11 @@ import com.ecole.saas.academic.AcademicStructurePort;
 import com.ecole.saas.academic.ClassRoomSummary;
 import com.ecole.saas.academic.ClassSubjectSummary;
 import com.ecole.saas.academic.EvaluationPeriodSummary;
+import com.ecole.saas.audit.AuditAction;
+import com.ecole.saas.audit.AuditCategory;
+import com.ecole.saas.audit.AuditLogPort;
+import com.ecole.saas.audit.AuditOutcome;
+import com.ecole.saas.audit.AuditRecordCommand;
 import com.ecole.saas.grade.domain.CouncilDecision;
 import com.ecole.saas.grade.domain.Evaluation;
 import com.ecole.saas.grade.domain.EvaluationPeriodClosedException;
@@ -76,6 +81,7 @@ public class ReportCardService {
     private final GradeSchoolContext schoolContext;
     private final GradeSubscriptionGuard subscriptionGuard;
     private final GradeTeacherScopeGuard teacherScopeGuard;
+    private final AuditLogPort auditLogPort;
     private final Clock clock;
 
     public ReportCardService(
@@ -88,6 +94,7 @@ public class ReportCardService {
             GradeSchoolContext schoolContext,
             GradeSubscriptionGuard subscriptionGuard,
             GradeTeacherScopeGuard teacherScopeGuard,
+            AuditLogPort auditLogPort,
             Clock clock) {
         this.reportCardRepository = reportCardRepository;
         this.subjectResultRepository = subjectResultRepository;
@@ -98,6 +105,7 @@ public class ReportCardService {
         this.schoolContext = schoolContext;
         this.subscriptionGuard = subscriptionGuard;
         this.teacherScopeGuard = teacherScopeGuard;
+        this.auditLogPort = auditLogPort;
         this.clock = clock;
     }
 
@@ -331,6 +339,15 @@ public class ReportCardService {
         List<PeriodReportCard> orderedCards = reportCardRepository
                 .findByEvaluationPeriodIdAndClassRoomIdOrderByRankInClassAscStudentIdAsc(
                         evaluationPeriodId, classRoomId);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.GRADE,
+                AuditAction.REPORT_CARD_GENERATED,
+                "CLASS_ROOM",
+                classRoomId,
+                "Calcul et génération des bulletins de période d'une classe.",
+                Map.of(
+                        "evaluationPeriodId", evaluationPeriodId.toString(),
+                        "reportCardCount", orderedCards.size())));
         return enrichReportCards(orderedCards);
     }
 
@@ -460,6 +477,15 @@ public class ReportCardService {
         assertPeriodNotLocked(card.getEvaluationPeriodId());
         card.validate(actorId, clock.instant());
         PeriodReportCard saved = reportCardRepository.save(card);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.GRADE,
+                AuditAction.REPORT_CARD_VALIDATED,
+                "PERIOD_REPORT_CARD",
+                saved.getId(),
+                "Validation d'un bulletin de période.",
+                Map.of(
+                        "studentId", saved.getStudentId().toString(),
+                        "evaluationPeriodId", saved.getEvaluationPeriodId().toString())));
         return enrichReportCards(List.of(saved)).getFirst();
     }
 
@@ -472,6 +498,16 @@ public class ReportCardService {
         PeriodReportCard card = requireReportCard(reportCardId);
         card.lock(actorId, clock.instant());
         PeriodReportCard saved = reportCardRepository.save(card);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.critical(
+                AuditCategory.GRADE,
+                AuditAction.REPORT_CARD_LOCKED,
+                AuditOutcome.SUCCESS,
+                "PERIOD_REPORT_CARD",
+                saved.getId(),
+                "Verrouillage définitif d'un bulletin de période.",
+                Map.of(
+                        "studentId", saved.getStudentId().toString(),
+                        "evaluationPeriodId", saved.getEvaluationPeriodId().toString())));
         return enrichReportCards(List.of(saved)).getFirst();
     }
 

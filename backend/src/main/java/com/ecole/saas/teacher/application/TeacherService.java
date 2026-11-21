@@ -2,6 +2,11 @@ package com.ecole.saas.teacher.application;
 
 import com.ecole.saas.academic.AcademicStructurePort;
 import com.ecole.saas.academic.SubjectSummary;
+import com.ecole.saas.audit.AuditAction;
+import com.ecole.saas.audit.AuditCategory;
+import com.ecole.saas.audit.AuditLogPort;
+import com.ecole.saas.audit.AuditOutcome;
+import com.ecole.saas.audit.AuditRecordCommand;
 import com.ecole.saas.identity.UserDirectoryPort;
 import com.ecole.saas.identity.UserSummary;
 import com.ecole.saas.shared.domain.TenantContext;
@@ -21,6 +26,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -43,6 +49,7 @@ public class TeacherService {
     private final AcademicStructurePort academicStructurePort;
     private final UserDirectoryPort userDirectoryPort;
     private final TeacherSubscriptionGuard subscriptionGuard;
+    private final AuditLogPort auditLogPort;
     private final Clock clock;
 
     public TeacherService(
@@ -51,12 +58,14 @@ public class TeacherService {
             AcademicStructurePort academicStructurePort,
             UserDirectoryPort userDirectoryPort,
             TeacherSubscriptionGuard subscriptionGuard,
+            AuditLogPort auditLogPort,
             Clock clock) {
         this.teacherRepository = teacherRepository;
         this.specialtyRepository = specialtyRepository;
         this.academicStructurePort = academicStructurePort;
         this.userDirectoryPort = userDirectoryPort;
         this.subscriptionGuard = subscriptionGuard;
+        this.auditLogPort = auditLogPort;
         this.clock = clock;
     }
 
@@ -153,7 +162,15 @@ public class TeacherService {
                 hireDate,
                 hourlyRateXof,
                 notes);
-        return teacherRepository.save(teacher);
+        Teacher saved = teacherRepository.save(teacher);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.TEACHER,
+                AuditAction.TEACHER_CREATED,
+                "TEACHER",
+                saved.getId(),
+                "Création d'un dossier enseignant ou intervenant.",
+                Map.of("employeeCode", saved.getEmployeeCode(), "teacherType", saved.getTeacherType().name())));
+        return saved;
     }
 
     @PreAuthorize(TeacherRoles.WRITE_ROLES)
@@ -210,7 +227,17 @@ public class TeacherService {
             }
         }
         teacher.linkUser(userId);
-        return teacherRepository.save(teacher);
+        Teacher saved = teacherRepository.save(teacher);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.TEACHER,
+                AuditAction.TEACHER_USER_LINKED,
+                "TEACHER",
+                saved.getId(),
+                "Association d'un compte utilisateur à un dossier enseignant.",
+                userId != null
+                        ? Map.of("employeeCode", saved.getEmployeeCode(), "userId", userId.toString())
+                        : Map.of("employeeCode", saved.getEmployeeCode(), "unlinked", true)));
+        return saved;
     }
 
     @PreAuthorize(TeacherRoles.WRITE_ROLES)
@@ -221,7 +248,16 @@ public class TeacherService {
 
         Teacher teacher = requireTeacher(teacherId);
         teacher.suspend(reason);
-        return teacherRepository.save(teacher);
+        Teacher saved = teacherRepository.save(teacher);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.warning(
+                AuditCategory.TEACHER,
+                AuditAction.TEACHER_STATUS_CHANGED,
+                AuditOutcome.SUCCESS,
+                "TEACHER",
+                saved.getId(),
+                "Suspension d'un dossier enseignant.",
+                Map.of("employeeCode", saved.getEmployeeCode(), "status", saved.getStatus().name())));
+        return saved;
     }
 
     @PreAuthorize(TeacherRoles.WRITE_ROLES)
@@ -232,7 +268,15 @@ public class TeacherService {
 
         Teacher teacher = requireTeacher(teacherId);
         teacher.reactivate();
-        return teacherRepository.save(teacher);
+        Teacher saved = teacherRepository.save(teacher);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.TEACHER,
+                AuditAction.TEACHER_STATUS_CHANGED,
+                "TEACHER",
+                saved.getId(),
+                "Réactivation d'un dossier enseignant.",
+                Map.of("employeeCode", saved.getEmployeeCode(), "status", saved.getStatus().name())));
+        return saved;
     }
 
     @PreAuthorize(TeacherRoles.WRITE_ROLES)
@@ -243,7 +287,16 @@ public class TeacherService {
 
         Teacher teacher = requireTeacher(teacherId);
         teacher.archive(reason, clock.instant());
-        return teacherRepository.save(teacher);
+        Teacher saved = teacherRepository.save(teacher);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.critical(
+                AuditCategory.TEACHER,
+                AuditAction.TEACHER_STATUS_CHANGED,
+                AuditOutcome.SUCCESS,
+                "TEACHER",
+                saved.getId(),
+                "Archivage définitif d'un dossier enseignant.",
+                Map.of("employeeCode", saved.getEmployeeCode(), "status", saved.getStatus().name())));
+        return saved;
     }
 
     @PreAuthorize(TeacherRoles.BACKOFFICE_READ_ROLES)
