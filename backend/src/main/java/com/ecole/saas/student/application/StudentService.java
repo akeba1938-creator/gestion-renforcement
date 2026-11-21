@@ -15,6 +15,7 @@ import com.ecole.saas.student.domain.StudentGender;
 import com.ecole.saas.student.domain.StudentNotFoundException;
 import com.ecole.saas.student.domain.StudentStatus;
 import com.ecole.saas.student.infrastructure.MatriculeSequenceRepository;
+import com.ecole.saas.student.infrastructure.StudentLockRepository;
 import com.ecole.saas.student.infrastructure.StudentRepository;
 import jakarta.persistence.criteria.Predicate;
 import java.time.Clock;
@@ -48,6 +49,7 @@ public class StudentService {
 
     private final StudentRepository studentRepository;
     private final MatriculeSequenceRepository matriculeSequenceRepository;
+    private final StudentLockRepository studentLockRepository;
     private final SchoolDirectory schoolDirectory;
     private final StudentSubscriptionGuard subscriptionGuard;
     private final StudentTeacherScopeGuard teacherScopeGuard;
@@ -57,6 +59,7 @@ public class StudentService {
     public StudentService(
             StudentRepository studentRepository,
             MatriculeSequenceRepository matriculeSequenceRepository,
+            StudentLockRepository studentLockRepository,
             SchoolDirectory schoolDirectory,
             StudentSubscriptionGuard subscriptionGuard,
             StudentTeacherScopeGuard teacherScopeGuard,
@@ -64,6 +67,7 @@ public class StudentService {
             Clock clock) {
         this.studentRepository = studentRepository;
         this.matriculeSequenceRepository = matriculeSequenceRepository;
+        this.studentLockRepository = studentLockRepository;
         this.schoolDirectory = schoolDirectory;
         this.subscriptionGuard = subscriptionGuard;
         this.teacherScopeGuard = teacherScopeGuard;
@@ -146,6 +150,7 @@ public class StudentService {
             String medicalNotes,
             LocalDate admissionDate) {
         TenantId tenantId = TenantContext.requireCurrent();
+        studentLockRepository.lockStudentQuotaForTenant();
         long activeCount = studentRepository.countByStatus(StudentStatus.ACTIVE);
         subscriptionGuard.assertStudentQuotaAvailable(activeCount);
 
@@ -302,6 +307,7 @@ public class StudentService {
     @Transactional
     public Student reactivateStudent(UUID studentId) {
         TenantContext.requireCurrent();
+        studentLockRepository.lockStudentQuotaForTenant();
         long activeCount = studentRepository.countByStatus(StudentStatus.ACTIVE);
         subscriptionGuard.assertStudentQuotaAvailable(activeCount);
 

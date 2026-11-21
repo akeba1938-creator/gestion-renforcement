@@ -38,6 +38,8 @@ import com.ecole.saas.communication.infrastructure.MessageTemplateRepository;
 import com.ecole.saas.school.SchoolProfileSnapshot;
 import com.ecole.saas.shared.domain.TenantContext;
 import jakarta.persistence.criteria.Predicate;
+import java.time.Clock;
+import java.time.DateTimeException;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
@@ -61,6 +63,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class CommunicationCampaignService {
 
+    private static final ZoneId DEFAULT_ZONE = ZoneId.of("Africa/Dakar");
+
     private final CommunicationCampaignRepository campaignRepository;
     private final MessageDeliveryRepository deliveryRepository;
     private final DeliveryEventRepository deliveryEventRepository;
@@ -72,6 +76,7 @@ public class CommunicationCampaignService {
     private final CommunicationSubscriptionGuard subscriptionGuard;
     private final CommunicationScopeGuard scopeGuard;
     private final AuditLogPort auditLogPort;
+    private final Clock clock;
 
     public CommunicationCampaignService(
             CommunicationCampaignRepository campaignRepository,
@@ -84,7 +89,8 @@ public class CommunicationCampaignService {
             CommunicationGatewayRouter gatewayRouter,
             CommunicationSubscriptionGuard subscriptionGuard,
             CommunicationScopeGuard scopeGuard,
-            AuditLogPort auditLogPort) {
+            AuditLogPort auditLogPort,
+            Clock clock) {
         this.campaignRepository = campaignRepository;
         this.deliveryRepository = deliveryRepository;
         this.deliveryEventRepository = deliveryEventRepository;
@@ -96,6 +102,7 @@ public class CommunicationCampaignService {
         this.subscriptionGuard = subscriptionGuard;
         this.scopeGuard = scopeGuard;
         this.auditLogPort = auditLogPort;
+        this.clock = clock;
     }
 
     @PreAuthorize(CommunicationRoles.CAMPAIGN_SEND_ROLES)
@@ -164,7 +171,7 @@ public class CommunicationCampaignService {
         subscriptionGuard.requireWriteAccess();
         CommunicationCampaign campaign = requireCampaign(campaignId);
         scopeGuard.assertCanMutateCampaign(actorUserId, campaign);
-        campaign.cancel(reason, Instant.now());
+        campaign.cancel(reason, clock.instant());
         CommunicationCampaign saved = campaignRepository.save(campaign);
         auditLogPort.recordTenantEvent(AuditRecordCommand.success(
                 AuditCategory.COMMUNICATION,
@@ -184,7 +191,7 @@ public class CommunicationCampaignService {
         List<MessageDelivery> deliveries = deliveryRepository.findByCampaignIdOrderByCreatedAtAsc(campaignId);
         ChannelDeliveryGateway gateway = gatewayRouter.requireGateway(campaign.getChannel());
         UUID tenantId = TenantContext.requireCurrent().value();
-        Instant now = Instant.now();
+        Instant now = clock.instant();
 
         int retriedCount = 0;
         int succeededCount = 0;
@@ -241,7 +248,7 @@ public class CommunicationCampaignService {
         subscriptionGuard.requireWriteAccess();
         MessageDelivery delivery = deliveryRepository.findById(deliveryId)
                 .orElseThrow(() -> new CommunicationNotFoundException("Remise de message introuvable."));
-        Instant now = Instant.now();
+        Instant now = clock.instant();
 
         DeliveryStatus previous;
         switch (targetStatus) {
@@ -313,9 +320,9 @@ public class CommunicationCampaignService {
             UUID actorUserId,
             Pageable pageable) {
         subscriptionGuard.requireReadAccess();
-        boolean cashierOnly = scopeGuard.isCashierOnly();
-        boolean censorOnly = scopeGuard.isCensorOnly();
-        boolean teacherOnly = scopeGuard.isTeacherOrTutorOnly();
+        boolean canFinancial = scopeGuard.canAccessFinancialCampaigns();
+        boolean canNonFinancial = scopeGuard.canAccessNonFinancialCampaigns();
+        boolean hasTeacherScope = scopeGuard.hasTeacherOrTutorScope();
 
         Specification<CommunicationCampaign> spec = (root, cq, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
@@ -328,14 +335,23 @@ public class CommunicationCampaignService {
             if (category != null) {
                 predicates.add(cb.equal(root.get("category"), category));
             }
-            if (cashierOnly) {
-                predicates.add(root.get("category").in(
-                        MessageCategory.PAYMENT_RECEIPT, MessageCategory.PAYMENT_DUE_REMINDER));
-            } else if (censorOnly) {
+            if (canFinancial && canNonFinancial) {
+                // Accès complet aux campagnes financières et non financières (ex. direction ou cumul CASHIER + CENSOR)
+            } else if (canFinancial) {
+                Predicate financialPredicate = root.get("category").in(
+                        MessageCategory.PAYMENT_RECEIPT, MessageCategory.PAYMENT_DUE_REMINDER);
+                if (hasTeacherScope && actorUserId != null) {
+                    predicates.add(cb.or(financialPredicate, cb.equal(root.get("createdBy"), actorUserId)));
+                } else {
+                    predicates.add(financialPredicate);
+                }
+            } else if (canNonFinancial) {
                 predicates.add(cb.not(root.get("category").in(
                         MessageCategory.PAYMENT_RECEIPT, MessageCategory.PAYMENT_DUE_REMINDER)));
-            } else if (teacherOnly) {
+            } else if (hasTeacherScope) {
                 predicates.add(cb.equal(root.get("createdBy"), actorUserId));
+            } else {
+                predicates.add(cb.disjunction());
             }
             return cb.and(predicates.toArray(Predicate[]::new));
         };
@@ -556,7 +572,7 @@ public class CommunicationCampaignService {
                 ? template.getEstimatedUnitCostXof()
                 : gateway.defaultUnitCostXof();
 
-        int year = ZonedDateTime.now(ZoneId.of(school.timezone())).getYear();
+        int year = ZonedDateTime.now(clock.withZone(resolveSchoolZone(school))).getYear();
         int seq = sequenceRepository.nextSequenceValue(year);
         String reference = CommunicationReferenceFormatter.format(school.code(), year, seq);
 
@@ -646,7 +662,7 @@ public class CommunicationCampaignService {
             List<AudienceResolver.ResolvedRecipient> recipients,
             MessageTemplate template,
             Map<String, String> baseVars) {
-        Instant now = Instant.now();
+        Instant now = clock.instant();
         campaign.markSending(now);
         campaignRepository.save(campaign);
 
@@ -988,6 +1004,17 @@ public class CommunicationCampaignService {
                 scheduledAt != null ? scheduledAt.toString() : "",
                 Boolean.toString(dispatchImmediately));
         return CommunicationHashSupport.sha256Hex(canonical);
+    }
+
+    private static ZoneId resolveSchoolZone(SchoolProfileSnapshot school) {
+        if (school == null || school.timezone() == null || school.timezone().isBlank()) {
+            return DEFAULT_ZONE;
+        }
+        try {
+            return ZoneId.of(school.timezone());
+        } catch (DateTimeException ex) {
+            return DEFAULT_ZONE;
+        }
     }
 
     private static String truncate(String raw, int max) {

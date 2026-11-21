@@ -3,9 +3,10 @@ package com.ecole.saas;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.ecole.saas.academic.application.AcademicYearService;
+import com.ecole.saas.academic.application.AcademicYearManagementService;
 import com.ecole.saas.academic.domain.AcademicYear;
-import com.ecole.saas.academic.domain.AcademicYearStatus;
+import com.ecole.saas.academic.domain.AcademicYearNotFoundException;
+import com.ecole.saas.academic.domain.PeriodSystem;
 import com.ecole.saas.identity.application.UserAccountService;
 import com.ecole.saas.identity.domain.Role;
 import com.ecole.saas.identity.domain.RoleCode;
@@ -32,7 +33,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.dao.DataAccessException;
+import org.springframework.data.domain.Pageable;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.junit.jupiter.Container;
@@ -51,7 +56,7 @@ class MultiTenantIsolationTest {
     private final SchoolService schoolService;
     private final SubscriptionService subscriptionService;
     private final UserAccountService userAccountService;
-    private final AcademicYearService academicYearService;
+    private final AcademicYearManagementService academicYearService;
     private final RoleRepository roleRepository;
     private final TransactionTemplate transactionTemplate;
     private final JdbcTemplate jdbcTemplate;
@@ -61,7 +66,7 @@ class MultiTenantIsolationTest {
             SchoolService schoolService,
             SubscriptionService subscriptionService,
             UserAccountService userAccountService,
-            AcademicYearService academicYearService,
+            AcademicYearManagementService academicYearService,
             RoleRepository roleRepository,
             TransactionTemplate transactionTemplate,
             JdbcTemplate jdbcTemplate) {
@@ -77,6 +82,7 @@ class MultiTenantIsolationTest {
     @AfterEach
     void clearTenantContext() {
         TenantContext.clear();
+        SecurityContextHolder.clearContext();
     }
 
     @Test
@@ -120,6 +126,12 @@ class MultiTenantIsolationTest {
 
         Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS);
 
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(
+                        UUID.randomUUID().toString(),
+                        null,
+                        List.of(new SimpleGrantedAuthority("ROLE_DIRECTOR"))));
+
         Subscription subA = TenantContext.executeWithTenant(tenantA, () ->
                 subscriptionService.createSubscription(
                         plan.getId(), SubscriptionStatus.ACTIVE, BillingCycle.MONTHLY, now, now.plus(30, ChronoUnit.DAYS)));
@@ -127,11 +139,13 @@ class MultiTenantIsolationTest {
                 userAccountService.createUserWithRole(
                         "direction@exemple.sn", "+221771111111", "Awa", "Ndiaye",
                         "hash-fictif-a", RoleCode.DIRECTOR));
-        AcademicYear yearA = TenantContext.executeWithTenant(tenantA, () ->
-                academicYearService.createAcademicYear(
-                        "2026-2027", "Année 2026-2027 École A",
-                        LocalDate.of(2026, 10, 1), LocalDate.of(2027, 7, 31),
-                        AcademicYearStatus.ACTIVE, true));
+        AcademicYear yearA = TenantContext.executeWithTenant(tenantA, () -> {
+            AcademicYear created = academicYearService.createAcademicYear(
+                    "2026-2027", "Année 2026-2027 École A",
+                    LocalDate.of(2026, 10, 1), LocalDate.of(2027, 7, 31),
+                    PeriodSystem.TRIMESTER);
+            return academicYearService.activateAcademicYear(created.getId(), true);
+        });
 
         // Même code d'année scolaire et même email dans l'établissement B : autorisé grâce aux unicités incluant tenant_id
         Subscription subB = TenantContext.executeWithTenant(tenantB, () ->
@@ -141,19 +155,28 @@ class MultiTenantIsolationTest {
                 userAccountService.createUserWithRole(
                         "direction@exemple.sn", "+221772222222", "Moussa", "Diop",
                         "hash-fictif-b", RoleCode.CENTER_MANAGER));
-        AcademicYear yearB = TenantContext.executeWithTenant(tenantB, () ->
-                academicYearService.createAcademicYear(
-                        "2026-2027", "Année 2026-2027 Centre B",
-                        LocalDate.of(2026, 10, 1), LocalDate.of(2027, 7, 31),
-                        AcademicYearStatus.ACTIVE, true));
+        AcademicYear yearB = TenantContext.executeWithTenant(tenantB, () -> {
+            AcademicYear created = academicYearService.createAcademicYear(
+                    "2026-2027", "Année 2026-2027 Centre B",
+                    LocalDate.of(2026, 10, 1), LocalDate.of(2027, 7, 31),
+                    PeriodSystem.TRIMESTER);
+            return academicYearService.activateAcademicYear(created.getId(), true);
+        });
 
         // 1. Isolation couche JPA / Hibernate @TenantId : le tenant A ne voit ni ne modifie les données du tenant B
         TenantContext.runWithTenant(tenantA, () -> {
-            assertThat(academicYearService.findAllForCurrentTenant())
+            assertThat(academicYearService.listAcademicYears(null, Pageable.unpaged()).getContent())
                     .extracting(AcademicYear::getId)
                     .containsExactly(yearA.getId());
-            assertThat(academicYearService.findById(yearB.getId())).isEmpty();
-            assertThat(academicYearService.renameAcademicYear(yearB.getId(), "Modification interdite")).isEmpty();
+            assertThatThrownBy(() -> academicYearService.getAcademicYear(yearB.getId()))
+                    .isInstanceOf(AcademicYearNotFoundException.class);
+            assertThatThrownBy(() -> academicYearService.updateAcademicYear(
+                    yearB.getId(),
+                    "Modification interdite",
+                    LocalDate.of(2026, 10, 1),
+                    LocalDate.of(2027, 7, 31),
+                    PeriodSystem.TRIMESTER))
+                    .isInstanceOf(AcademicYearNotFoundException.class);
 
             assertThat(userAccountService.findAllForCurrentTenant())
                     .extracting(User::getId)
@@ -168,7 +191,7 @@ class MultiTenantIsolationTest {
 
         // Vérifier que les données de B n'ont pas été modifiées
         TenantContext.runWithTenant(tenantB, () -> {
-            AcademicYear reloadedB = academicYearService.findById(yearB.getId()).orElseThrow();
+            AcademicYear reloadedB = academicYearService.getAcademicYear(yearB.getId());
             assertThat(reloadedB.getLabel()).isEqualTo("Année 2026-2027 Centre B");
             assertThat(subB.getAmountXof()).isEqualTo(500_000L);
         });
@@ -192,11 +215,23 @@ class MultiTenantIsolationTest {
             int updatedRows = jdbcTemplate.update(
                     "UPDATE academic_years SET label = 'Piraté' WHERE id = ?", yearB.getId());
             assertThat(updatedRows).isZero();
-
-            int deletedRows = jdbcTemplate.update(
-                    "DELETE FROM academic_years WHERE id = ?", yearB.getId());
-            assertThat(deletedRows).isZero();
         }));
+
+        // V12 : REVOKE DELETE sur academic_years pour ecole_app (archivage logique uniquement)
+        TenantContext.runWithTenant(tenantA, () -> assertThatThrownBy(() ->
+                transactionTemplate.executeWithoutResult(status -> {
+                    jdbcTemplate.execute("SET LOCAL ROLE ecole_app");
+                    jdbcTemplate.update("DELETE FROM academic_years WHERE id = ?", yearB.getId());
+                }))
+                .isInstanceOf(DataAccessException.class));
+
+        // V12 : CHECK (role_code <> 'ADMIN_SAAS') empêche l'attribution du rôle plateforme à un utilisateur tenant
+        TenantContext.runWithTenant(tenantA, () -> assertThatThrownBy(() ->
+                transactionTemplate.executeWithoutResult(status -> jdbcTemplate.update(
+                        "INSERT INTO user_roles (tenant_id, user_id, role_code) VALUES (?, ?, 'ADMIN_SAAS')",
+                        tenantA.value(),
+                        userA.getId())))
+                .isInstanceOf(DataAccessException.class));
 
         // Tentative d'INSERT inter-tenant sous RLS : doit être rejetée par la politique WITH CHECK
         TenantContext.runWithTenant(tenantA, () -> assertThatThrownBy(() ->

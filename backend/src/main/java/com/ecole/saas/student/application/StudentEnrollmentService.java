@@ -22,6 +22,7 @@ import com.ecole.saas.student.domain.StudentAlreadyEnrolledException;
 import com.ecole.saas.student.domain.StudentEnrollment;
 import com.ecole.saas.student.domain.StudentNotFoundException;
 import com.ecole.saas.student.infrastructure.StudentEnrollmentRepository;
+import com.ecole.saas.student.infrastructure.StudentLockRepository;
 import com.ecole.saas.student.infrastructure.StudentRepository;
 import jakarta.persistence.criteria.Predicate;
 import java.time.Clock;
@@ -54,6 +55,7 @@ public class StudentEnrollmentService {
 
     private final StudentEnrollmentRepository enrollmentRepository;
     private final StudentRepository studentRepository;
+    private final StudentLockRepository studentLockRepository;
     private final AcademicStructurePort academicStructurePort;
     private final SchoolDirectory schoolDirectory;
     private final StudentSubscriptionGuard subscriptionGuard;
@@ -64,6 +66,7 @@ public class StudentEnrollmentService {
     public StudentEnrollmentService(
             StudentEnrollmentRepository enrollmentRepository,
             StudentRepository studentRepository,
+            StudentLockRepository studentLockRepository,
             AcademicStructurePort academicStructurePort,
             SchoolDirectory schoolDirectory,
             StudentSubscriptionGuard subscriptionGuard,
@@ -72,6 +75,7 @@ public class StudentEnrollmentService {
             Clock clock) {
         this.enrollmentRepository = enrollmentRepository;
         this.studentRepository = studentRepository;
+        this.studentLockRepository = studentLockRepository;
         this.academicStructurePort = academicStructurePort;
         this.schoolDirectory = schoolDirectory;
         this.subscriptionGuard = subscriptionGuard;
@@ -176,6 +180,8 @@ public class StudentEnrollmentService {
         ClassRoomSummary classRoom = requireClassRoom(classRoomId);
         assertClassRoomUsableForYear(classRoom, academicYearId);
 
+        studentLockRepository.lockClassRoomCapacity(classRoomId);
+
         if (enrollmentRepository.existsByStudentIdAndAcademicYearIdAndStatus(
                 studentId, academicYearId, EnrollmentStatus.ACTIVE)) {
             throw new StudentAlreadyEnrolledException(
@@ -224,6 +230,7 @@ public class StudentEnrollmentService {
 
         ClassRoomSummary targetClass = requireClassRoom(targetClassRoomId);
         assertClassRoomUsableForYear(targetClass, enrollment.getAcademicYearId());
+        studentLockRepository.lockClassRoomCapacity(targetClassRoomId);
         assertClassCapacityAvailable(targetClass);
 
         UUID previousClassId = enrollment.getClassRoomId();

@@ -526,6 +526,66 @@ class CenterIntegrationTest {
         assertThat(fixtureA.groupId()).isNotEqualTo(fixtureB.groupId());
     }
 
+    @Test
+    void shouldPreserveTutorRemunerationAfterDeactivationAndFallbackToTeacherHourlyRate() throws Exception {
+        School center = createSchool("CTR-M10", SchoolType.TUTORING_CENTER);
+        createSubscription(center, SubscriptionStatus.ACTIVE, Instant.now().plus(30, ChronoUnit.DAYS));
+        String managerToken = tenantToken(center.getId(), RoleCode.CENTER_MANAGER);
+
+        UUID yearId = createAcademicYearViaApi(managerToken, "2026-2027", "2026-10-01", "2027-07-31");
+        activateAcademicYearViaApi(managerToken, yearId);
+        UUID mathId = createSubjectViaApi(managerToken, "MATH", "Mathématiques", "SCIENTIFIC", 4);
+        UUID physId = createSubjectViaApi(managerToken, "PHYS", "Physique", "SCIENTIFIC", 4);
+
+        // Intervenant 1 : taux spécifique sur cohorte (6 000 FCFA/h), clôture de séance de 2h (= 12 000 FCFA), puis désactivation de l'affectation
+        UUID tutor1Id = createTeacherViaApi(
+                managerToken, "TUT-M10-1", null, "Mamadou", "Seck", "TUTOR", "+221770099001", 4_000L);
+        UUID group1Id = createGroupViaApi(
+                managerToken, yearId, null, mathId, null, "COH-M10-1", "Cohorte M10-1", "SUBJECT_SUPPORT", 15, "2026-10-01", "2027-06-30");
+        UUID assignment1Id = assignTutorViaApi(managerToken, group1Id, tutor1Id, mathId, true, 6_000L);
+        UUID session1Id = createSessionViaApi(managerToken, group1Id, tutor1Id, mathId, "2026-10-10", "10:00", "12:00");
+        mockMvc.perform(post("/api/v1/center/sessions/" + session1Id + "/complete")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(managerToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("topic", "Algèbre linéaire"))))
+                .andExpect(status().isOk());
+
+        // Désactiver l'affectation de tutor1 -> la rémunération historique doit rester exactement 12 000 FCFA (snapshot + historique)
+        mockMvc.perform(post("/api/v1/center/groups/" + group1Id + "/tutors/" + assignment1Id + "/deactivate")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(managerToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("reason", "Fin de mission"))))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/v1/center/tutors/" + tutor1Id + "/workload")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(managerToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.workload.activeGroupCount").value(0))
+                .andExpect(jsonPath("$.workload.completedSessionCount").value(1))
+                .andExpect(jsonPath("$.workload.completedMinutes").value(120))
+                .andExpect(jsonPath("$.workload.estimatedRemunerationXof").value(12_000));
+
+        // Intervenant 2 : affectation sans hourlyRateXof -> repli sur Teacher.hourlyRateXof (5 000 FCFA/h) pour une séance de 90 min (= 7 500 FCFA)
+        UUID tutor2Id = createTeacherViaApi(
+                managerToken, "TUT-M10-2", null, "Fatou", "Gaye", "TUTOR", "+221770099002", 5_000L);
+        UUID group2Id = createGroupViaApi(
+                managerToken, yearId, null, physId, null, "COH-M10-2", "Cohorte M10-2", "SUBJECT_SUPPORT", 15, "2026-10-01", "2027-06-30");
+        assignTutorViaApi(managerToken, group2Id, tutor2Id, physId, true, null);
+        UUID session2Id = createSessionViaApi(managerToken, group2Id, tutor2Id, physId, "2026-10-11", "14:00", "15:30");
+        mockMvc.perform(post("/api/v1/center/sessions/" + session2Id + "/complete")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(managerToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("topic", "Mécanique"))))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/v1/center/tutors/" + tutor2Id + "/workload")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(managerToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.workload.completedSessionCount").value(1))
+                .andExpect(jsonPath("$.workload.completedMinutes").value(90))
+                .andExpect(jsonPath("$.workload.estimatedRemunerationXof").value(7_500));
+    }
+
     private record CenterFixture(
             UUID packId,
             UUID studentPackId,

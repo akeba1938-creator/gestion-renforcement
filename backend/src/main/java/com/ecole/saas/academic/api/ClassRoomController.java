@@ -154,7 +154,7 @@ public class ClassRoomController {
                 classSubjectId,
                 request.coefficient(),
                 request.weeklyHours(),
-                request.mandatory());
+                Boolean.TRUE.equals(request.mandatory()));
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
                 .body(ClassSubjectResponse.from(updated));

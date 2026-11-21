@@ -56,6 +56,7 @@ public class ClassRoomService {
     private final AcademicYearRepository academicYearRepository;
     private final GradeLevelRepository gradeLevelRepository;
     private final SubjectRepository subjectRepository;
+    private final AcademicSubscriptionGuard subscriptionGuard;
     private final AuditLogPort auditLogPort;
 
     public ClassRoomService(
@@ -64,12 +65,14 @@ public class ClassRoomService {
             AcademicYearRepository academicYearRepository,
             GradeLevelRepository gradeLevelRepository,
             SubjectRepository subjectRepository,
+            AcademicSubscriptionGuard subscriptionGuard,
             AuditLogPort auditLogPort) {
         this.classRoomRepository = classRoomRepository;
         this.classSubjectRepository = classSubjectRepository;
         this.academicYearRepository = academicYearRepository;
         this.gradeLevelRepository = gradeLevelRepository;
         this.subjectRepository = subjectRepository;
+        this.subscriptionGuard = subscriptionGuard;
         this.auditLogPort = auditLogPort;
     }
 
@@ -81,6 +84,7 @@ public class ClassRoomService {
             ClassRoomStatus status,
             Pageable pageable) {
         TenantContext.requireCurrent();
+        subscriptionGuard.requireReadAccess();
         Specification<ClassRoom> spec = (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
             if (academicYearId != null) {
@@ -117,6 +121,7 @@ public class ClassRoomService {
     @Transactional(readOnly = true)
     public ClassRoomView getClassRoom(UUID classRoomId) {
         TenantContext.requireCurrent();
+        subscriptionGuard.requireReadAccess();
         ClassRoom room = requireClassRoom(classRoomId);
         AcademicYear year = academicYearRepository.findById(room.getAcademicYearId()).orElse(null);
         GradeLevel level = gradeLevelRepository.findById(room.getGradeLevelId()).orElse(null);
@@ -134,6 +139,7 @@ public class ClassRoomService {
             String roomName,
             Integer capacity) {
         TenantContext.requireCurrent();
+        subscriptionGuard.requireWriteAccess();
         AcademicYear year = requireAcademicYear(academicYearId);
         year.assertMutable();
 
@@ -171,6 +177,7 @@ public class ClassRoomService {
             String roomName,
             int capacity) {
         TenantContext.requireCurrent();
+        subscriptionGuard.requireWriteAccess();
         ClassRoom room = requireClassRoom(classRoomId);
         AcademicYear year = requireAcademicYear(room.getAcademicYearId());
         year.assertMutable();
@@ -189,6 +196,7 @@ public class ClassRoomService {
     @Transactional
     public ClassRoomView archiveClassRoom(UUID classRoomId) {
         TenantContext.requireCurrent();
+        subscriptionGuard.requireWriteAccess();
         ClassRoom room = requireClassRoom(classRoomId);
         AcademicYear year = requireAcademicYear(room.getAcademicYearId());
         year.assertMutable();
@@ -211,6 +219,7 @@ public class ClassRoomService {
     @Transactional
     public ClassRoomView reactivateClassRoom(UUID classRoomId) {
         TenantContext.requireCurrent();
+        subscriptionGuard.requireWriteAccess();
         ClassRoom room = requireClassRoom(classRoomId);
         AcademicYear year = requireAcademicYear(room.getAcademicYearId());
         year.assertMutable();
@@ -232,6 +241,7 @@ public class ClassRoomService {
     @Transactional(readOnly = true)
     public Page<ClassSubjectView> listClassSubjects(UUID classRoomId, Boolean activeOnly, Pageable pageable) {
         TenantContext.requireCurrent();
+        subscriptionGuard.requireReadAccess();
         requireClassRoom(classRoomId);
         Page<ClassSubject> page = Boolean.TRUE.equals(activeOnly)
                 ? classSubjectRepository.findByClassRoomIdAndActiveTrue(classRoomId, pageable)
@@ -255,6 +265,7 @@ public class ClassRoomService {
             Integer weeklyHours,
             Boolean mandatory) {
         TenantContext.requireCurrent();
+        subscriptionGuard.requireWriteAccess();
         ClassRoom room = requireClassRoom(classRoomId);
         room.assertActive();
         requireAcademicYear(room.getAcademicYearId()).assertMutable();
@@ -283,6 +294,7 @@ public class ClassRoomService {
             Integer weeklyHours,
             boolean mandatory) {
         TenantContext.requireCurrent();
+        subscriptionGuard.requireWriteAccess();
         ClassRoom room = requireClassRoom(classRoomId);
         room.assertActive();
         requireAcademicYear(room.getAcademicYearId()).assertMutable();
@@ -298,6 +310,7 @@ public class ClassRoomService {
     @Transactional
     public ClassSubjectView activateClassSubject(UUID classRoomId, UUID classSubjectId) {
         TenantContext.requireCurrent();
+        subscriptionGuard.requireWriteAccess();
         ClassRoom room = requireClassRoom(classRoomId);
         room.assertActive();
         requireAcademicYear(room.getAcademicYearId()).assertMutable();
@@ -316,6 +329,7 @@ public class ClassRoomService {
     @Transactional
     public ClassSubjectView deactivateClassSubject(UUID classRoomId, UUID classSubjectId) {
         TenantContext.requireCurrent();
+        subscriptionGuard.requireWriteAccess();
         ClassRoom room = requireClassRoom(classRoomId);
         room.assertActive();
         requireAcademicYear(room.getAcademicYearId()).assertMutable();

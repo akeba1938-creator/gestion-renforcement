@@ -8,6 +8,8 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.PreRemove;
+import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.Objects;
@@ -84,6 +86,17 @@ public class Receipt extends TenantScopedEntity {
         this.paymentMethod = Objects.requireNonNull(paymentMethod, "Le mode de paiement est obligatoire.");
         this.issuedAt = Objects.requireNonNull(issuedAt, "La date d'émission du reçu est obligatoire.");
         this.issuedBy = Objects.requireNonNull(issuedBy, "L'émetteur du reçu est obligatoire.");
+    }
+
+    @Override
+    @PreUpdate
+    protected void onUpdate() {
+        throw new UnsupportedOperationException("Les reçus de paiement sont strictement immuables.");
+    }
+
+    @PreRemove
+    protected void onRemove() {
+        throw new UnsupportedOperationException("Les reçus de paiement ne peuvent jamais être supprimés.");
     }
 
     public UUID getId() {

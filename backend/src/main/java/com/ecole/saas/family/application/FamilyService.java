@@ -49,6 +49,7 @@ public class FamilyService {
     private final StudentGuardianLinkRepository linkRepository;
     private final StudentDirectoryPort studentDirectoryPort;
     private final FamilySubscriptionGuard subscriptionGuard;
+    private final FamilyTeacherScopeGuard teacherScopeGuard;
     private final AuditLogPort auditLogPort;
     private final Clock clock;
 
@@ -58,6 +59,7 @@ public class FamilyService {
             StudentGuardianLinkRepository linkRepository,
             StudentDirectoryPort studentDirectoryPort,
             FamilySubscriptionGuard subscriptionGuard,
+            FamilyTeacherScopeGuard teacherScopeGuard,
             AuditLogPort auditLogPort,
             Clock clock) {
         this.familyRepository = familyRepository;
@@ -65,6 +67,7 @@ public class FamilyService {
         this.linkRepository = linkRepository;
         this.studentDirectoryPort = studentDirectoryPort;
         this.subscriptionGuard = subscriptionGuard;
+        this.teacherScopeGuard = teacherScopeGuard;
         this.auditLogPort = auditLogPort;
         this.clock = clock;
     }
@@ -75,8 +78,20 @@ public class FamilyService {
         TenantContext.requireCurrent();
         subscriptionGuard.requireReadAccess();
 
+        Set<UUID> visibleFamilyIds = null;
+        if (teacherScopeGuard.isRestrictedTeacher()) {
+            visibleFamilyIds = teacherScopeGuard.resolveVisibleFamilyIds();
+            if (visibleFamilyIds.isEmpty()) {
+                return Page.empty(pageable);
+            }
+        }
+        Set<UUID> restrictedFamilyIds = visibleFamilyIds;
+
         Specification<Family> spec = (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
+            if (restrictedFamilyIds != null) {
+                predicates.add(root.get("id").in(restrictedFamilyIds));
+            }
             if (status != null) {
                 predicates.add(cb.equal(root.get("status"), status));
             }
@@ -98,7 +113,9 @@ public class FamilyService {
     public Family getFamily(UUID familyId) {
         TenantContext.requireCurrent();
         subscriptionGuard.requireReadAccess();
-        return requireFamily(familyId);
+        Family family = requireFamily(familyId);
+        teacherScopeGuard.assertCanAccessFamily(family.getId());
+        return family;
     }
 
     @PreAuthorize(WRITE_ROLES)
@@ -181,8 +198,20 @@ public class FamilyService {
         TenantContext.requireCurrent();
         subscriptionGuard.requireReadAccess();
         Family family = requireFamily(familyId);
-        return guardianRepository.findByFamilyId(familyId, pageable)
-                .map(guardian -> new GuardianService.GuardianView(guardian, family.getCode(), family.getName()));
+        teacherScopeGuard.assertCanAccessFamily(family.getId());
+        boolean includeNationalId = teacherScopeGuard.canViewNationalIdNumber();
+        Page<Guardian> guardians;
+        if (teacherScopeGuard.isRestrictedTeacher()) {
+            Set<UUID> visibleGuardianIds = teacherScopeGuard.resolveVisibleGuardianIds();
+            if (visibleGuardianIds.isEmpty()) {
+                return Page.empty(pageable);
+            }
+            guardians = guardianRepository.findByFamilyIdAndIdIn(familyId, visibleGuardianIds, pageable);
+        } else {
+            guardians = guardianRepository.findByFamilyId(familyId, pageable);
+        }
+        return guardians.map(guardian -> new GuardianService.GuardianView(
+                guardian, family.getCode(), family.getName(), includeNationalId));
     }
 
     @PreAuthorize(READ_ROLES)
@@ -191,6 +220,7 @@ public class FamilyService {
         TenantContext.requireCurrent();
         subscriptionGuard.requireReadAccess();
         requireFamily(familyId);
+        teacherScopeGuard.assertCanAccessFamily(familyId);
 
         List<UUID> guardianIds = guardianRepository.findByFamilyId(familyId).stream()
                 .map(Guardian::getId)
@@ -202,6 +232,9 @@ public class FamilyService {
         Set<UUID> studentIds = linkRepository.findByGuardianIdInAndActiveTrue(guardianIds).stream()
                 .map(StudentGuardianLink::getStudentId)
                 .collect(Collectors.toSet());
+        if (teacherScopeGuard.isRestrictedTeacher()) {
+            studentIds.retainAll(teacherScopeGuard.resolveVisibleStudentIds());
+        }
         if (studentIds.isEmpty()) {
             return new PageImpl<>(List.of(), pageable, 0);
         }

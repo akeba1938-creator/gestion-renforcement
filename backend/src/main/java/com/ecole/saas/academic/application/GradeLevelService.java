@@ -28,15 +28,20 @@ public class GradeLevelService {
     private static final String WRITE_ROLES = "hasAnyRole('DIRECTOR', 'CENTER_MANAGER')";
 
     private final GradeLevelRepository gradeLevelRepository;
+    private final AcademicSubscriptionGuard subscriptionGuard;
 
-    public GradeLevelService(GradeLevelRepository gradeLevelRepository) {
+    public GradeLevelService(
+            GradeLevelRepository gradeLevelRepository,
+            AcademicSubscriptionGuard subscriptionGuard) {
         this.gradeLevelRepository = gradeLevelRepository;
+        this.subscriptionGuard = subscriptionGuard;
     }
 
     @PreAuthorize(READ_ROLES)
     @Transactional(readOnly = true)
     public Page<GradeLevel> listGradeLevels(EducationCycle cycle, Boolean activeOnly, Pageable pageable) {
         TenantContext.requireCurrent();
+        subscriptionGuard.requireReadAccess();
         Specification<GradeLevel> spec = (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
             if (cycle != null) {
@@ -54,6 +59,7 @@ public class GradeLevelService {
     @Transactional(readOnly = true)
     public GradeLevel getGradeLevel(UUID levelId) {
         TenantContext.requireCurrent();
+        subscriptionGuard.requireReadAccess();
         return requireGradeLevel(levelId);
     }
 
@@ -61,6 +67,7 @@ public class GradeLevelService {
     @Transactional
     public GradeLevel createGradeLevel(String code, String name, EducationCycle cycle, int displayOrder) {
         TenantContext.requireCurrent();
+        subscriptionGuard.requireWriteAccess();
         String normalizedCode = GradeLevel.normalizeCode(code);
         if (gradeLevelRepository.existsByCode(normalizedCode)) {
             throw new GradeLevelAlreadyExistsException("Un niveau avec ce code existe déjà dans votre établissement.");
@@ -72,6 +79,7 @@ public class GradeLevelService {
     @Transactional
     public GradeLevel updateGradeLevel(UUID levelId, String name, EducationCycle cycle, int displayOrder) {
         TenantContext.requireCurrent();
+        subscriptionGuard.requireWriteAccess();
         GradeLevel level = requireGradeLevel(levelId);
         level.update(name, cycle, displayOrder);
         return gradeLevelRepository.save(level);
@@ -81,6 +89,7 @@ public class GradeLevelService {
     @Transactional
     public GradeLevel activateGradeLevel(UUID levelId) {
         TenantContext.requireCurrent();
+        subscriptionGuard.requireWriteAccess();
         GradeLevel level = requireGradeLevel(levelId);
         level.activate();
         return gradeLevelRepository.save(level);
@@ -90,6 +99,7 @@ public class GradeLevelService {
     @Transactional
     public GradeLevel deactivateGradeLevel(UUID levelId) {
         TenantContext.requireCurrent();
+        subscriptionGuard.requireWriteAccess();
         GradeLevel level = requireGradeLevel(levelId);
         level.deactivate();
         return gradeLevelRepository.save(level);

@@ -10,7 +10,9 @@ public record RecordPaymentRequest(
         @NotNull(message = "La facture est obligatoire.") UUID invoiceId,
         UUID paymentScheduleId,
         UUID payerGuardianId,
-        @Min(value = 1, message = "Le montant encaissé en FCFA doit être strictement positif.") long amountXof,
+        @NotNull(message = "Le montant encaissé en FCFA est obligatoire.")
+                @Min(value = 1, message = "Le montant encaissé en FCFA doit être strictement positif.")
+                Long amountXof,
         @NotNull(message = "Le mode de paiement est obligatoire.") PaymentMethod paymentMethod,
         @Size(max = 120, message = "La référence externe ne doit pas dépasser 120 caractères.")
                 String externalReference,

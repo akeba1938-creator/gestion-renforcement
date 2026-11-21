@@ -42,7 +42,7 @@ public record GuardianResponse(
                 guardian.getEmail(),
                 guardian.getProfession(),
                 guardian.getAddress(),
-                guardian.getNationalIdNumber(),
+                view.includeNationalId() ? guardian.getNationalIdNumber() : null,
                 guardian.getPreferredLanguage(),
                 guardian.getStatus(),
                 guardian.getArchivedAt(),

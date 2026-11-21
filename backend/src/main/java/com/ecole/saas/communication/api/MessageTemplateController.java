@@ -119,7 +119,7 @@ public class MessageTemplateController {
     @PostMapping("/{templateId}/preview")
     public ResponseEntity<TemplatePreviewResponse> previewTemplate(
             @PathVariable UUID templateId,
-            @RequestBody(required = false) PreviewTemplateRequest request) {
+            @Valid @RequestBody(required = false) PreviewTemplateRequest request) {
         Map<String, String> variables = request != null && request.variables() != null ? request.variables() : Map.of();
         boolean strict = request == null || request.strict() == null || request.strict();
         return ResponseEntity.ok()

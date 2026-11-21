@@ -46,6 +46,7 @@ public class AcademicYearManagementService {
     private final AcademicYearRepository academicYearRepository;
     private final EvaluationPeriodRepository evaluationPeriodRepository;
     private final SchoolDirectory schoolDirectory;
+    private final AcademicSubscriptionGuard subscriptionGuard;
     private final AuditLogPort auditLogPort;
     private final Clock clock;
 
@@ -53,11 +54,13 @@ public class AcademicYearManagementService {
             AcademicYearRepository academicYearRepository,
             EvaluationPeriodRepository evaluationPeriodRepository,
             SchoolDirectory schoolDirectory,
+            AcademicSubscriptionGuard subscriptionGuard,
             AuditLogPort auditLogPort,
             Clock clock) {
         this.academicYearRepository = academicYearRepository;
         this.evaluationPeriodRepository = evaluationPeriodRepository;
         this.schoolDirectory = schoolDirectory;
+        this.subscriptionGuard = subscriptionGuard;
         this.auditLogPort = auditLogPort;
         this.clock = clock;
     }
@@ -66,6 +69,7 @@ public class AcademicYearManagementService {
     @Transactional(readOnly = true)
     public Page<AcademicYear> listAcademicYears(AcademicYearStatus status, Pageable pageable) {
         TenantContext.requireCurrent();
+        subscriptionGuard.requireReadAccess();
         if (status != null) {
             return academicYearRepository.findByStatus(status, pageable);
         }
@@ -76,6 +80,7 @@ public class AcademicYearManagementService {
     @Transactional(readOnly = true)
     public AcademicYear getCurrentAcademicYear() {
         TenantContext.requireCurrent();
+        subscriptionGuard.requireReadAccess();
         return academicYearRepository.findByCurrentTrue()
                 .orElseThrow(() -> new AcademicYearNotFoundException(
                         "Aucune année scolaire courante n'est définie pour cet établissement."));
@@ -85,6 +90,7 @@ public class AcademicYearManagementService {
     @Transactional(readOnly = true)
     public AcademicYear getAcademicYear(UUID yearId) {
         TenantContext.requireCurrent();
+        subscriptionGuard.requireReadAccess();
         return requireAcademicYear(yearId);
     }
 
@@ -97,6 +103,7 @@ public class AcademicYearManagementService {
             LocalDate endDate,
             PeriodSystem periodSystem) {
         UUID tenantId = TenantContext.requireCurrent().value();
+        subscriptionGuard.requireWriteAccess();
         String normalizedCode = AcademicYear.normalizeCode(code);
         if (academicYearRepository.existsByCode(normalizedCode)) {
             throw new AcademicYearAlreadyExistsException("Une année scolaire avec ce code existe déjà.");
@@ -131,6 +138,7 @@ public class AcademicYearManagementService {
             LocalDate endDate,
             PeriodSystem periodSystem) {
         TenantContext.requireCurrent();
+        subscriptionGuard.requireWriteAccess();
         AcademicYear year = requireAcademicYear(yearId);
         year.assertMutable();
 
@@ -151,6 +159,7 @@ public class AcademicYearManagementService {
     @Transactional
     public AcademicYear activateAcademicYear(UUID yearId, boolean makeCurrent) {
         TenantContext.requireCurrent();
+        subscriptionGuard.requireWriteAccess();
         AcademicYear year = requireAcademicYear(yearId);
         if (makeCurrent) {
             clearCurrentYearIfOther(yearId);
@@ -172,6 +181,7 @@ public class AcademicYearManagementService {
     @Transactional
     public AcademicYear setCurrentAcademicYear(UUID yearId) {
         TenantContext.requireCurrent();
+        subscriptionGuard.requireWriteAccess();
         AcademicYear year = requireAcademicYear(yearId);
         if (year.isCurrent()) {
             return year;
@@ -198,6 +208,7 @@ public class AcademicYearManagementService {
     @Transactional
     public AcademicYear closeAcademicYear(UUID yearId) {
         TenantContext.requireCurrent();
+        subscriptionGuard.requireWriteAccess();
         AcademicYear year = requireAcademicYear(yearId);
         year.close(clock.instant());
         AcademicYear saved = academicYearRepository.save(year);
@@ -217,6 +228,7 @@ public class AcademicYearManagementService {
     @Transactional
     public AcademicYear archiveAcademicYear(UUID yearId) {
         TenantContext.requireCurrent();
+        subscriptionGuard.requireWriteAccess();
         AcademicYear year = requireAcademicYear(yearId);
         year.archive(clock.instant());
         AcademicYear saved = academicYearRepository.save(year);

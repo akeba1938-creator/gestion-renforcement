@@ -7,6 +7,8 @@ import java.time.LocalDate;
 
 public record SubmitCashClosingRequest(
         @NotNull(message = "La date de clôture est obligatoire.") LocalDate closingDate,
-        @Min(value = 0, message = "Le montant compté en caisse doit être positif ou nul.") long countedCashXof,
+        @NotNull(message = "Le montant compté en caisse est obligatoire.")
+                @Min(value = 0, message = "Le montant compté en caisse doit être positif ou nul.")
+                Long countedCashXof,
         @Size(max = 500, message = "Les notes ne doivent pas dépasser 500 caractères.") String notes) {
 }

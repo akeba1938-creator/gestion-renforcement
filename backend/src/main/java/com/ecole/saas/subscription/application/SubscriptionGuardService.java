@@ -46,6 +46,17 @@ public class SubscriptionGuardService implements SubscriptionAccessPort {
 
     @Override
     @Transactional(readOnly = true)
+    public SubscriptionSnapshot assertReadAllowed() {
+        TenantContext.requireCurrent();
+        Instant now = clock.instant();
+        Subscription subscription = SubscriptionSupport.findCurrentSubscription(subscriptionRepository)
+                .orElse(null);
+        SubscriptionPolicy.assertReadAllowed(subscription, now);
+        return SubscriptionSupport.toSnapshot(subscription, planRepository, now);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public SubscriptionSnapshot requireOperationalSubscription() {
         TenantContext.requireCurrent();
         Instant now = clock.instant();

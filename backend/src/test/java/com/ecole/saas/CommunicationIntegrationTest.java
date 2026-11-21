@@ -928,6 +928,136 @@ class CommunicationIntegrationTest {
         })).isInstanceOf(DataAccessException.class);
     }
 
+    @Test
+    void shouldHideInactiveTemplatesFromNonAdminsAndSupportCashierPlusCensorMultiRole() throws Exception {
+        School school = createSchool("COMM-M4", SchoolType.PRIVATE_SCHOOL);
+        createSubscription(school, SubscriptionStatus.ACTIVE, Instant.now().plus(30, ChronoUnit.DAYS));
+
+        String directorToken = tenantToken(school.getId(), RoleCode.DIRECTOR);
+        String cashierToken = tenantToken(school.getId(), RoleCode.CASHIER);
+        String censorToken = tenantToken(school.getId(), RoleCode.CENSOR);
+        String teacherToken = tenantToken(school.getId(), RoleCode.TEACHER);
+        String multiRoleToken = tokenIssuer
+                .issueAccessToken(
+                        AccountRef.user(UUID.randomUUID(), school.getId()),
+                        Set.of(RoleCode.CASHIER.name(), RoleCode.CENSOR.name()))
+                .value();
+
+        // Créer 1 modèle actif et 1 modèle désactivé
+        MvcResult activeTplRes = mockMvc.perform(post("/api/v1/communication/templates")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(directorToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "code", "ACTIF_M4",
+                                "name", "Modèle actif",
+                                "category", "GENERAL",
+                                "channel", "SMS",
+                                "bodyTemplate", "Bonjour {{recipientName}}",
+                                "estimatedUnitCostXof", 15L))))
+                .andExpect(status().isCreated())
+                .andReturn();
+        UUID activeTemplateId = UUID.fromString(readJson(activeTplRes).get("id").asString());
+
+        MvcResult inactiveTplRes = mockMvc.perform(post("/api/v1/communication/templates")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(directorToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "code", "INACTIF_M4",
+                                "name", "Modèle archivé",
+                                "category", "GENERAL",
+                                "channel", "SMS",
+                                "bodyTemplate", "Brouillon confidentiel",
+                                "estimatedUnitCostXof", 15L))))
+                .andExpect(status().isCreated())
+                .andReturn();
+        UUID inactiveTemplateId = UUID.fromString(readJson(inactiveTplRes).get("id").asString());
+
+        mockMvc.perform(post("/api/v1/communication/templates/" + inactiveTemplateId + "/deactivate")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(directorToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.active").value(false));
+
+        // M4 (a) : hors rôles admin, ?active=false ne révèle aucun modèle inactif, et GET/preview sur un modèle inactif -> 403
+        for (String nonAdminToken : List.of(cashierToken, censorToken, teacherToken, multiRoleToken)) {
+            mockMvc.perform(get("/api/v1/communication/templates")
+                            .header(HttpHeaders.AUTHORIZATION, bearer(nonAdminToken))
+                            .param("active", "false"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totalElements").value(1))
+                    .andExpect(jsonPath("$.content[0].id").value(activeTemplateId.toString()));
+
+            mockMvc.perform(get("/api/v1/communication/templates/" + inactiveTemplateId)
+                            .header(HttpHeaders.AUTHORIZATION, bearer(nonAdminToken)))
+                    .andExpect(status().isForbidden());
+
+            mockMvc.perform(post("/api/v1/communication/templates/" + inactiveTemplateId + "/preview")
+                            .header(HttpHeaders.AUTHORIZATION, bearer(nonAdminToken))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(json(Map.of("variables", Map.of(), "strict", false))))
+                    .andExpect(status().isForbidden());
+        }
+
+        // L'administrateur (DIRECTOR) continue de voir et prévisualiser le modèle inactif
+        mockMvc.perform(get("/api/v1/communication/templates")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(directorToken))
+                        .param("active", "false"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].id").value(inactiveTemplateId.toString()));
+        mockMvc.perform(get("/api/v1/communication/templates/" + inactiveTemplateId)
+                        .header(HttpHeaders.AUTHORIZATION, bearer(directorToken)))
+                .andExpect(status().isOk());
+
+        // M4 (b) : cumul de rôles CASHIER + CENSOR autorise lecture et envoi des campagnes financières ET non financières
+        UUID familyId = createFamilyViaApi(directorToken, "FAM-M4", "Famille M4");
+        UUID guardianId = createGuardianViaApi(
+                directorToken, familyId, "Moussa", "Ndiaye", "+221774445566", "moussa.m4@ecole.sn");
+
+        MvcResult finCampaignRes = mockMvc.perform(post("/api/v1/communication/campaigns")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(multiRoleToken))
+                        .header("Idempotency-Key", "comm-m4-fin-001")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "title", "Relance scolarité M4",
+                                "category", "PAYMENT_DUE_REMINDER",
+                                "channel", "SMS",
+                                "audienceType", "GUARDIAN",
+                                "audienceTargetId", guardianId,
+                                "body", "Rappel échéance scolarité.",
+                                "dispatchImmediately", true))))
+                .andExpect(status().isCreated())
+                .andReturn();
+        UUID finCampaignId = UUID.fromString(readJson(finCampaignRes).get("id").asString());
+
+        MvcResult pedCampaignRes = mockMvc.perform(post("/api/v1/communication/campaigns")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(multiRoleToken))
+                        .header("Idempotency-Key", "comm-m4-ped-001")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "title", "Information pédagogique M4",
+                                "category", "GENERAL",
+                                "channel", "SMS",
+                                "audienceType", "GUARDIAN",
+                                "audienceTargetId", guardianId,
+                                "body", "Réunion parents-professeurs vendredi.",
+                                "dispatchImmediately", true))))
+                .andExpect(status().isCreated())
+                .andReturn();
+        UUID pedCampaignId = UUID.fromString(readJson(pedCampaignRes).get("id").asString());
+
+        mockMvc.perform(get("/api/v1/communication/campaigns")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(multiRoleToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(2));
+
+        mockMvc.perform(get("/api/v1/communication/campaigns/" + finCampaignId)
+                        .header(HttpHeaders.AUTHORIZATION, bearer(multiRoleToken)))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/communication/campaigns/" + pedCampaignId)
+                        .header(HttpHeaders.AUTHORIZATION, bearer(multiRoleToken)))
+                .andExpect(status().isOk());
+    }
+
     // --- Helpers ---
 
     private School createSchool(String prefix, SchoolType type) {

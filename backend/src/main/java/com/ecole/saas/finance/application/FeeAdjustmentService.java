@@ -190,7 +190,7 @@ public class FeeAdjustmentService {
         subscriptionGuard.requireWriteAccess();
 
         FeeAdjustment adjustment = requireAdjustment(adjustmentId);
-        StudentInvoice invoice = invoiceRepository.findById(adjustment.getInvoiceId())
+        StudentInvoice invoice = invoiceRepository.findByIdForUpdate(adjustment.getInvoiceId())
                 .orElseThrow(() -> new FinanceNotFoundException(
                         "invoice-not-found", "Facture introuvable", "La facture associée est introuvable."));
 

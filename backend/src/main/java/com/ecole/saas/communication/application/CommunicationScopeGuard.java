@@ -56,26 +56,26 @@ class CommunicationScopeGuard {
     }
 
     boolean hasFullAdminScope() {
-        Set<String> roles = currentAuthorities();
+        return hasFullAdminScope(currentAuthorities());
+    }
+
+    private static boolean hasFullAdminScope(Set<String> roles) {
         return roles.stream().anyMatch(FULL_ACCESS_ROLES::contains);
     }
 
-    boolean isCashierOnly() {
+    boolean canAccessFinancialCampaigns() {
         Set<String> roles = currentAuthorities();
-        return !hasFullAdminScope() && roles.contains("ROLE_CASHIER") && !roles.contains("ROLE_CENSOR");
+        return hasFullAdminScope(roles) || roles.contains("ROLE_CASHIER");
     }
 
-    boolean isCensorOnly() {
+    boolean canAccessNonFinancialCampaigns() {
         Set<String> roles = currentAuthorities();
-        return !hasFullAdminScope() && roles.contains("ROLE_CENSOR") && !roles.contains("ROLE_CASHIER");
+        return hasFullAdminScope(roles) || roles.contains("ROLE_CENSOR");
     }
 
-    boolean isTeacherOrTutorOnly() {
+    boolean hasTeacherOrTutorScope() {
         Set<String> roles = currentAuthorities();
-        return !hasFullAdminScope()
-                && !roles.contains("ROLE_CASHIER")
-                && !roles.contains("ROLE_CENSOR")
-                && (roles.contains("ROLE_TEACHER") || roles.contains("ROLE_TUTOR"));
+        return roles.contains("ROLE_TEACHER") || roles.contains("ROLE_TUTOR");
     }
 
     void assertCanSendCampaign(
@@ -83,32 +83,40 @@ class CommunicationScopeGuard {
             MessageCategory category,
             AudienceType audienceType,
             UUID audienceTargetId) {
-        if (hasFullAdminScope()) {
-            return;
-        }
         Set<String> roles = currentAuthorities();
-
-        if (roles.contains("ROLE_CASHIER") && !roles.contains("ROLE_CENSOR")) {
-            if (!category.isFinancial()) {
-                throw new CommunicationForbiddenException(
-                        "Le rôle Caissier est limité aux relances et reçus financiers (PAYMENT_RECEIPT, PAYMENT_DUE_REMINDER).");
-            }
-            if (!CASHIER_ALLOWED_AUDIENCES.contains(audienceType)) {
-                throw new CommunicationForbiddenException(
-                        "Le rôle Caissier ne peut envoyer de relances qu'aux familles, tuteurs ou élèves.");
-            }
+        if (hasFullAdminScope(roles)) {
             return;
         }
 
-        if (roles.contains("ROLE_CENSOR")) {
-            if (category.isFinancial()) {
+        boolean hasCashier = roles.contains("ROLE_CASHIER");
+        boolean hasCensor = roles.contains("ROLE_CENSOR");
+        boolean hasTeacher = roles.contains("ROLE_TEACHER") || roles.contains("ROLE_TUTOR");
+
+        if (category.isFinancial()) {
+            if (hasCashier) {
+                if (!CASHIER_ALLOWED_AUDIENCES.contains(audienceType)) {
+                    throw new CommunicationForbiddenException(
+                            "Le rôle Caissier ne peut envoyer de relances qu'aux familles, tuteurs ou élèves.");
+                }
+                return;
+            }
+            if (hasCensor) {
                 throw new CommunicationForbiddenException(
                         "Le rôle Censeur ne peut pas envoyer de communications financières.");
             }
-            return;
+            if (hasTeacher) {
+                throw new CommunicationForbiddenException(
+                        "Les enseignants et intervenants ne peuvent envoyer que des messages pédagogiques, alertes d'absence ou notifications de séance.");
+            }
+            throw new CommunicationForbiddenException(
+                    "Vous ne disposez pas des autorisations nécessaires pour envoyer cette communication.");
         }
 
-        if (roles.contains("ROLE_TEACHER") || roles.contains("ROLE_TUTOR")) {
+        // Catégories non financières : union des capacités CENSOR puis TEACHER/TUTOR
+        if (hasCensor) {
+            return;
+        }
+        if (hasTeacher) {
             if (!TEACHER_ALLOWED_CATEGORIES.contains(category)) {
                 throw new CommunicationForbiddenException(
                         "Les enseignants et intervenants ne peuvent envoyer que des messages pédagogiques, alertes d'absence ou notifications de séance.");
@@ -116,35 +124,52 @@ class CommunicationScopeGuard {
             assertTeacherOrTutorAudienceAllowed(actorUserId, audienceType, audienceTargetId);
             return;
         }
-
+        if (hasCashier) {
+            throw new CommunicationForbiddenException(
+                    "Le rôle Caissier est limité aux relances et reçus financiers (PAYMENT_RECEIPT, PAYMENT_DUE_REMINDER).");
+        }
         throw new CommunicationForbiddenException(
                 "Vous ne disposez pas des autorisations nécessaires pour envoyer cette communication.");
     }
 
     void assertCanReadCampaign(UUID actorUserId, CommunicationCampaign campaign) {
-        if (hasFullAdminScope()) {
+        Set<String> roles = currentAuthorities();
+        if (hasFullAdminScope(roles)) {
             return;
         }
-        if (isCashierOnly()) {
-            if (!campaign.getCategory().isFinancial()) {
-                throw new CommunicationForbiddenException(
-                        "Le rôle Caissier ne peut consulter que les communications financières.");
+
+        boolean hasCashier = roles.contains("ROLE_CASHIER");
+        boolean hasCensor = roles.contains("ROLE_CENSOR");
+        boolean hasTeacher = roles.contains("ROLE_TEACHER") || roles.contains("ROLE_TUTOR");
+
+        if (campaign.getCategory().isFinancial()) {
+            if (hasCashier) {
+                return;
             }
-            return;
-        }
-        if (isCensorOnly()) {
-            if (campaign.getCategory().isFinancial()) {
+            if (hasCensor) {
                 throw new CommunicationForbiddenException(
                         "Le rôle Censeur ne peut pas consulter les communications financières.");
             }
-            return;
-        }
-        if (isTeacherOrTutorOnly()) {
-            if (actorUserId == null || !actorUserId.equals(campaign.getCreatedBy())) {
+            if (hasTeacher) {
                 throw new CommunicationForbiddenException(
                         "Un enseignant ou intervenant ne peut consulter que ses propres envois.");
             }
+            throw new CommunicationForbiddenException("Accès refusé à cette campagne de communication.");
+        }
+
+        if (hasCensor) {
             return;
+        }
+        if (hasTeacher) {
+            if (actorUserId != null && actorUserId.equals(campaign.getCreatedBy())) {
+                return;
+            }
+            throw new CommunicationForbiddenException(
+                    "Un enseignant ou intervenant ne peut consulter que ses propres envois.");
+        }
+        if (hasCashier) {
+            throw new CommunicationForbiddenException(
+                    "Le rôle Caissier ne peut consulter que les communications financières.");
         }
         throw new CommunicationForbiddenException("Accès refusé à cette campagne de communication.");
     }

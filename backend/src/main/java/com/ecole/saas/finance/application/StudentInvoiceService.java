@@ -261,7 +261,7 @@ public class StudentInvoiceService {
         TenantContext.requireCurrent();
         subscriptionGuard.requireWriteAccess();
 
-        StudentInvoice invoice = requireInvoice(invoiceId);
+        StudentInvoice invoice = requireInvoiceForUpdate(invoiceId);
         requireMutableAcademicYear(invoice.getAcademicYearId());
         if (!invoice.isDraft()) {
             throw new FinanceConflictException(
@@ -317,7 +317,7 @@ public class StudentInvoiceService {
         }
         Objects.requireNonNull(firstDueDate, "La date de première échéance est obligatoire.");
 
-        StudentInvoice invoice = requireInvoice(invoiceId);
+        StudentInvoice invoice = requireInvoiceForUpdate(invoiceId);
         requireMutableAcademicYear(invoice.getAcademicYearId());
         if (!invoice.isDraft()) {
             throw new FinanceConflictException(
@@ -359,7 +359,7 @@ public class StudentInvoiceService {
         TenantContext.requireCurrent();
         subscriptionGuard.requireWriteAccess();
 
-        StudentInvoice invoice = requireInvoice(invoiceId);
+        StudentInvoice invoice = requireInvoiceForUpdate(invoiceId);
         requireMutableAcademicYear(invoice.getAcademicYearId());
         List<StudentInvoiceLine> lines = lineRepository.findByInvoiceIdOrderByLineOrderAsc(invoice.getId());
         if (lines.isEmpty()) {
@@ -425,7 +425,7 @@ public class StudentInvoiceService {
         TenantContext.requireCurrent();
         subscriptionGuard.requireWriteAccess();
 
-        StudentInvoice invoice = requireInvoice(invoiceId);
+        StudentInvoice invoice = requireInvoiceForUpdate(invoiceId);
         long netBeforeCancel = invoice.getNetAmountXof();
         Instant now = clock.instant();
         boolean wasIssued = invoice.cancel(reason, now, actorId);
@@ -627,6 +627,12 @@ public class StudentInvoiceService {
 
     private StudentInvoice requireInvoice(UUID invoiceId) {
         return invoiceRepository.findById(invoiceId)
+                .orElseThrow(() -> new FinanceNotFoundException(
+                        "invoice-not-found", "Facture introuvable", "La facture demandée est introuvable."));
+    }
+
+    private StudentInvoice requireInvoiceForUpdate(UUID invoiceId) {
+        return invoiceRepository.findByIdForUpdate(invoiceId)
                 .orElseThrow(() -> new FinanceNotFoundException(
                         "invoice-not-found", "Facture introuvable", "La facture demandée est introuvable."));
     }

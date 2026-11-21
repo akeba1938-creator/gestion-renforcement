@@ -95,7 +95,7 @@ public class AcademicYearController {
     @PostMapping("/{yearId}/activate")
     public ResponseEntity<AcademicYearResponse> activateYear(
             @PathVariable UUID yearId,
-            @RequestBody(required = false) ActivateAcademicYearRequest request) {
+            @Valid @RequestBody(required = false) ActivateAcademicYearRequest request) {
         boolean makeCurrent = request == null || request.resolvedMakeCurrent();
         AcademicYear activated = academicYearService.activateAcademicYear(yearId, makeCurrent);
         return ResponseEntity.ok()

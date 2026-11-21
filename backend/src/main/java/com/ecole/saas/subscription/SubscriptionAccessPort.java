@@ -10,6 +10,8 @@ public interface SubscriptionAccessPort {
 
     Optional<SubscriptionSnapshot> findCurrentForCurrentTenant();
 
+    SubscriptionSnapshot assertReadAllowed();
+
     SubscriptionSnapshot requireOperationalSubscription();
 
     boolean isOperationalForCurrentTenant();

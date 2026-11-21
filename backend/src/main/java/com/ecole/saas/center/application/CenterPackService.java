@@ -307,7 +307,11 @@ public class CenterPackService {
     public StudentPackView cancelStudentPack(UUID studentPackId, String reason) {
         subscriptionGuard.requireWriteAccess();
         schoolGuard.requireActiveSchoolForWrite();
-        CenterStudentPack studentPack = requireStudentPack(studentPackId);
+        CenterStudentPack studentPack = studentPackRepository.findByIdForUpdate(studentPackId)
+                .orElseThrow(() -> new CenterNotFoundException(
+                        "center-student-pack-not-found",
+                        "Forfait élève introuvable",
+                        "Le forfait élève demandé est introuvable."));
         studentPack.cancel(reason);
         CenterStudentPack saved = studentPackRepository.save(studentPack);
         auditLogPort.recordTenantEvent(AuditRecordCommand.warning(

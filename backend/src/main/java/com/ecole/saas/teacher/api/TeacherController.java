@@ -137,7 +137,7 @@ public class TeacherController {
     @PutMapping("/{teacherId}/user-link")
     public ResponseEntity<TeacherResponse> linkUserAccount(
             @PathVariable UUID teacherId,
-            @RequestBody LinkTeacherUserRequest request) {
+            @Valid @RequestBody LinkTeacherUserRequest request) {
         Teacher updated = teacherService.linkUserAccount(teacherId, request != null ? request.userId() : null);
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())

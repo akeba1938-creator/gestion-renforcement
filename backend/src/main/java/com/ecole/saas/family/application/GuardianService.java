@@ -47,6 +47,7 @@ public class GuardianService {
     private final StudentGuardianLinkRepository linkRepository;
     private final StudentDirectoryPort studentDirectoryPort;
     private final FamilySubscriptionGuard subscriptionGuard;
+    private final FamilyTeacherScopeGuard teacherScopeGuard;
     private final AuditLogPort auditLogPort;
     private final Clock clock;
 
@@ -56,6 +57,7 @@ public class GuardianService {
             StudentGuardianLinkRepository linkRepository,
             StudentDirectoryPort studentDirectoryPort,
             FamilySubscriptionGuard subscriptionGuard,
+            FamilyTeacherScopeGuard teacherScopeGuard,
             AuditLogPort auditLogPort,
             Clock clock) {
         this.guardianRepository = guardianRepository;
@@ -63,6 +65,7 @@ public class GuardianService {
         this.linkRepository = linkRepository;
         this.studentDirectoryPort = studentDirectoryPort;
         this.subscriptionGuard = subscriptionGuard;
+        this.teacherScopeGuard = teacherScopeGuard;
         this.auditLogPort = auditLogPort;
         this.clock = clock;
     }
@@ -74,8 +77,23 @@ public class GuardianService {
         TenantContext.requireCurrent();
         subscriptionGuard.requireReadAccess();
 
+        Set<UUID> visibleGuardianIds = null;
+        if (teacherScopeGuard.isRestrictedTeacher()) {
+            if (familyId != null) {
+                teacherScopeGuard.assertCanAccessFamily(familyId);
+            }
+            visibleGuardianIds = teacherScopeGuard.resolveVisibleGuardianIds();
+            if (visibleGuardianIds.isEmpty()) {
+                return Page.empty(pageable);
+            }
+        }
+        Set<UUID> restrictedGuardianIds = visibleGuardianIds;
+
         Specification<Guardian> spec = (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
+            if (restrictedGuardianIds != null) {
+                predicates.add(root.get("id").in(restrictedGuardianIds));
+            }
             if (familyId != null) {
                 predicates.add(cb.equal(root.get("familyId"), familyId));
             }
@@ -93,8 +111,9 @@ public class GuardianService {
             return cb.and(predicates.toArray(Predicate[]::new));
         };
         Page<Guardian> page = guardianRepository.findAll(spec, pageable);
+        boolean includeNationalId = teacherScopeGuard.canViewNationalIdNumber();
         if (page.isEmpty()) {
-            return page.map(g -> new GuardianView(g, null, null));
+            return page.map(g -> new GuardianView(g, null, null, includeNationalId));
         }
 
         Set<UUID> familyIds = page.getContent().stream()
@@ -106,7 +125,7 @@ public class GuardianService {
                 : familyRepository.findAllById(familyIds).stream()
                         .collect(Collectors.toMap(Family::getId, Function.identity()));
 
-        return page.map(guardian -> toView(guardian, familiesById.get(guardian.getFamilyId())));
+        return page.map(guardian -> toView(guardian, familiesById.get(guardian.getFamilyId()), includeNationalId));
     }
 
     @PreAuthorize(FamilyService.READ_ROLES)
@@ -115,10 +134,11 @@ public class GuardianService {
         TenantContext.requireCurrent();
         subscriptionGuard.requireReadAccess();
         Guardian guardian = requireGuardian(guardianId);
+        teacherScopeGuard.assertCanAccessGuardian(guardian.getId());
         Family family = guardian.getFamilyId() != null
                 ? familyRepository.findById(guardian.getFamilyId()).orElse(null)
                 : null;
-        return toView(guardian, family);
+        return toView(guardian, family, teacherScopeGuard.canViewNationalIdNumber());
     }
 
     @PreAuthorize(FamilyService.WRITE_ROLES)
@@ -248,10 +268,22 @@ public class GuardianService {
         TenantContext.requireCurrent();
         subscriptionGuard.requireReadAccess();
         Guardian guardian = requireGuardian(guardianId);
+        teacherScopeGuard.assertCanAccessGuardian(guardian.getId());
 
-        Page<StudentGuardianLink> page = Boolean.TRUE.equals(activeOnly)
-                ? linkRepository.findByGuardianIdAndActiveTrue(guardianId, pageable)
-                : linkRepository.findByGuardianId(guardianId, pageable);
+        Page<StudentGuardianLink> page;
+        if (teacherScopeGuard.isRestrictedTeacher()) {
+            Set<UUID> visibleStudentIds = teacherScopeGuard.resolveVisibleStudentIds();
+            if (visibleStudentIds.isEmpty()) {
+                return Page.empty(pageable);
+            }
+            page = Boolean.TRUE.equals(activeOnly)
+                    ? linkRepository.findByGuardianIdAndStudentIdInAndActiveTrue(guardianId, visibleStudentIds, pageable)
+                    : linkRepository.findByGuardianIdAndStudentIdIn(guardianId, visibleStudentIds, pageable);
+        } else {
+            page = Boolean.TRUE.equals(activeOnly)
+                    ? linkRepository.findByGuardianIdAndActiveTrue(guardianId, pageable)
+                    : linkRepository.findByGuardianId(guardianId, pageable);
+        }
         if (page.isEmpty()) {
             return page.map(link -> new StudentGuardianService.StudentGuardianView(link, guardian, null));
         }
@@ -276,13 +308,18 @@ public class GuardianService {
                 .orElseThrow(() -> new FamilyNotFoundException("Famille introuvable."));
     }
 
-    private static GuardianView toView(Guardian guardian, Family family) {
+    private GuardianView toView(Guardian guardian, Family family) {
+        return toView(guardian, family, teacherScopeGuard.canViewNationalIdNumber());
+    }
+
+    private static GuardianView toView(Guardian guardian, Family family, boolean includeNationalId) {
         return new GuardianView(
                 guardian,
                 family != null ? family.getCode() : null,
-                family != null ? family.getName() : null);
+                family != null ? family.getName() : null,
+                includeNationalId);
     }
 
-    public record GuardianView(Guardian guardian, String familyCode, String familyName) {
+    public record GuardianView(Guardian guardian, String familyCode, String familyName, boolean includeNationalId) {
     }
 }

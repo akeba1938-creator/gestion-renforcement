@@ -191,6 +191,7 @@ public class TeacherDirectoryQueryService implements TeacherDirectoryPort {
                 teacher.getTeacherType().name(),
                 teacher.getPhone(),
                 teacher.getEmail(),
+                teacher.getHourlyRateXof(),
                 teacher.getStatus().name(),
                 teacher.isActive());
     }

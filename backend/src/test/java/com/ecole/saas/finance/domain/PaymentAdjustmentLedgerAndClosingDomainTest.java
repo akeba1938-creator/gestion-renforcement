@@ -59,15 +59,47 @@ class PaymentAdjustmentLedgerAndClosingDomainTest {
                 "short", now, actorId, null))
                 .isInstanceOf(FinanceValidationException.class);
 
+        UUID guardianId = UUID.randomUUID();
         Payment wavePayment = new Payment(
-                invoiceId, studentId, null, null, 25_000L,
+                invoiceId, studentId, guardianId, null, 25_000L,
                 PaymentMethod.MOBILE_MONEY_WAVE, "WAVE-TX-998877", PaymentConfirmationSource.MANUAL_DESK,
                 "idem-wave-0001", now, actorId, "Paiement Octobre");
 
         assertThat(wavePayment.matchesIdempotentRequest(
-                invoiceId, 25_000L, PaymentMethod.MOBILE_MONEY_WAVE, "WAVE-TX-998877", null)).isTrue();
+                invoiceId, 25_000L, PaymentMethod.MOBILE_MONEY_WAVE, "WAVE-TX-998877", null, guardianId, "Paiement Octobre")).isTrue();
         assertThat(wavePayment.matchesIdempotentRequest(
-                invoiceId, 26_000L, PaymentMethod.MOBILE_MONEY_WAVE, "WAVE-TX-998877", null)).isFalse();
+                invoiceId, 26_000L, PaymentMethod.MOBILE_MONEY_WAVE, "WAVE-TX-998877", null, guardianId, "Paiement Octobre")).isFalse();
+        assertThat(wavePayment.matchesIdempotentRequest(
+                invoiceId, 25_000L, PaymentMethod.MOBILE_MONEY_WAVE, "WAVE-TX-998877", null, UUID.randomUUID(), "Paiement Octobre")).isFalse();
+        assertThat(wavePayment.matchesIdempotentRequest(
+                invoiceId, 25_000L, PaymentMethod.MOBILE_MONEY_WAVE, "WAVE-TX-998877", null, guardianId, "Autre note")).isFalse();
+    }
+
+    @Test
+    void shouldForbidSelfApprovalOnAdjustmentReversalAndCashClosing() {
+        UUID invoiceId = UUID.randomUUID();
+        UUID studentId = UUID.randomUUID();
+        UUID paymentId = UUID.randomUUID();
+        UUID sameActor = UUID.randomUUID();
+        Instant now = Instant.parse("2026-10-15T15:00:00Z");
+
+        FeeAdjustment adjustment = FeeAdjustment.requestFixed(
+                invoiceId, studentId, AdjustmentType.DISCOUNT, 10_000L, "Remise fratrie", sameActor, now);
+        assertThatThrownBy(() -> adjustment.approve(sameActor, now.plusSeconds(30), "Auto-approbation"))
+                .isInstanceOf(FinanceForbiddenException.class)
+                .hasMessageContaining("lui-même");
+
+        PaymentReversalRequest reversalRequest = new PaymentReversalRequest(
+                paymentId, invoiceId, studentId, 25_000L, "Erreur saisie", sameActor, now);
+        assertThatThrownBy(() -> reversalRequest.approve(sameActor, now.plusSeconds(30), "Auto-approbation"))
+                .isInstanceOf(FinanceForbiddenException.class)
+                .hasMessageContaining("lui-même");
+
+        CashClosing closing = new CashClosing(
+                LocalDate.of(2026, 10, 15), 50_000L, 0L, 50_000L, 2, 0, null, sameActor, now);
+        assertThatThrownBy(() -> closing.validate(sameActor, now.plusSeconds(30), "Auto-validation"))
+                .isInstanceOf(FinanceForbiddenException.class)
+                .hasMessageContaining("lui-même");
     }
 
     @Test

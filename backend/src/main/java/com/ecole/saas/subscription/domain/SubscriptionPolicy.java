@@ -114,6 +114,13 @@ public final class SubscriptionPolicy {
                 null);
     }
 
+    public static void assertReadAllowed(Subscription subscription, Instant now) {
+        EffectiveAccessState accessState = evaluateAccessState(subscription, now);
+        if (!accessState.isReadAllowed()) {
+            throw new SubscriptionAccessDeniedException(accessDeniedMessage(accessState));
+        }
+    }
+
     public static void assertOperational(Subscription subscription, Instant now) {
         EffectiveAccessState accessState = evaluateAccessState(subscription, now);
         if (!accessState.isWriteAllowed()) {

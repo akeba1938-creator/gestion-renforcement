@@ -47,6 +47,12 @@ public class JwtAuthenticationConverter implements Converter<Jwt, AbstractAuthen
                 if (role == null || role.isBlank()) {
                     throw new InvalidBearerTokenException("Jeton d'authentification invalide.");
                 }
+                if (JwtClaims.SUBJECT_TYPE_USER.equals(subjectType) && "ADMIN_SAAS".equals(role)) {
+                    throw new InvalidBearerTokenException("Jeton d'authentification invalide.");
+                }
+                if (JwtClaims.SUBJECT_TYPE_PLATFORM_ADMIN.equals(subjectType) && !"ADMIN_SAAS".equals(role)) {
+                    throw new InvalidBearerTokenException("Jeton d'authentification invalide.");
+                }
                 authorities.add(new SimpleGrantedAuthority("ROLE_" + role));
             }
         } else if (JwtClaims.TOKEN_TYPE_MFA_PENDING.equals(tokenType)) {

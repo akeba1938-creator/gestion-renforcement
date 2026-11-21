@@ -142,7 +142,7 @@ public class PlatformSubscriptionController {
                 subscriptionId,
                 request.planId(),
                 request.billingCycle(),
-                request.resetExtraQuotas(),
+                Boolean.TRUE.equals(request.resetExtraQuotas()),
                 request.reason(),
                 extractActorId(authentication));
         return ResponseEntity.ok(SubscriptionResponse.from(updated));

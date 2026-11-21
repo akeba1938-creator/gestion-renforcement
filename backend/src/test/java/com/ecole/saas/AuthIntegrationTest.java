@@ -549,6 +549,24 @@ class AuthIntegrationTest {
             jdbcTemplate.execute("SET LOCAL ROLE ecole_app");
             jdbcTemplate.update("UPDATE roles SET label = 'Piraté' WHERE code = 'DIRECTOR'");
         })).isInstanceOf(DataAccessException.class);
+
+        // M2 (V12) : RLS sur platform_admins et platform_refresh_tokens bloque toute lecture/écriture dès qu'un TenantContext est actif
+        TenantContext.runWithTenant(tenantA, () -> transactionTemplate.executeWithoutResult(status -> {
+            jdbcTemplate.execute("SET LOCAL ROLE ecole_app");
+            assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM platform_admins", Integer.class)).isZero();
+            assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM platform_refresh_tokens", Integer.class))
+                    .isZero();
+        }));
+
+        TenantContext.runWithTenant(tenantA, () -> assertThatThrownBy(() ->
+                transactionTemplate.executeWithoutResult(status -> {
+                    jdbcTemplate.execute("SET LOCAL ROLE ecole_app");
+                    jdbcTemplate.update(
+                            "INSERT INTO platform_admins (id, email, first_name, last_name, password_hash, status) "
+                                    + "VALUES (?, 'rogue@platform.sn', 'Rogue', 'Admin', 'hash', 'ACTIVE')",
+                            UUID.randomUUID());
+                }))
+                .isInstanceOf(DataAccessException.class));
     }
 
     private School createSchool(String prefix) {

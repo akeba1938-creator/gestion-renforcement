@@ -8,11 +8,11 @@ public record UpdateStudentGuardianRequest(
         @NotNull(message = "Le lien de parenté est obligatoire.")
         RelationshipType relationshipType,
 
-        boolean primaryContact,
-        boolean financialResponsible,
-        boolean legalCustody,
-        boolean emergencyContact,
-        boolean authorizedPickup,
+        Boolean primaryContact,
+        Boolean financialResponsible,
+        Boolean legalCustody,
+        Boolean emergencyContact,
+        Boolean authorizedPickup,
 
         @Size(max = 500, message = "Les observations ne peuvent pas dépasser 500 caractères.")
         String notes) {

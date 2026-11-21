@@ -9,6 +9,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Objects;
@@ -71,6 +72,10 @@ public class CashClosing extends TenantScopedEntity {
     @Column(name = "validation_note", length = 500)
     private String validationNote;
 
+    @Version
+    @Column(name = "version", nullable = false)
+    private long version;
+
     protected CashClosing() {
     }
 
@@ -116,6 +121,10 @@ public class CashClosing extends TenantScopedEntity {
                     "Cette clôture de caisse est déjà validée.");
         }
         UUID validatedActor = Objects.requireNonNull(validatorId, "Le valideur est obligatoire.");
+        if (validatedActor.equals(this.submittedBy)) {
+            throw new FinanceForbiddenException(
+                    "L'auteur d'une clôture de caisse ne peut pas la valider lui-même.");
+        }
         Instant validatedAtChecked = Objects.requireNonNull(validatedAt, "La date de validation est obligatoire.");
         String normalizedNote = normalizeOptional(validationNote);
         this.status = CashClosingStatus.VALIDATED;
@@ -197,5 +206,9 @@ public class CashClosing extends TenantScopedEntity {
 
     public String getValidationNote() {
         return validationNote;
+    }
+
+    public long getVersion() {
+        return version;
     }
 }
