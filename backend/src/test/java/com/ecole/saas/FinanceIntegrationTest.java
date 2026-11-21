@@ -1018,6 +1018,101 @@ class FinanceIntegrationTest {
                 .andExpect(jsonPath("$.type").value("urn:ecole:problem:finance-self-approval-forbidden"));
     }
 
+    @Test
+    void shouldAggregateCashClosingViaSqlForEmptyAndMixedPaymentDaysWithTenantIsolation() throws Exception {
+        School schoolA = createSchool("FINM8A", SchoolType.PRIVATE_SCHOOL);
+        School schoolB = createSchool("FINM8B", SchoolType.PRIVATE_SCHOOL);
+        createActiveSubscription(schoolA, 100);
+        createActiveSubscription(schoolB, 100);
+
+        String dirTokenA = tenantToken(schoolA.getId(), RoleCode.DIRECTOR);
+        String cashierTokenA = tenantToken(schoolA.getId(), RoleCode.CASHIER);
+        String dirTokenB = tenantToken(schoolB.getId(), RoleCode.DIRECTOR);
+        String cashierTokenB = tenantToken(schoolB.getId(), RoleCode.CASHIER);
+
+        Fixture fixA = createIssuedInvoiceFixture(schoolA, dirTokenA, 200_000L);
+        Fixture fixB = createIssuedInvoiceFixture(schoolB, dirTokenB, 100_000L);
+
+        // 1. Clôture sur une journée sans encaissement espèces -> 0 FCFA, 0 paiement, 0 contre-passation
+        LocalDate yesterday = LocalDate.now(ZoneId.of("Africa/Dakar")).minusDays(1);
+        mockMvc.perform(post("/api/v1/finance/cash-closings")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(cashierTokenA))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "closingDate", yesterday.toString(),
+                                "countedCashXof", 0L))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.cashInXof").value(0))
+                .andExpect(jsonPath("$.cashOutReversalsXof").value(0))
+                .andExpect(jsonPath("$.expectedCashXof").value(0))
+                .andExpect(jsonPath("$.paymentCount").value(0))
+                .andExpect(jsonPath("$.reversalCount").value(0))
+                .andExpect(jsonPath("$.discrepancyXof").value(0));
+
+        // 2. Journée courante : 2 paiements CASH (60 000 + 40 000), 1 paiement WAVE (30 000 exclu), 1 contre-passation CASH (40 000)
+        // + 1 paiement CASH sur l'école B (50 000 isolé par RLS)
+        mockMvc.perform(post("/api/v1/finance/payments")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(cashierTokenA))
+                        .header("Idempotency-Key", "fin-m8-cash-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "invoiceId", fixA.invoiceId(),
+                                "amountXof", 60_000L,
+                                "paymentMethod", "CASH"))))
+                .andExpect(status().isCreated());
+
+        MvcResult cash2Res = mockMvc.perform(post("/api/v1/finance/payments")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(cashierTokenA))
+                        .header("Idempotency-Key", "fin-m8-cash-2")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "invoiceId", fixA.invoiceId(),
+                                "amountXof", 40_000L,
+                                "paymentMethod", "CASH"))))
+                .andExpect(status().isCreated())
+                .andReturn();
+        UUID cash2Id = UUID.fromString(readJson(cash2Res).get("id").asString());
+
+        mockMvc.perform(post("/api/v1/finance/payments")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(cashierTokenA))
+                        .header("Idempotency-Key", "fin-m8-bank-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "invoiceId", fixA.invoiceId(),
+                                "amountXof", 30_000L,
+                                "paymentMethod", "BANK_TRANSFER",
+                                "externalReference", "VIR-M8-001"))))
+                .andExpect(status().isCreated());
+
+        requestAndApproveReversal(cashierTokenA, dirTokenA, cash2Id);
+
+        mockMvc.perform(post("/api/v1/finance/payments")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(cashierTokenB))
+                        .header("Idempotency-Key", "fin-m8-cash-b1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "invoiceId", fixB.invoiceId(),
+                                "amountXof", 50_000L,
+                                "paymentMethod", "CASH"))))
+                .andExpect(status().isCreated());
+
+        LocalDate today = LocalDate.now(ZoneId.of("Africa/Dakar"));
+        mockMvc.perform(post("/api/v1/finance/cash-closings")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(cashierTokenA))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "closingDate", today.toString(),
+                                "countedCashXof", 58_000L,
+                                "notes", "Écart de 2 000 FCFA en cours de vérification"))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.cashInXof").value(100_000))
+                .andExpect(jsonPath("$.cashOutReversalsXof").value(40_000))
+                .andExpect(jsonPath("$.expectedCashXof").value(60_000))
+                .andExpect(jsonPath("$.paymentCount").value(2))
+                .andExpect(jsonPath("$.reversalCount").value(1))
+                .andExpect(jsonPath("$.discrepancyXof").value(-2_000));
+    }
+
     private int recordPaymentConcurrently(
             String token,
             UUID invoiceId,

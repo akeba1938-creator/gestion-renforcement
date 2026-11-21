@@ -618,6 +618,142 @@ class CenterIntegrationTest {
         return new CenterFixture(packId, studentPackId, groupId, teacherId, studentId, slotId, sessionId);
     }
 
+    @Test
+    void shouldBatchGenerateSessionsUpsertAttendanceCancelSessionAndCountActiveEnrollments() throws Exception {
+        School center = createSchool("CTRM7", SchoolType.TUTORING_CENTER);
+        createSubscription(center, SubscriptionStatus.ACTIVE, Instant.now().plus(30, ChronoUnit.DAYS));
+        String token = tenantToken(center.getId(), RoleCode.CENTER_MANAGER);
+
+        UUID yearId = createAcademicYearViaApi(token, "2026-2027", "2026-10-01", "2027-07-31");
+        activateAcademicYearViaApi(token, yearId);
+        UUID levelId = createGradeLevelViaApi(token, "TS", "Terminale S", "TUTORING", 1);
+        UUID mathId = createSubjectViaApi(token, "MATH", "Mathématiques", "SCIENTIFIC", 5);
+
+        UUID teacher1 = createTeacherViaApi(token, "TUT-B1", null, "Ibrahima", "Sy", "TUTOR", "+221778880001", 6000L);
+        UUID teacher2 = createTeacherViaApi(token, "TUT-B2", null, "Ndèye", "Kane", "TUTOR", "+221778880002", 5500L);
+
+        UUID packId = createPackViaApi(
+                token, yearId, levelId, mathId, "PK-10", "Carnet 10 séances", "SESSION_PACK", 10, 60, 40_000L);
+        UUID group1 = createGroupViaApi(
+                token, yearId, levelId, mathId, packId, "GRP-M7-1", "Groupe Maths 1", "SMALL_GROUP", 20, "2026-10-01", "2027-06-30");
+        UUID group2 = createGroupViaApi(
+                token, yearId, levelId, mathId, packId, "GRP-M7-2", "Groupe Maths 2", "SMALL_GROUP", 20, "2026-10-01", "2027-06-30");
+        mockMvc.perform(post("/api/v1/center/groups/" + group1 + "/activate")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(token)))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/center/groups/" + group2 + "/activate")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(token)))
+                .andExpect(status().isOk());
+
+        assignTutorViaApi(token, group1, teacher1, mathId, true, 6000L);
+        assignTutorViaApi(token, group1, teacher2, mathId, false, 5500L);
+
+        UUID student1 = createStudentViaApi(token, "Awa", "Diop", "FEMALE");
+        UUID student2 = createStudentViaApi(token, "Modou", "Fall", "MALE");
+        UUID student3 = createStudentViaApi(token, "Khadija", "Seck", "FEMALE");
+
+        // student1 : pack explicite sur inscription ; student2 : pack fallback lié à group1 ; student3 : pack fallback global
+        UUID packS1 = assignStudentPackViaApi(token, student1, packId, group1, "2026-10-01");
+        UUID packS2 = assignStudentPackViaApi(token, student2, packId, group1, "2026-10-01");
+        UUID packS3 = assignStudentPackViaApi(token, student3, packId, null, "2026-10-01");
+
+        enrollStudentViaApi(token, group1, student1, packS1, "2026-10-01");
+        enrollStudentViaApi(token, group1, student2, null, "2026-10-01");
+        enrollStudentViaApi(token, group1, student3, null, "2026-10-01");
+        enrollStudentViaApi(token, group2, student1, null, "2026-10-01");
+
+        // M6 : comptage groupé sur CenterDirectoryPort & liste des cohortes + intervenants groupés
+        List<CenterGroupSummary> activeGroups = TenantContext.executeWithTenant(
+                TenantId.of(center.getId()), () -> centerDirectoryPort.findActiveGroupsByAcademicYear(yearId));
+        assertThat(activeGroups).hasSize(2);
+        assertThat(activeGroups.stream().filter(g -> g.id().equals(group1)).findFirst().orElseThrow().activeEnrollmentCount())
+                .isEqualTo(3L);
+        assertThat(activeGroups.stream().filter(g -> g.id().equals(group2)).findFirst().orElseThrow().activeEnrollmentCount())
+                .isEqualTo(1L);
+
+        mockMvc.perform(get("/api/v1/center/groups/" + group1 + "/tutors")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2));
+
+        // M7 : génération de séances en lot (2 mercredis) + idempotence skippedCount + détection conflit intervenant
+        UUID slot1Id = createScheduleSlotViaApi(token, group1, teacher1, mathId, "WEDNESDAY", "15:00", "17:00");
+        MvcResult gen1 = mockMvc.perform(post("/api/v1/center/groups/" + group1 + "/sessions/generate")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("fromDate", "2026-10-01", "toDate", "2026-10-15"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.createdCount").value(2))
+                .andExpect(jsonPath("$.skippedCount").value(0))
+                .andReturn();
+        UUID sessionId = UUID.fromString(readJson(gen1).get("sessions").get(0).get("id").asString());
+
+        mockMvc.perform(post("/api/v1/center/groups/" + group1 + "/sessions/generate")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("fromDate", "2026-10-01", "toDate", "2026-10-15"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.createdCount").value(0))
+                .andExpect(jsonPath("$.skippedCount").value(2));
+
+        // Désactiver le créneau de group1 afin de créer un créneau chevauchant sur group2 et tester le conflit de séances en lot
+        mockMvc.perform(post("/api/v1/center/schedule-slots/" + slot1Id + "/deactivate")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(token)))
+                .andExpect(status().isOk());
+        createScheduleSlotViaApi(token, group2, teacher1, mathId, "WEDNESDAY", "16:00", "18:00");
+        mockMvc.perform(post("/api/v1/center/groups/" + group2 + "/sessions/generate")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("fromDate", "2026-10-01", "toDate", "2026-10-15"))))
+                .andExpect(status().isConflict());
+
+        // M7 : upsertAttendance en lot sur les 3 élèves (verrouillage groupé + consommation des 3 packs)
+        mockMvc.perform(put("/api/v1/center/sessions/" + sessionId + "/attendance")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("records", List.of(
+                                Map.of("studentId", student1, "status", "PRESENT", "participationRating", 5),
+                                Map.of("studentId", student2, "status", "PRESENT", "participationRating", 4),
+                                Map.of("studentId", student3, "status", "LATE", "lateMinutes", 10))))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.attendances.length()").value(3));
+
+        for (UUID spId : List.of(packS1, packS2, packS3)) {
+            mockMvc.perform(get("/api/v1/center/student-packs/" + spId)
+                            .header(HttpHeaders.AUTHORIZATION, bearer(token)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.consumedSessions").value(1));
+        }
+
+        // Passage de student2 à EXCUSED -> restitution de son crédit en lot
+        mockMvc.perform(put("/api/v1/center/sessions/" + sessionId + "/attendance")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("records", List.of(
+                                Map.of("studentId", student2, "status", "EXCUSED"))))))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/v1/center/student-packs/" + packS2)
+                        .header(HttpHeaders.AUTHORIZATION, bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.consumedSessions").value(0));
+
+        // M7 : cancelSession -> restitution groupée des 2 packs encore consommés (student1 et student3)
+        mockMvc.perform(post("/api/v1/center/sessions/" + sessionId + "/cancel")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("reason", "Salle indisponible"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CANCELLED"));
+
+        for (UUID spId : List.of(packS1, packS2, packS3)) {
+            mockMvc.perform(get("/api/v1/center/student-packs/" + spId)
+                            .header(HttpHeaders.AUTHORIZATION, bearer(token)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.consumedSessions").value(0));
+        }
+    }
+
     // --- Helpers ---
 
     private School createSchool(String prefix, SchoolType type) {

@@ -9,10 +9,7 @@ import com.ecole.saas.finance.domain.CashClosing;
 import com.ecole.saas.finance.domain.CashClosingStatus;
 import com.ecole.saas.finance.domain.FinanceConflictException;
 import com.ecole.saas.finance.domain.FinanceNotFoundException;
-import com.ecole.saas.finance.domain.MoneyMath;
-import com.ecole.saas.finance.domain.Payment;
 import com.ecole.saas.finance.domain.PaymentMethod;
-import com.ecole.saas.finance.domain.PaymentReversal;
 import com.ecole.saas.finance.infrastructure.CashClosingRepository;
 import com.ecole.saas.finance.infrastructure.PaymentRepository;
 import com.ecole.saas.finance.infrastructure.PaymentReversalRepository;
@@ -117,27 +114,23 @@ public class CashClosingService {
         Instant startOfDay = closingDate.atStartOfDay(zone).toInstant();
         Instant nextDayStart = closingDate.plusDays(1).atStartOfDay(zone).toInstant();
 
-        List<Payment> cashPayments = paymentRepository
-                .findByPaymentMethodAndPaidAtGreaterThanEqualAndPaidAtLessThan(
-                        PaymentMethod.CASH, startOfDay, nextDayStart);
-        List<PaymentReversal> cashReversals = reversalRepository
-                .findByPaymentMethodAndReversedAtGreaterThanEqualAndReversedAtLessThan(
-                        PaymentMethod.CASH, startOfDay, nextDayStart);
+        PaymentRepository.CashMethodAggregate cashInAggregate = paymentRepository
+                .aggregateByPaymentMethodAndPaidAtRange(PaymentMethod.CASH, startOfDay, nextDayStart);
+        PaymentReversalRepository.CashReversalAggregate cashOutAggregate = reversalRepository
+                .aggregateByPaymentMethodAndReversedAtRange(PaymentMethod.CASH, startOfDay, nextDayStart);
 
-        long cashInXof = cashPayments.stream()
-                .map(Payment::getAmountXof)
-                .reduce(0L, MoneyMath::addExact);
-        long cashOutReversalsXof = cashReversals.stream()
-                .map(PaymentReversal::getAmountXof)
-                .reduce(0L, MoneyMath::addExact);
+        long cashInXof = cashInAggregate != null ? cashInAggregate.getTotalAmountXof() : 0L;
+        int cashPaymentCount = cashInAggregate != null ? Math.toIntExact(cashInAggregate.getOperationCount()) : 0;
+        long cashOutReversalsXof = cashOutAggregate != null ? cashOutAggregate.getTotalAmountXof() : 0L;
+        int cashReversalCount = cashOutAggregate != null ? Math.toIntExact(cashOutAggregate.getOperationCount()) : 0;
 
         CashClosing closing = new CashClosing(
                 closingDate,
                 cashInXof,
                 cashOutReversalsXof,
                 countedCashXof,
-                cashPayments.size(),
-                cashReversals.size(),
+                cashPaymentCount,
+                cashReversalCount,
                 notes,
                 actorId,
                 clock.instant());

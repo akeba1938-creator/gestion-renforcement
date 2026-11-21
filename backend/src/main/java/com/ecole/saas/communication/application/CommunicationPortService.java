@@ -46,7 +46,6 @@ public class CommunicationPortService implements CommunicationPort {
     }
 
     @Override
-    @Transactional
     public NotificationDispatchResult sendNotification(TriggerNotificationCommand command) {
         TenantContext.requireCurrent();
         CommunicationCampaignService.CampaignDispatchView view =
@@ -72,7 +71,6 @@ public class CommunicationPortService implements CommunicationPort {
     }
 
     @Override
-    @Transactional
     public NotificationDispatchResult notifyStudentAbsence(AbsenceNotificationCommand command) {
         TenantContext.requireCurrent();
         StudentSummary student = requireStudent(command.studentId());
@@ -119,7 +117,6 @@ public class CommunicationPortService implements CommunicationPort {
     }
 
     @Override
-    @Transactional
     public NotificationDispatchResult notifyPaymentReceipt(PaymentReceiptNotificationCommand command) {
         TenantContext.requireCurrent();
         StudentSummary student = requireStudent(command.studentId());
@@ -159,7 +156,6 @@ public class CommunicationPortService implements CommunicationPort {
     }
 
     @Override
-    @Transactional
     public NotificationDispatchResult notifyReportCardPublished(ReportCardPublishedNotificationCommand command) {
         TenantContext.requireCurrent();
         StudentSummary student = requireStudent(command.studentId());
@@ -207,7 +203,6 @@ public class CommunicationPortService implements CommunicationPort {
     }
 
     @Override
-    @Transactional
     public NotificationDispatchResult notifyPaymentDueReminder(PaymentDueReminderNotificationCommand command) {
         TenantContext.requireCurrent();
         StudentSummary student = requireStudent(command.studentId());

@@ -30,9 +30,9 @@ import java.time.DateTimeException;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
@@ -341,17 +341,17 @@ public class StudentEnrollmentService {
         Map<UUID, Student> studentsById = studentRepository.findAllById(studentIds).stream()
                 .collect(Collectors.toMap(Student::getId, Function.identity()));
 
-        Map<UUID, AcademicYearSummary> yearsById = new HashMap<>();
-        Map<UUID, ClassRoomSummary> classesById = new HashMap<>();
+        Set<UUID> academicYearIds = page.getContent().stream()
+                .map(StudentEnrollment::getAcademicYearId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Set<UUID> classRoomIds = page.getContent().stream()
+                .map(StudentEnrollment::getClassRoomId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
 
-        for (StudentEnrollment enrollment : page.getContent()) {
-            yearsById.computeIfAbsent(
-                    enrollment.getAcademicYearId(),
-                    id -> academicStructurePort.findAcademicYearById(id).orElse(null));
-            classesById.computeIfAbsent(
-                    enrollment.getClassRoomId(),
-                    id -> academicStructurePort.findClassRoomById(id).orElse(null));
-        }
+        Map<UUID, AcademicYearSummary> yearsById = academicStructurePort.findAcademicYearsByIds(academicYearIds);
+        Map<UUID, ClassRoomSummary> classesById = academicStructurePort.findClassRoomsByIds(classRoomIds);
 
         return page.map(enrollment -> toView(
                 enrollment,

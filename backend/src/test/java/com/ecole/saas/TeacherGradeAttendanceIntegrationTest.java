@@ -10,6 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.ecole.saas.academic.AcademicStructurePort;
 import com.ecole.saas.attendance.AttendanceSummaryPort;
 import com.ecole.saas.attendance.StudentAttendanceSummary;
 import com.ecole.saas.grade.ClassPeriodGradeStats;
@@ -76,6 +77,7 @@ class TeacherGradeAttendanceIntegrationTest {
     private final SubscriptionService subscriptionService;
     private final UserAccountService userAccountService;
     private final UserDirectoryPort userDirectoryPort;
+    private final AcademicStructurePort academicStructurePort;
     private final TeacherDirectoryPort teacherDirectoryPort;
     private final GradeSummaryPort gradeSummaryPort;
     private final AttendanceSummaryPort attendanceSummaryPort;
@@ -91,6 +93,7 @@ class TeacherGradeAttendanceIntegrationTest {
             SubscriptionService subscriptionService,
             UserAccountService userAccountService,
             UserDirectoryPort userDirectoryPort,
+            AcademicStructurePort academicStructurePort,
             TeacherDirectoryPort teacherDirectoryPort,
             GradeSummaryPort gradeSummaryPort,
             AttendanceSummaryPort attendanceSummaryPort,
@@ -103,6 +106,7 @@ class TeacherGradeAttendanceIntegrationTest {
         this.subscriptionService = subscriptionService;
         this.userAccountService = userAccountService;
         this.userDirectoryPort = userDirectoryPort;
+        this.academicStructurePort = academicStructurePort;
         this.teacherDirectoryPort = teacherDirectoryPort;
         this.gradeSummaryPort = gradeSummaryPort;
         this.attendanceSummaryPort = attendanceSummaryPort;
@@ -871,6 +875,171 @@ class TeacherGradeAttendanceIntegrationTest {
 
         return new TenantFixture(
                 teacherUser.getId(), teacherId, assignmentId, evalId, reportCardId, sessionId, recordId);
+    }
+
+    @Test
+    void shouldBatchLoadReferencesAcrossPortsAndRecomputeReportCardsInBatch() throws Exception {
+        School schoolA = createSchool("M67A", SchoolType.PRIVATE_SCHOOL);
+        School schoolB = createSchool("M67B", SchoolType.PRIVATE_SCHOOL);
+        createSubscription(schoolA, SubscriptionStatus.ACTIVE, Instant.now().plus(30, ChronoUnit.DAYS));
+        createSubscription(schoolB, SubscriptionStatus.ACTIVE, Instant.now().plus(30, ChronoUnit.DAYS));
+
+        String dirTokenA = tenantToken(schoolA.getId(), RoleCode.DIRECTOR);
+        String dirTokenB = tenantToken(schoolB.getId(), RoleCode.DIRECTOR);
+
+        UUID yearA = createAcademicYearViaApi(dirTokenA, "2026-2027", "2026-10-01", "2027-07-31");
+        activateAcademicYearViaApi(dirTokenA, yearA);
+        UUID periodA = createAndOpenPeriodViaApi(dirTokenA, yearA, "T1", "Trimestre 1", 1, "2026-10-01", "2026-12-20");
+        UUID levelA = createGradeLevelViaApi(dirTokenA, "3E", "Troisième", "MIDDLE_SCHOOL", 4);
+        UUID mathA = createSubjectViaApi(dirTokenA, "MATH", "Mathématiques", "SCIENTIFIC", 4);
+        UUID frA = createSubjectViaApi(dirTokenA, "FR", "Français", "LITERARY", 3);
+        UUID histA = createSubjectViaApi(dirTokenA, "HIST", "Histoire-Géo", "HUMANITIES", 2);
+        UUID classA = createClassViaApi(dirTokenA, yearA, levelA, "3E-A", "Troisième A", 40);
+
+        assignSubjectToClassViaApi(dirTokenA, classA, mathA, 4, 5);
+        assignSubjectToClassViaApi(dirTokenA, classA, frA, 3, 4);
+        MvcResult histClassSubjRes = mockMvc.perform(post("/api/v1/academic/classes/" + classA + "/subjects")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(dirTokenA))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "subjectId", histA,
+                                "coefficient", 2,
+                                "weeklyHours", 2,
+                                "mandatory", true))))
+                .andExpect(status().isCreated())
+                .andReturn();
+        UUID histClassSubjectId = UUID.fromString(readJson(histClassSubjRes).get("id").asString());
+
+        UUID yearB = createAcademicYearViaApi(dirTokenB, "2026-2027", "2026-10-01", "2027-07-31");
+        activateAcademicYearViaApi(dirTokenB, yearB);
+        UUID levelB = createGradeLevelViaApi(dirTokenB, "3E", "Troisième", "MIDDLE_SCHOOL", 4);
+        UUID mathB = createSubjectViaApi(dirTokenB, "MATH", "Mathématiques", "SCIENTIFIC", 4);
+        UUID classB = createClassViaApi(dirTokenB, yearB, levelB, "3E-B", "Troisième B", 40);
+        UUID teacherB = createTeacherViaApi(dirTokenB, "ENS-B1", null, "Bamba", "Diallo", "PERMANENT", "+221779990001", null);
+
+        User teacherUserA = createTenantUser(schoolA.getId(), "prof.m67@ecole.sn", "Mamadou", "Sarr", RoleCode.TEACHER);
+        UUID teacherA1 = createTeacherViaApi(
+                dirTokenA, "ENS-A1", teacherUserA.getId(), "Mamadou", "Sarr", "PERMANENT", "+221779990002", null);
+        UUID teacherA2 = createTeacherViaApi(
+                dirTokenA, "ENS-A2", null, "Aissatou", "Ba", "PART_TIME", "+221779990003", 5000L);
+        createAssignmentViaApi(dirTokenA, teacherA1, yearA, classA, mathA, true, 5);
+        createAssignmentViaApi(dirTokenA, teacherA2, yearA, classA, frA, false, 4);
+
+        // M6 : lectures groupées sur AcademicStructurePort & TeacherDirectoryPort + isolation inter-tenant
+        TenantContext.runWithTenant(TenantId.of(schoolA.getId()), () -> {
+            assertThat(academicStructurePort.findAcademicYearsByIds(List.of())).isEmpty();
+            assertThat(academicStructurePort.findAcademicYearsByIds(null)).isEmpty();
+            assertThat(academicStructurePort.findAcademicYearsByIds(List.of(yearA, yearB)))
+                    .containsOnlyKeys(yearA);
+            assertThat(academicStructurePort.findEvaluationPeriodsByIds(List.of(periodA)))
+                    .containsOnlyKeys(periodA);
+            assertThat(academicStructurePort.findGradeLevelsByIds(List.of(levelA, levelB)))
+                    .containsOnlyKeys(levelA);
+            assertThat(academicStructurePort.findSubjectsByIds(List.of(mathA, frA, mathB)))
+                    .containsOnlyKeys(mathA, frA);
+            assertThat(academicStructurePort.findClassRoomsByIds(List.of(classA, classB)))
+                    .containsOnlyKeys(classA);
+            assertThat(teacherDirectoryPort.findTeachersByIds(List.of())).isEmpty();
+            assertThat(teacherDirectoryPort.findTeachersByIds(List.of(teacherA1, teacherA2, teacherB)))
+                    .containsOnlyKeys(teacherA1, teacherA2);
+        });
+
+        UUID student1 = createAndEnrollStudent(dirTokenA, yearA, classA, "Fatou", "Gueye", "FEMALE");
+        UUID student2 = createAndEnrollStudent(dirTokenA, yearA, classA, "Cheikh", "Mbaye", "MALE");
+
+        UUID evalMath = createEvaluationViaApi(
+                dirTokenA, periodA, classA, mathA, "Devoir Maths", "TEST", "2026-10-20", "20", 1);
+        UUID evalFr = createEvaluationViaApi(
+                dirTokenA, periodA, classA, frA, "Devoir Français", "TEST", "2026-10-22", "20", 1);
+        upsertGradesViaApi(dirTokenA, evalMath, List.of(
+                Map.of("studentId", student1, "attendanceStatus", "PRESENT", "score", new BigDecimal("16.00")),
+                Map.of("studentId", student2, "attendanceStatus", "PRESENT", "score", new BigDecimal("12.00"))));
+        upsertGradesViaApi(dirTokenA, evalFr, List.of(
+                Map.of("studentId", student1, "attendanceStatus", "PRESENT", "score", new BigDecimal("14.00")),
+                Map.of("studentId", student2, "attendanceStatus", "PRESENT", "score", new BigDecimal("15.00"))));
+
+        createAttendanceSessionViaApi(
+                dirTokenA, classA, periodA, mathA, "2026-10-20", "MORNING", "08:00", "10:00", true);
+        createAttendanceSessionViaApi(
+                dirTokenA, classA, periodA, frA, "2026-10-21", "AFTERNOON", "15:00", "17:00", true);
+
+        // M6 : vérification des listes paginées enrichies par lots
+        mockMvc.perform(get("/api/v1/attendance/sessions")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(dirTokenA)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.content[0].classRoomCode").value("3E-A"))
+                .andExpect(jsonPath("$.content[0].periodCode").value("T1"));
+
+        mockMvc.perform(get("/api/v1/grades/evaluations")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(dirTokenA)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.content[0].classRoomCode").value("3E-A"))
+                .andExpect(jsonPath("$.content[0].periodCode").value("T1"));
+
+        mockMvc.perform(get("/api/v1/teacher-assignments")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(dirTokenA)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.content[0].classRoomCode").value("3E-A"))
+                .andExpect(jsonPath("$.content[0].academicYearCode").value("2026-2027"));
+
+        String teacherTokenA = tenantTokenForUser(schoolA.getId(), teacherUserA.getId(), RoleCode.TEACHER);
+        mockMvc.perform(get("/api/v1/teachers/me/assignments")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(teacherTokenA)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].subjectCode").value("MATH"));
+
+        mockMvc.perform(get("/api/v1/enrollments")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(dirTokenA)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.content[0].classRoomCode").value("3E-A"))
+                .andExpect(jsonPath("$.content[0].academicYearCode").value("2026-2027"));
+
+        // M7 : calcul en lot des bulletins (3 matières actives), appréciation DRAFT, désactivation matière obsolète, recalcul
+        MvcResult firstCompute = mockMvc.perform(post("/api/v1/grades/report-cards/compute")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(dirTokenA))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("classRoomId", classA, "evaluationPeriodId", periodA))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].subjectResults.length()").value(3))
+                .andReturn();
+        UUID firstCardId = UUID.fromString(readJson(firstCompute).get(0).get("id").asString());
+
+        mockMvc.perform(put("/api/v1/grades/report-cards/" + firstCardId + "/subjects/" + mathA + "/appreciation")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(dirTokenA))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("teacherAppreciation", "Très bon travail"))))
+                .andExpect(status().isOk());
+
+        // Désactiver Histoire-Géo sur la classe puis recalculer -> la matière obsolète disparaît, l'appréciation reste
+        mockMvc.perform(post("/api/v1/academic/classes/" + classA + "/subjects/" + histClassSubjectId + "/deactivate")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(dirTokenA)))
+                .andExpect(status().isOk());
+
+        MvcResult recompute = mockMvc.perform(post("/api/v1/grades/report-cards/compute")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(dirTokenA))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("classRoomId", classA, "evaluationPeriodId", periodA))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].subjectResults.length()").value(2))
+                .andReturn();
+
+        JsonNode firstRecomputedSubjects = readJson(recompute).get(0).get("subjectResults");
+        boolean foundPreservedAppreciation = false;
+        for (JsonNode subj : firstRecomputedSubjects) {
+            assertThat(subj.get("subjectCode").asString()).isNotEqualTo("HIST");
+            if ("MATH".equals(subj.get("subjectCode").asString())) {
+                assertThat(subj.get("teacherAppreciation").asString()).isEqualTo("Très bon travail");
+                foundPreservedAppreciation = true;
+            }
+        }
+        assertThat(foundPreservedAppreciation).isTrue();
     }
 
     // --- Helpers ---

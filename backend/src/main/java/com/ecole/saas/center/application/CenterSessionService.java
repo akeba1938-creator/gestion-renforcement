@@ -41,7 +41,9 @@ import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -329,11 +331,38 @@ public class CenterSessionService {
         List<CenterSession> existingGroupSessions = sessionRepository
                 .findByGroupIdAndSessionDateBetweenAndStatusNot(
                         groupId, fromDate, toDate, CenterSessionStatus.CANCELLED);
+        Map<LocalDate, List<CenterSession>> groupSessionsByDate = new HashMap<>();
+        for (CenterSession existing : existingGroupSessions) {
+            groupSessionsByDate
+                    .computeIfAbsent(existing.getSessionDate(), ignored -> new ArrayList<>())
+                    .add(existing);
+        }
 
-        List<CenterSession> created = new ArrayList<>();
+        Set<UUID> teacherIds = occurrences.stream()
+                .map(CenterSessionGenerator.PlannedOccurrence::teacherId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Map<UUID, Map<LocalDate, List<CenterSession>>> teacherSessionsByTeacherAndDate = new HashMap<>();
+        if (!teacherIds.isEmpty()) {
+            List<CenterSession> existingTeacherSessions = sessionRepository
+                    .findByTeacherIdInAndSessionDateBetweenAndStatusNot(
+                            teacherIds, fromDate, toDate, CenterSessionStatus.CANCELLED);
+            for (CenterSession existing : existingTeacherSessions) {
+                if (existing.getTeacherId() != null) {
+                    teacherSessionsByTeacherAndDate
+                            .computeIfAbsent(existing.getTeacherId(), ignored -> new HashMap<>())
+                            .computeIfAbsent(existing.getSessionDate(), ignored -> new ArrayList<>())
+                            .add(existing);
+                }
+            }
+        }
+
+        List<CenterSession> toCreate = new ArrayList<>();
         int skipped = 0;
         for (CenterSessionGenerator.PlannedOccurrence occ : occurrences) {
-            boolean alreadyGenerated = existingGroupSessions.stream()
+            List<CenterSession> sameDateGroupSessions = groupSessionsByDate.computeIfAbsent(
+                    occ.sessionDate(), ignored -> new ArrayList<>());
+            boolean alreadyGenerated = sameDateGroupSessions.stream()
                     .anyMatch(s -> occ.sessionDate().equals(s.getSessionDate())
                             && occ.startTime().equals(s.getStartTime())
                             && occ.endTime().equals(s.getEndTime()));
@@ -341,8 +370,27 @@ public class CenterSessionService {
                 skipped++;
                 continue;
             }
-            assertNoSessionConflicts(
-                    null, groupId, occ.teacherId(), occ.sessionDate(), occ.startTime(), occ.endTime());
+            CenterScheduleConflictChecker.assertNoSessionConflict(
+                    null,
+                    occ.sessionDate(),
+                    occ.startTime(),
+                    occ.endTime(),
+                    sameDateGroupSessions,
+                    "La cohorte possède déjà une séance sur cet horaire à la date du " + occ.sessionDate() + ".");
+            List<CenterSession> sameDateTeacherSessions = null;
+            if (occ.teacherId() != null) {
+                sameDateTeacherSessions = teacherSessionsByTeacherAndDate
+                        .computeIfAbsent(occ.teacherId(), ignored -> new HashMap<>())
+                        .computeIfAbsent(occ.sessionDate(), ignored -> new ArrayList<>());
+                CenterScheduleConflictChecker.assertNoSessionConflict(
+                        null,
+                        occ.sessionDate(),
+                        occ.startTime(),
+                        occ.endTime(),
+                        sameDateTeacherSessions,
+                        "L'intervenant anime déjà une autre séance sur cet horaire à la date du "
+                                + occ.sessionDate() + ".");
+            }
             CenterSession session = new CenterSession(
                     groupId,
                     occ.scheduleSlotId(),
@@ -355,10 +403,13 @@ public class CenterSessionService {
                     null,
                     null,
                     actorId);
-            CenterSession saved = sessionRepository.save(session);
-            created.add(saved);
-            existingGroupSessions.add(saved);
+            toCreate.add(session);
+            sameDateGroupSessions.add(session);
+            if (sameDateTeacherSessions != null) {
+                sameDateTeacherSessions.add(session);
+            }
         }
+        List<CenterSession> created = toCreate.isEmpty() ? List.of() : sessionRepository.saveAll(toCreate);
         List<SessionView> views = created.stream().map(s -> toSessionView(s, false)).toList();
         return new GeneratedSessionsResult(views, skipped);
     }
@@ -444,15 +495,34 @@ public class CenterSessionService {
         int refundedCredits = 0;
         List<CenterSessionAttendance> existingAttendances =
                 attendanceRepository.findBySessionIdOrderByCreatedAtAsc(sessionId);
-        for (CenterSessionAttendance attendance : existingAttendances) {
-            if (attendance.getConsumedStudentPackId() != null) {
-                studentPackRepository.findByIdForUpdate(attendance.getConsumedStudentPackId()).ifPresent(pack -> {
-                    CenterPackConsumptionPolicy.refundOnSessionCancellation(
-                            attendance, pack, session.getSessionDate());
-                    studentPackRepository.save(pack);
-                    attendanceRepository.save(attendance);
-                });
-                refundedCredits++;
+        Set<UUID> packIdsToRefund = existingAttendances.stream()
+                .map(CenterSessionAttendance::getConsumedStudentPackId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        if (!packIdsToRefund.isEmpty()) {
+            Map<UUID, CenterStudentPack> lockedPacksById = studentPackRepository.findByIdInForUpdate(packIdsToRefund)
+                    .stream()
+                    .collect(Collectors.toMap(CenterStudentPack::getId, Function.identity()));
+            Map<UUID, CenterStudentPack> packsToSave = new LinkedHashMap<>();
+            List<CenterSessionAttendance> attendancesToSave = new ArrayList<>();
+            for (CenterSessionAttendance attendance : existingAttendances) {
+                UUID consumedPackId = attendance.getConsumedStudentPackId();
+                if (consumedPackId != null) {
+                    CenterStudentPack pack = lockedPacksById.get(consumedPackId);
+                    if (pack != null) {
+                        CenterPackConsumptionPolicy.refundOnSessionCancellation(
+                                attendance, pack, session.getSessionDate());
+                        packsToSave.put(pack.getId(), pack);
+                        attendancesToSave.add(attendance);
+                    }
+                    refundedCredits++;
+                }
+            }
+            if (!packsToSave.isEmpty()) {
+                studentPackRepository.saveAll(packsToSave.values());
+            }
+            if (!attendancesToSave.isEmpty()) {
+                attendanceRepository.saveAll(attendancesToSave);
             }
         }
         CenterSession saved = sessionRepository.save(session);
@@ -513,17 +583,67 @@ public class CenterSessionService {
                         .collect(Collectors.toMap(CenterGroupEnrollment::getStudentId, Function.identity()));
 
         for (AttendanceInput input : inputs) {
-            CenterGroupEnrollment enrollment = activeEnrollmentsByStudent.get(input.studentId());
-            if (enrollment == null) {
+            if (!activeEnrollmentsByStudent.containsKey(input.studentId())) {
                 throw new CenterConflictException(
                         "center-student-not-enrolled",
                         "Élève non inscrit à la cohorte",
                         "L'élève " + input.studentId() + " ne dispose pas d'une inscription ACTIVE dans cette cohorte.");
             }
+        }
 
-            CenterSessionAttendance attendance = attendanceRepository
-                    .findBySessionIdAndStudentId(sessionId, input.studentId())
-                    .orElse(null);
+        Map<UUID, CenterSessionAttendance> existingAttendancesByStudent =
+                attendanceRepository.findBySessionIdOrderByCreatedAtAsc(sessionId)
+                        .stream()
+                        .collect(Collectors.toMap(CenterSessionAttendance::getStudentId, Function.identity()));
+
+        Set<UUID> fallbackStudentIds = new HashSet<>();
+        for (AttendanceInput input : inputs) {
+            CenterGroupEnrollment enrollment = activeEnrollmentsByStudent.get(input.studentId());
+            if (enrollment.getStudentPackId() == null) {
+                fallbackStudentIds.add(input.studentId());
+            }
+        }
+        Map<UUID, List<CenterStudentPackRepository.ActivePackCandidate>> candidatesByStudent = new HashMap<>();
+        if (!fallbackStudentIds.isEmpty()) {
+            for (CenterStudentPackRepository.ActivePackCandidate candidate :
+                    studentPackRepository.findActiveCandidatesByStudentIdInAndStatus(
+                            fallbackStudentIds, CenterStudentPackStatus.ACTIVE)) {
+                candidatesByStudent
+                        .computeIfAbsent(candidate.getStudentId(), ignored -> new ArrayList<>())
+                        .add(candidate);
+            }
+        }
+
+        Map<UUID, UUID> eligiblePackIdByStudent = new HashMap<>();
+        Set<UUID> packIdsToLock = new HashSet<>();
+        for (AttendanceInput input : inputs) {
+            CenterSessionAttendance existing = existingAttendancesByStudent.get(input.studentId());
+            if (existing != null && existing.getConsumedStudentPackId() != null) {
+                packIdsToLock.add(existing.getConsumedStudentPackId());
+            }
+            CenterGroupEnrollment enrollment = activeEnrollmentsByStudent.get(input.studentId());
+            UUID eligiblePackId = resolveEligiblePackId(
+                    enrollment,
+                    session.getGroupId(),
+                    session.getSessionDate(),
+                    candidatesByStudent.getOrDefault(input.studentId(), List.of()));
+            if (eligiblePackId != null) {
+                eligiblePackIdByStudent.put(input.studentId(), eligiblePackId);
+                packIdsToLock.add(eligiblePackId);
+            }
+        }
+
+        Map<UUID, CenterStudentPack> lockedPacksById = packIdsToLock.isEmpty()
+                ? Map.of()
+                : studentPackRepository.findByIdInForUpdate(packIdsToLock)
+                        .stream()
+                        .collect(Collectors.toMap(CenterStudentPack::getId, Function.identity()));
+
+        Map<UUID, CenterStudentPack> packsToSave = new LinkedHashMap<>();
+        List<CenterSessionAttendance> attendancesToSave = new ArrayList<>(inputs.size());
+        for (AttendanceInput input : inputs) {
+            CenterGroupEnrollment enrollment = activeEnrollmentsByStudent.get(input.studentId());
+            CenterSessionAttendance attendance = existingAttendancesByStudent.get(input.studentId());
             UUID previousPackId = attendance != null ? attendance.getConsumedStudentPackId() : null;
 
             if (attendance == null) {
@@ -547,23 +667,26 @@ public class CenterSessionService {
                         actorId);
             }
 
-            CenterStudentPack previousPack = previousPackId != null
-                    ? studentPackRepository.findByIdForUpdate(previousPackId).orElse(null)
-                    : null;
-            CenterStudentPack eligiblePack = resolveEligiblePack(
-                    enrollment, session.getGroupId(), session.getSessionDate(), previousPack);
+            CenterStudentPack previousPack = previousPackId != null ? lockedPacksById.get(previousPackId) : null;
+            UUID eligiblePackId = eligiblePackIdByStudent.get(input.studentId());
+            CenterStudentPack eligiblePack = eligiblePackId != null ? lockedPacksById.get(eligiblePackId) : null;
 
             CenterPackConsumptionPolicy.reconcileAttendancePack(
                     attendance, previousPack, eligiblePack, session.getSessionDate());
 
             if (previousPack != null) {
-                studentPackRepository.save(previousPack);
+                packsToSave.put(previousPack.getId(), previousPack);
             }
-            if (eligiblePack != null && (previousPack == null || !eligiblePack.getId().equals(previousPack.getId()))) {
-                studentPackRepository.save(eligiblePack);
+            if (eligiblePack != null) {
+                packsToSave.put(eligiblePack.getId(), eligiblePack);
             }
-            attendanceRepository.save(attendance);
+            attendancesToSave.add(attendance);
         }
+
+        if (!packsToSave.isEmpty()) {
+            studentPackRepository.saveAll(packsToSave.values());
+        }
+        attendanceRepository.saveAll(attendancesToSave);
 
         auditLogPort.recordTenantEvent(AuditRecordCommand.success(
                 AuditCategory.CENTER,
@@ -578,35 +701,35 @@ public class CenterSessionService {
         return toSessionView(session, true);
     }
 
-    private CenterStudentPack resolveEligiblePack(
+    private static UUID resolveEligiblePackId(
             CenterGroupEnrollment enrollment,
             UUID groupId,
             LocalDate sessionDate,
-            CenterStudentPack alreadyLockedPack) {
+            List<CenterStudentPackRepository.ActivePackCandidate> activeCandidates) {
         if (enrollment.getStudentPackId() != null) {
-            if (alreadyLockedPack != null && enrollment.getStudentPackId().equals(alreadyLockedPack.getId())) {
-                return alreadyLockedPack;
-            }
-            return studentPackRepository.findByIdForUpdate(enrollment.getStudentPackId()).orElse(null);
+            return enrollment.getStudentPackId();
         }
-        List<CenterStudentPack> activePacks = studentPackRepository
-                .findByStudentIdAndStatusOrderByStartDateAsc(
-                        enrollment.getStudentId(), CenterStudentPackStatus.ACTIVE);
         // Préférer un pack explicitement lié à la cohorte, sinon un pack global élève valide à la date de séance
-        CenterStudentPack candidate = activePacks.stream()
-                .filter(p -> groupId.equals(p.getGroupId()) && p.isValidOnDate(sessionDate))
+        return activeCandidates.stream()
+                .filter(p -> groupId.equals(p.getGroupId()) && isCandidateValidOnDate(p, sessionDate))
+                .map(CenterStudentPackRepository.ActivePackCandidate::getId)
                 .findFirst()
-                .or(() -> activePacks.stream()
-                        .filter(p -> p.getGroupId() == null && p.isValidOnDate(sessionDate))
+                .or(() -> activeCandidates.stream()
+                        .filter(p -> p.getGroupId() == null && isCandidateValidOnDate(p, sessionDate))
+                        .map(CenterStudentPackRepository.ActivePackCandidate::getId)
                         .findFirst())
                 .orElse(null);
-        if (candidate == null) {
-            return null;
+    }
+
+    private static boolean isCandidateValidOnDate(
+            CenterStudentPackRepository.ActivePackCandidate candidate, LocalDate sessionDate) {
+        if (sessionDate == null || candidate.getStartDate() == null) {
+            return false;
         }
-        if (alreadyLockedPack != null && candidate.getId().equals(alreadyLockedPack.getId())) {
-            return alreadyLockedPack;
+        if (sessionDate.isBefore(candidate.getStartDate())) {
+            return false;
         }
-        return studentPackRepository.findByIdForUpdate(candidate.getId()).orElse(null);
+        return candidate.getEndDate() == null || !sessionDate.isAfter(candidate.getEndDate());
     }
 
     private void assertNoSlotConflicts(

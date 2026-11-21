@@ -23,6 +23,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
@@ -120,7 +121,7 @@ public class TeacherAssignmentService {
                 .stream()
                 .filter(a -> academicYearId == null || academicYearId.equals(a.getAcademicYearId()))
                 .toList();
-        return assignments.stream().map(a -> toView(a, teacher)).toList();
+        return enrichAssignments(assignments, Map.of(teacher.getId(), teacher));
     }
 
     @PreAuthorize(TeacherRoles.BACKOFFICE_READ_ROLES)
@@ -310,18 +311,73 @@ public class TeacherAssignmentService {
     }
 
     private Page<AssignmentView> enrichPage(Page<TeacherAssignment> page) {
-        Set<UUID> teacherIds = page.getContent().stream()
+        if (page.isEmpty()) {
+            return page.map(a -> buildView(a, null, null, null, null));
+        }
+        List<TeacherAssignment> content = page.getContent();
+        Set<UUID> teacherIds = content.stream()
                 .map(TeacherAssignment::getTeacherId)
+                .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
         Map<UUID, Teacher> teachersById = teacherRepository.findAllById(teacherIds).stream()
                 .collect(Collectors.toMap(Teacher::getId, Function.identity()));
-        return page.map(a -> toView(a, teachersById.get(a.getTeacherId())));
+        AcademicReferences refs = preloadAcademicReferences(content);
+        return page.map(a -> buildView(
+                a,
+                teachersById.get(a.getTeacherId()),
+                refs.yearsById().get(a.getAcademicYearId()),
+                refs.roomsById().get(a.getClassRoomId()),
+                refs.subjectsById().get(a.getSubjectId())));
+    }
+
+    private List<AssignmentView> enrichAssignments(
+            List<TeacherAssignment> assignments, Map<UUID, Teacher> teachersById) {
+        if (assignments.isEmpty()) {
+            return List.of();
+        }
+        AcademicReferences refs = preloadAcademicReferences(assignments);
+        return assignments.stream()
+                .map(a -> buildView(
+                        a,
+                        teachersById.get(a.getTeacherId()),
+                        refs.yearsById().get(a.getAcademicYearId()),
+                        refs.roomsById().get(a.getClassRoomId()),
+                        refs.subjectsById().get(a.getSubjectId())))
+                .toList();
+    }
+
+    private AcademicReferences preloadAcademicReferences(List<TeacherAssignment> assignments) {
+        Set<UUID> yearIds = assignments.stream()
+                .map(TeacherAssignment::getAcademicYearId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Set<UUID> roomIds = assignments.stream()
+                .map(TeacherAssignment::getClassRoomId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Set<UUID> subjectIds = assignments.stream()
+                .map(TeacherAssignment::getSubjectId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        return new AcademicReferences(
+                academicStructurePort.findAcademicYearsByIds(yearIds),
+                academicStructurePort.findClassRoomsByIds(roomIds),
+                academicStructurePort.findSubjectsByIds(subjectIds));
     }
 
     private AssignmentView toView(TeacherAssignment assignment, Teacher teacher) {
         AcademicYearSummary year = academicStructurePort.findAcademicYearById(assignment.getAcademicYearId()).orElse(null);
         ClassRoomSummary room = academicStructurePort.findClassRoomById(assignment.getClassRoomId()).orElse(null);
         SubjectSummary subject = academicStructurePort.findSubjectById(assignment.getSubjectId()).orElse(null);
+        return buildView(assignment, teacher, year, room, subject);
+    }
+
+    private static AssignmentView buildView(
+            TeacherAssignment assignment,
+            Teacher teacher,
+            AcademicYearSummary year,
+            ClassRoomSummary room,
+            SubjectSummary subject) {
         return new AssignmentView(
                 assignment,
                 teacher != null ? teacher.getEmployeeCode() : null,
@@ -331,5 +387,11 @@ public class TeacherAssignmentService {
                 room != null ? room.name() : null,
                 subject != null ? subject.code() : null,
                 subject != null ? subject.name() : null);
+    }
+
+    private record AcademicReferences(
+            Map<UUID, AcademicYearSummary> yearsById,
+            Map<UUID, ClassRoomSummary> roomsById,
+            Map<UUID, SubjectSummary> subjectsById) {
     }
 }

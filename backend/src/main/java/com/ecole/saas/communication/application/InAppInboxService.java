@@ -11,10 +11,12 @@ import com.ecole.saas.communication.infrastructure.DeliveryEventRepository;
 import com.ecole.saas.communication.infrastructure.MessageDeliveryRepository;
 import java.time.Clock;
 import java.time.Instant;
-import java.util.HashSet;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Set;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -103,8 +105,18 @@ public class InAppInboxService {
         Instant now = clock.instant();
         DeliveryStatus previous = delivery.markRead(now);
         MessageDelivery saved = deliveryRepository.save(delivery);
-        appendEvent(saved, previous, DeliveryStatus.READ, "READ", "Notification marquée comme lue dans la boîte de réception.", now);
-        recomputeCampaignCounters(saved.getCampaignId(), now);
+        int nextSeq = deliveryEventRepository.findMaxSequenceNoByDeliveryId(saved.getId()) + 1;
+        deliveryEventRepository.save(new DeliveryEvent(
+                saved.getId(),
+                nextSeq,
+                previous,
+                DeliveryStatus.READ,
+                saved.getProviderName(),
+                "READ",
+                null,
+                "Notification marquée comme lue dans la boîte de réception.",
+                now));
+        applyReadCounterDelta(saved.getCampaignId(), previous, now);
         return saved;
     }
 
@@ -114,26 +126,52 @@ public class InAppInboxService {
         subscriptionGuard.requireReadAccess();
         List<MessageDelivery> unread = deliveryRepository.findByRecipientUserIdAndChannelAndStatusIn(
                 currentUserId, CommunicationChannel.IN_APP, UNREAD_STATUSES);
-        if (unread.isEmpty()) {
+        List<MessageDelivery> eligible = unread.stream()
+                .filter(d -> d.getStatus() != DeliveryStatus.QUEUED)
+                .toList();
+        if (eligible.isEmpty()) {
             return 0;
         }
+
+        List<UUID> deliveryIds = eligible.stream().map(MessageDelivery::getId).toList();
+        Map<UUID, Integer> maxSeqByDeliveryId = deliveryEventRepository
+                .findMaxSequenceNoByDeliveryIdIn(deliveryIds)
+                .stream()
+                .collect(Collectors.toMap(
+                        DeliveryEventRepository.DeliveryMaxSequence::getDeliveryId,
+                        DeliveryEventRepository.DeliveryMaxSequence::getMaxSequenceNo));
+
         Instant now = clock.instant();
-        Set<UUID> touchedCampaignIds = new HashSet<>();
-        int updated = 0;
-        for (MessageDelivery delivery : unread) {
-            if (delivery.getStatus() == DeliveryStatus.QUEUED) {
-                continue;
-            }
+        List<DeliveryEvent> eventsToSave = new ArrayList<>(eligible.size());
+        Map<UUID, int[]> deltasByCampaign = new LinkedHashMap<>();
+
+        for (MessageDelivery delivery : eligible) {
             DeliveryStatus previous = delivery.markRead(now);
-            deliveryRepository.save(delivery);
-            appendEvent(delivery, previous, DeliveryStatus.READ, "READ", "Lecture groupée boîte de réception.", now);
-            touchedCampaignIds.add(delivery.getCampaignId());
-            updated++;
+            int nextSeq = maxSeqByDeliveryId.getOrDefault(delivery.getId(), 0) + 1;
+            eventsToSave.add(new DeliveryEvent(
+                    delivery.getId(),
+                    nextSeq,
+                    previous,
+                    DeliveryStatus.READ,
+                    delivery.getProviderName(),
+                    "READ",
+                    null,
+                    "Lecture groupée boîte de réception.",
+                    now));
+            int[] deltas = deltasByCampaign.computeIfAbsent(delivery.getCampaignId(), ignored -> new int[3]);
+            if (previous == DeliveryStatus.SENT) {
+                deltas[0] -= 1;
+            } else if (previous == DeliveryStatus.DELIVERED) {
+                deltas[1] -= 1;
+            }
+            deltas[2] += 1;
         }
-        for (UUID campaignId : touchedCampaignIds) {
-            recomputeCampaignCounters(campaignId, now);
-        }
-        return updated;
+
+        deliveryRepository.saveAll(eligible);
+        deliveryEventRepository.saveAll(eventsToSave);
+        deltasByCampaign.forEach((campaignId, deltas) ->
+                campaignRepository.incrementReadCounters(campaignId, deltas[0], deltas[1], deltas[2], now));
+        return eligible.size();
     }
 
     long countUnreadInternal(UUID userId) {
@@ -144,31 +182,9 @@ public class InAppInboxService {
                 userId, CommunicationChannel.IN_APP, UNREAD_STATUSES);
     }
 
-    private void appendEvent(
-            MessageDelivery delivery,
-            DeliveryStatus previous,
-            DeliveryStatus next,
-            String providerStatus,
-            String detail,
-            Instant occurredAt) {
-        int nextSeq = deliveryEventRepository.countByDeliveryId(delivery.getId()) + 1;
-        deliveryEventRepository.save(new DeliveryEvent(
-                delivery.getId(),
-                nextSeq,
-                previous,
-                next,
-                delivery.getProviderName(),
-                providerStatus,
-                null,
-                detail,
-                occurredAt));
-    }
-
-    private void recomputeCampaignCounters(UUID campaignId, Instant now) {
-        campaignRepository.findById(campaignId).ifPresent(campaign -> {
-            List<MessageDelivery> deliveries = deliveryRepository.findByCampaignIdOrderByCreatedAtAsc(campaignId);
-            CommunicationCampaignService.applyAggregates(campaign, deliveries, now);
-            campaignRepository.save(campaign);
-        });
+    private void applyReadCounterDelta(UUID campaignId, DeliveryStatus previousStatus, Instant now) {
+        int sentDelta = previousStatus == DeliveryStatus.SENT ? -1 : 0;
+        int deliveredDelta = previousStatus == DeliveryStatus.DELIVERED ? -1 : 0;
+        campaignRepository.incrementReadCounters(campaignId, sentDelta, deliveredDelta, 1, now);
     }
 }
