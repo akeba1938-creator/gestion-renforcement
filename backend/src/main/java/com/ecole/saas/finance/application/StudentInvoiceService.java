@@ -3,6 +3,11 @@ package com.ecole.saas.finance.application;
 import com.ecole.saas.academic.AcademicStructurePort;
 import com.ecole.saas.academic.AcademicYearSummary;
 import com.ecole.saas.academic.ClassRoomSummary;
+import com.ecole.saas.audit.AuditAction;
+import com.ecole.saas.audit.AuditCategory;
+import com.ecole.saas.audit.AuditLogPort;
+import com.ecole.saas.audit.AuditOutcome;
+import com.ecole.saas.audit.AuditRecordCommand;
 import com.ecole.saas.family.FamilyDirectoryPort;
 import com.ecole.saas.family.FamilySummary;
 import com.ecole.saas.family.GuardianSummary;
@@ -83,6 +88,7 @@ public class StudentInvoiceService {
     private final FamilyDirectoryPort familyDirectoryPort;
     private final FinanceSchoolContext schoolContext;
     private final FinanceSubscriptionGuard subscriptionGuard;
+    private final AuditLogPort auditLogPort;
     private final Clock clock;
 
     public StudentInvoiceService(
@@ -98,6 +104,7 @@ public class StudentInvoiceService {
             FamilyDirectoryPort familyDirectoryPort,
             FinanceSchoolContext schoolContext,
             FinanceSubscriptionGuard subscriptionGuard,
+            AuditLogPort auditLogPort,
             Clock clock) {
         this.invoiceRepository = invoiceRepository;
         this.lineRepository = lineRepository;
@@ -111,6 +118,7 @@ public class StudentInvoiceService {
         this.familyDirectoryPort = familyDirectoryPort;
         this.schoolContext = schoolContext;
         this.subscriptionGuard = subscriptionGuard;
+        this.auditLogPort = auditLogPort;
         this.clock = clock;
     }
 
@@ -226,6 +234,16 @@ public class StudentInvoiceService {
         if (scheduleInputs != null && !scheduleInputs.isEmpty()) {
             savedSchedules = replaceDraftSchedules(invoice, scheduleInputs);
         }
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.FINANCE,
+                AuditAction.INVOICE_CREATED,
+                "STUDENT_INVOICE",
+                invoice.getId(),
+                "Création d'une facture élève en brouillon.",
+                Map.of(
+                        "invoiceNumber", invoice.getInvoiceNumber(),
+                        "studentId", invoice.getStudentId().toString(),
+                        "netAmountXof", invoice.getNetAmountXof())));
         return new InvoiceDetailView(invoice, savedLines, savedSchedules);
     }
 
@@ -387,6 +405,17 @@ public class StudentInvoiceService {
                 actorId,
                 now);
 
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.FINANCE,
+                AuditAction.INVOICE_ISSUED,
+                "STUDENT_INVOICE",
+                invoice.getId(),
+                "Émission officielle d'une facture élève.",
+                Map.of(
+                        "invoiceNumber", invoice.getInvoiceNumber(),
+                        "studentId", invoice.getStudentId().toString(),
+                        "netAmountXof", invoice.getNetAmountXof())));
+
         return new InvoiceDetailView(invoice, lines, schedules);
     }
 
@@ -427,6 +456,18 @@ public class StudentInvoiceService {
                     actorId,
                     now);
         }
+
+        auditLogPort.recordTenantEvent(AuditRecordCommand.warning(
+                AuditCategory.FINANCE,
+                AuditAction.INVOICE_CANCELLED,
+                AuditOutcome.SUCCESS,
+                "STUDENT_INVOICE",
+                invoice.getId(),
+                "Annulation d'une facture élève.",
+                Map.of(
+                        "invoiceNumber", invoice.getInvoiceNumber(),
+                        "wasIssued", wasIssued,
+                        "netBeforeCancelXof", netBeforeCancel)));
 
         List<StudentInvoiceLine> lines = lineRepository.findByInvoiceIdOrderByLineOrderAsc(invoice.getId());
         return new InvoiceDetailView(invoice, lines, schedules);

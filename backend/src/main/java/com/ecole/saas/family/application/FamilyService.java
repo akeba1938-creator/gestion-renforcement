@@ -1,5 +1,9 @@
 package com.ecole.saas.family.application;
 
+import com.ecole.saas.audit.AuditAction;
+import com.ecole.saas.audit.AuditCategory;
+import com.ecole.saas.audit.AuditLogPort;
+import com.ecole.saas.audit.AuditRecordCommand;
 import com.ecole.saas.family.domain.Family;
 import com.ecole.saas.family.domain.FamilyCodeAlreadyExistsException;
 import com.ecole.saas.family.domain.FamilyNotFoundException;
@@ -18,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -44,6 +49,7 @@ public class FamilyService {
     private final StudentGuardianLinkRepository linkRepository;
     private final StudentDirectoryPort studentDirectoryPort;
     private final FamilySubscriptionGuard subscriptionGuard;
+    private final AuditLogPort auditLogPort;
     private final Clock clock;
 
     public FamilyService(
@@ -52,12 +58,14 @@ public class FamilyService {
             StudentGuardianLinkRepository linkRepository,
             StudentDirectoryPort studentDirectoryPort,
             FamilySubscriptionGuard subscriptionGuard,
+            AuditLogPort auditLogPort,
             Clock clock) {
         this.familyRepository = familyRepository;
         this.guardianRepository = guardianRepository;
         this.linkRepository = linkRepository;
         this.studentDirectoryPort = studentDirectoryPort;
         this.subscriptionGuard = subscriptionGuard;
+        this.auditLogPort = auditLogPort;
         this.clock = clock;
     }
 
@@ -110,7 +118,15 @@ public class FamilyService {
         if (normalizedCode != null && familyRepository.existsByCode(normalizedCode)) {
             throw new FamilyCodeAlreadyExistsException("Une famille avec ce code existe déjà dans l'établissement.");
         }
-        return familyRepository.save(new Family(normalizedCode, name, primaryPhone, email, address, city, notes));
+        Family saved = familyRepository.save(new Family(normalizedCode, name, primaryPhone, email, address, city, notes));
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.FAMILY,
+                AuditAction.FAMILY_CREATED,
+                "FAMILY",
+                saved.getId(),
+                "Création d'un dossier famille.",
+                saved.getCode() != null ? Map.of("familyCode", saved.getCode()) : Map.of()));
+        return saved;
     }
 
     @PreAuthorize(WRITE_ROLES)

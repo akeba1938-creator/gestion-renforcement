@@ -1,5 +1,10 @@
 package com.ecole.saas.family.application;
 
+import com.ecole.saas.audit.AuditAction;
+import com.ecole.saas.audit.AuditCategory;
+import com.ecole.saas.audit.AuditLogPort;
+import com.ecole.saas.audit.AuditOutcome;
+import com.ecole.saas.audit.AuditRecordCommand;
 import com.ecole.saas.family.domain.Guardian;
 import com.ecole.saas.family.domain.GuardianArchivedException;
 import com.ecole.saas.family.domain.GuardianNotFoundException;
@@ -35,16 +40,19 @@ public class StudentGuardianService {
     private final GuardianRepository guardianRepository;
     private final StudentDirectoryPort studentDirectoryPort;
     private final FamilySubscriptionGuard subscriptionGuard;
+    private final AuditLogPort auditLogPort;
 
     public StudentGuardianService(
             StudentGuardianLinkRepository linkRepository,
             GuardianRepository guardianRepository,
             StudentDirectoryPort studentDirectoryPort,
-            FamilySubscriptionGuard subscriptionGuard) {
+            FamilySubscriptionGuard subscriptionGuard,
+            AuditLogPort auditLogPort) {
         this.linkRepository = linkRepository;
         this.guardianRepository = guardianRepository;
         this.studentDirectoryPort = studentDirectoryPort;
         this.subscriptionGuard = subscriptionGuard;
+        this.auditLogPort = auditLogPort;
     }
 
     @PreAuthorize(FamilyService.READ_ROLES)
@@ -123,6 +131,17 @@ public class StudentGuardianService {
                 isEmergency,
                 isAuthorizedPickup,
                 notes));
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.FAMILY,
+                AuditAction.STUDENT_GUARDIAN_LINKED,
+                "STUDENT_GUARDIAN_LINK",
+                saved.getId(),
+                "Rattachement d'un parent ou tuteur légal à un élève.",
+                Map.of(
+                        "studentId", studentId.toString(),
+                        "guardianId", guardianId.toString(),
+                        "primaryContact", isPrimary,
+                        "financialResponsible", isFinancial)));
         return new StudentGuardianView(saved, guardian, student);
     }
 
@@ -152,6 +171,7 @@ public class StudentGuardianService {
             clearExistingFinancialResponsible(studentId, linkId);
         }
 
+        boolean wasFinancial = link.isFinancialResponsible();
         link.update(
                 relationshipType,
                 primaryContact,
@@ -161,6 +181,19 @@ public class StudentGuardianService {
                 authorizedPickup,
                 notes);
         StudentGuardianLink saved = linkRepository.save(link);
+        if (wasFinancial != financialResponsible) {
+            auditLogPort.recordTenantEvent(AuditRecordCommand.warning(
+                    AuditCategory.FAMILY,
+                    AuditAction.FINANCIAL_RESPONSIBLE_CHANGED,
+                    AuditOutcome.SUCCESS,
+                    "STUDENT_GUARDIAN_LINK",
+                    saved.getId(),
+                    "Modification de la désignation du responsable financier d'un élève.",
+                    Map.of(
+                            "studentId", studentId.toString(),
+                            "guardianId", saved.getGuardianId().toString(),
+                            "financialResponsible", financialResponsible)));
+        }
         Guardian guardian = guardianRepository.findById(saved.getGuardianId()).orElse(null);
         return new StudentGuardianView(saved, guardian, student);
     }
@@ -175,6 +208,14 @@ public class StudentGuardianService {
         StudentGuardianLink link = requireLink(studentId, linkId);
         link.deactivate();
         StudentGuardianLink saved = linkRepository.save(link);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.warning(
+                AuditCategory.FAMILY,
+                AuditAction.STUDENT_GUARDIAN_UNLINKED,
+                AuditOutcome.SUCCESS,
+                "STUDENT_GUARDIAN_LINK",
+                saved.getId(),
+                "Désactivation d'un lien élève-tuteur.",
+                Map.of("studentId", studentId.toString(), "guardianId", saved.getGuardianId().toString())));
         Guardian guardian = guardianRepository.findById(saved.getGuardianId()).orElse(null);
         return new StudentGuardianView(saved, guardian, student);
     }

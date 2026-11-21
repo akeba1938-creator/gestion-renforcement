@@ -4,6 +4,11 @@ import com.ecole.saas.academic.AcademicStructurePort;
 import com.ecole.saas.academic.AcademicYearSummary;
 import com.ecole.saas.academic.GradeLevelSummary;
 import com.ecole.saas.academic.SubjectSummary;
+import com.ecole.saas.audit.AuditAction;
+import com.ecole.saas.audit.AuditCategory;
+import com.ecole.saas.audit.AuditLogPort;
+import com.ecole.saas.audit.AuditOutcome;
+import com.ecole.saas.audit.AuditRecordCommand;
 import com.ecole.saas.center.domain.CenterConflictException;
 import com.ecole.saas.center.domain.CenterGroup;
 import com.ecole.saas.center.domain.CenterNotFoundException;
@@ -20,6 +25,7 @@ import jakarta.persistence.criteria.Predicate;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -41,6 +47,7 @@ public class CenterPackService {
     private final StudentDirectoryPort studentDirectoryPort;
     private final CenterSubscriptionGuard subscriptionGuard;
     private final CenterSchoolGuard schoolGuard;
+    private final AuditLogPort auditLogPort;
 
     public CenterPackService(
             CenterSessionPackRepository packRepository,
@@ -49,7 +56,8 @@ public class CenterPackService {
             AcademicStructurePort academicStructurePort,
             StudentDirectoryPort studentDirectoryPort,
             CenterSubscriptionGuard subscriptionGuard,
-            CenterSchoolGuard schoolGuard) {
+            CenterSchoolGuard schoolGuard,
+            AuditLogPort auditLogPort) {
         this.packRepository = packRepository;
         this.studentPackRepository = studentPackRepository;
         this.groupRepository = groupRepository;
@@ -57,6 +65,7 @@ public class CenterPackService {
         this.studentDirectoryPort = studentDirectoryPort;
         this.subscriptionGuard = subscriptionGuard;
         this.schoolGuard = schoolGuard;
+        this.auditLogPort = auditLogPort;
     }
 
     @PreAuthorize(CenterRoles.READ_ROLES)
@@ -132,7 +141,18 @@ public class CenterPackService {
                 includedSessions,
                 durationDays,
                 priceXof);
-        return packRepository.save(pack);
+        CenterSessionPack saved = packRepository.save(pack);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.CENTER,
+                AuditAction.CENTER_PACK_CREATED,
+                "CENTER_SESSION_PACK",
+                saved.getId(),
+                "Création d'un forfait de séances du centre de renforcement.",
+                Map.of(
+                        "code", saved.getCode(),
+                        "billingMode", saved.getBillingMode().name(),
+                        "priceXof", saved.getPriceXof())));
+        return saved;
     }
 
     @PreAuthorize(CenterRoles.PACK_CATALOG_WRITE_ROLES)
@@ -182,7 +202,16 @@ public class CenterPackService {
         schoolGuard.requireActiveSchoolForWrite();
         CenterSessionPack pack = requirePack(packId);
         pack.deactivate();
-        return packRepository.save(pack);
+        CenterSessionPack saved = packRepository.save(pack);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.warning(
+                AuditCategory.CENTER,
+                AuditAction.CENTER_PACK_DEACTIVATED,
+                AuditOutcome.SUCCESS,
+                "CENTER_SESSION_PACK",
+                saved.getId(),
+                "Désactivation d'un forfait de séances du centre.",
+                Map.of("code", saved.getCode())));
+        return saved;
     }
 
     @PreAuthorize(CenterRoles.STAFF_READ_ROLES)
@@ -260,6 +289,16 @@ public class CenterPackService {
                 actorId,
                 notes);
         CenterStudentPack saved = studentPackRepository.save(assigned);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.CENTER,
+                AuditAction.CENTER_STUDENT_PACK_ASSIGNED,
+                "CENTER_STUDENT_PACK",
+                saved.getId(),
+                "Attribution d'un pack de séances à un élève du centre.",
+                Map.of(
+                        "studentId", student.id().toString(),
+                        "packCode", saved.getPackCodeSnapshot(),
+                        "priceXof", saved.getPriceXof())));
         return new StudentPackView(saved, student);
     }
 
@@ -270,7 +309,18 @@ public class CenterPackService {
         schoolGuard.requireActiveSchoolForWrite();
         CenterStudentPack studentPack = requireStudentPack(studentPackId);
         studentPack.cancel(reason);
-        return toStudentPackView(studentPackRepository.save(studentPack));
+        CenterStudentPack saved = studentPackRepository.save(studentPack);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.warning(
+                AuditCategory.CENTER,
+                AuditAction.CENTER_STUDENT_PACK_CANCELLED,
+                AuditOutcome.SUCCESS,
+                "CENTER_STUDENT_PACK",
+                saved.getId(),
+                "Annulation d'un pack de séances élève.",
+                Map.of(
+                        "studentId", saved.getStudentId().toString(),
+                        "packCode", saved.getPackCodeSnapshot())));
+        return toStudentPackView(saved);
     }
 
     private void validateOptionalAcademicReferences(

@@ -1,5 +1,10 @@
 package com.ecole.saas.finance.application;
 
+import com.ecole.saas.audit.AuditAction;
+import com.ecole.saas.audit.AuditCategory;
+import com.ecole.saas.audit.AuditLogPort;
+import com.ecole.saas.audit.AuditOutcome;
+import com.ecole.saas.audit.AuditRecordCommand;
 import com.ecole.saas.finance.domain.ApprovalStatus;
 import com.ecole.saas.finance.domain.FinanceConflictException;
 import com.ecole.saas.finance.domain.FinanceNotFoundException;
@@ -55,6 +60,7 @@ public class PaymentReversalService {
     private final LedgerEntryRepository ledgerEntryRepository;
     private final LedgerPostingHelper ledgerPostingHelper;
     private final FinanceSubscriptionGuard subscriptionGuard;
+    private final AuditLogPort auditLogPort;
     private final Clock clock;
 
     public PaymentReversalService(
@@ -67,6 +73,7 @@ public class PaymentReversalService {
             LedgerEntryRepository ledgerEntryRepository,
             LedgerPostingHelper ledgerPostingHelper,
             FinanceSubscriptionGuard subscriptionGuard,
+            AuditLogPort auditLogPort,
             Clock clock) {
         this.requestRepository = requestRepository;
         this.reversalRepository = reversalRepository;
@@ -77,6 +84,7 @@ public class PaymentReversalService {
         this.ledgerEntryRepository = ledgerEntryRepository;
         this.ledgerPostingHelper = ledgerPostingHelper;
         this.subscriptionGuard = subscriptionGuard;
+        this.auditLogPort = auditLogPort;
         this.clock = clock;
     }
 
@@ -147,7 +155,19 @@ public class PaymentReversalService {
                 reason,
                 actorId,
                 clock.instant());
-        return requestRepository.save(request);
+        PaymentReversalRequest saved = requestRepository.save(request);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.warning(
+                AuditCategory.FINANCE,
+                AuditAction.PAYMENT_REVERSAL_REQUESTED,
+                AuditOutcome.SUCCESS,
+                "PAYMENT_REVERSAL_REQUEST",
+                saved.getId(),
+                "Demande de contre-passation d'un encaissement.",
+                Map.of(
+                        "paymentId", saved.getPaymentId().toString(),
+                        "invoiceId", saved.getInvoiceId().toString(),
+                        "amountXof", saved.getAmountXof())));
+        return saved;
     }
 
     @PreAuthorize(FinanceRoles.APPROVAL_ROLES)
@@ -221,6 +241,18 @@ public class PaymentReversalService {
                 actorId,
                 now);
 
+        auditLogPort.recordTenantEvent(AuditRecordCommand.critical(
+                AuditCategory.FINANCE,
+                AuditAction.PAYMENT_REVERSAL_APPROVED,
+                AuditOutcome.SUCCESS,
+                "PAYMENT_REVERSAL",
+                reversal.getId(),
+                "Approbation et exécution d'une contre-passation d'encaissement.",
+                Map.of(
+                        "originalPaymentId", payment.getId().toString(),
+                        "invoiceId", payment.getInvoiceId().toString(),
+                        "amountXof", payment.getAmountXof())));
+
         return new ReversalDecisionView(request, reversal);
     }
 
@@ -232,7 +264,15 @@ public class PaymentReversalService {
 
         PaymentReversalRequest request = requireRequest(requestId);
         request.reject(actorId, clock.instant(), decisionNote);
-        return requestRepository.save(request);
+        PaymentReversalRequest saved = requestRepository.save(request);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.FINANCE,
+                AuditAction.PAYMENT_REVERSAL_REJECTED,
+                "PAYMENT_REVERSAL_REQUEST",
+                saved.getId(),
+                "Rejet d'une demande de contre-passation d'encaissement.",
+                Map.of("paymentId", saved.getPaymentId().toString(), "amountXof", saved.getAmountXof())));
+        return saved;
     }
 
     private PaymentReversalRequest requireRequest(UUID requestId) {

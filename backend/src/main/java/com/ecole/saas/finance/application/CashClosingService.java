@@ -1,5 +1,10 @@
 package com.ecole.saas.finance.application;
 
+import com.ecole.saas.audit.AuditAction;
+import com.ecole.saas.audit.AuditCategory;
+import com.ecole.saas.audit.AuditLogPort;
+import com.ecole.saas.audit.AuditOutcome;
+import com.ecole.saas.audit.AuditRecordCommand;
 import com.ecole.saas.finance.domain.CashClosing;
 import com.ecole.saas.finance.domain.CashClosingStatus;
 import com.ecole.saas.finance.domain.FinanceConflictException;
@@ -20,6 +25,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
@@ -40,6 +46,7 @@ public class CashClosingService {
     private final PaymentReversalRepository reversalRepository;
     private final FinanceSchoolContext schoolContext;
     private final FinanceSubscriptionGuard subscriptionGuard;
+    private final AuditLogPort auditLogPort;
     private final Clock clock;
 
     public CashClosingService(
@@ -48,12 +55,14 @@ public class CashClosingService {
             PaymentReversalRepository reversalRepository,
             FinanceSchoolContext schoolContext,
             FinanceSubscriptionGuard subscriptionGuard,
+            AuditLogPort auditLogPort,
             Clock clock) {
         this.cashClosingRepository = cashClosingRepository;
         this.paymentRepository = paymentRepository;
         this.reversalRepository = reversalRepository;
         this.schoolContext = schoolContext;
         this.subscriptionGuard = subscriptionGuard;
+        this.auditLogPort = auditLogPort;
         this.clock = clock;
     }
 
@@ -132,7 +141,29 @@ public class CashClosingService {
                 notes,
                 actorId,
                 clock.instant());
-        return cashClosingRepository.save(closing);
+        CashClosing saved = cashClosingRepository.save(closing);
+        Map<String, Object> meta = Map.of(
+                "closingDate", saved.getClosingDate().toString(),
+                "expectedCashXof", saved.getExpectedCashXof(),
+                "countedCashXof", saved.getCountedCashXof(),
+                "discrepancyXof", saved.getDiscrepancyXof());
+        auditLogPort.recordTenantEvent(saved.getDiscrepancyXof() != 0L
+                ? AuditRecordCommand.warning(
+                        AuditCategory.FINANCE,
+                        AuditAction.CASH_CLOSING_SUBMITTED,
+                        AuditOutcome.SUCCESS,
+                        "CASH_CLOSING",
+                        saved.getId(),
+                        "Soumission d'une clôture journalière de caisse avec écart constaté.",
+                        meta)
+                : AuditRecordCommand.success(
+                        AuditCategory.FINANCE,
+                        AuditAction.CASH_CLOSING_SUBMITTED,
+                        "CASH_CLOSING",
+                        saved.getId(),
+                        "Soumission d'une clôture journalière de caisse.",
+                        meta));
+        return saved;
     }
 
     @PreAuthorize(FinanceRoles.APPROVAL_ROLES)
@@ -143,7 +174,29 @@ public class CashClosingService {
 
         CashClosing closing = requireClosing(closingId);
         closing.validate(actorId, clock.instant(), validationNote);
-        return cashClosingRepository.save(closing);
+        CashClosing saved = cashClosingRepository.save(closing);
+        Map<String, Object> meta = Map.of(
+                "closingDate", saved.getClosingDate().toString(),
+                "expectedCashXof", saved.getExpectedCashXof(),
+                "countedCashXof", saved.getCountedCashXof(),
+                "discrepancyXof", saved.getDiscrepancyXof());
+        auditLogPort.recordTenantEvent(saved.getDiscrepancyXof() != 0L
+                ? AuditRecordCommand.warning(
+                        AuditCategory.FINANCE,
+                        AuditAction.CASH_CLOSING_VALIDATED,
+                        AuditOutcome.SUCCESS,
+                        "CASH_CLOSING",
+                        saved.getId(),
+                        "Validation d'une clôture journalière de caisse avec écart.",
+                        meta)
+                : AuditRecordCommand.success(
+                        AuditCategory.FINANCE,
+                        AuditAction.CASH_CLOSING_VALIDATED,
+                        "CASH_CLOSING",
+                        saved.getId(),
+                        "Validation d'une clôture journalière de caisse.",
+                        meta));
+        return saved;
     }
 
     private CashClosing requireClosing(UUID closingId) {

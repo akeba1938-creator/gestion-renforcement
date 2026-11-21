@@ -1,5 +1,9 @@
 package com.ecole.saas.finance.application;
 
+import com.ecole.saas.audit.AuditAction;
+import com.ecole.saas.audit.AuditCategory;
+import com.ecole.saas.audit.AuditLogPort;
+import com.ecole.saas.audit.AuditRecordCommand;
 import com.ecole.saas.family.FamilyDirectoryPort;
 import com.ecole.saas.family.GuardianSummary;
 import com.ecole.saas.finance.domain.FinanceCodeFormatter;
@@ -91,6 +95,7 @@ public class PaymentService {
     private final FamilyDirectoryPort familyDirectoryPort;
     private final FinanceSchoolContext schoolContext;
     private final FinanceSubscriptionGuard subscriptionGuard;
+    private final AuditLogPort auditLogPort;
     private final Clock clock;
 
     public PaymentService(
@@ -106,6 +111,7 @@ public class PaymentService {
             FamilyDirectoryPort familyDirectoryPort,
             FinanceSchoolContext schoolContext,
             FinanceSubscriptionGuard subscriptionGuard,
+            AuditLogPort auditLogPort,
             Clock clock) {
         this.paymentRepository = paymentRepository;
         this.allocationRepository = allocationRepository;
@@ -119,6 +125,7 @@ public class PaymentService {
         this.familyDirectoryPort = familyDirectoryPort;
         this.schoolContext = schoolContext;
         this.subscriptionGuard = subscriptionGuard;
+        this.auditLogPort = auditLogPort;
         this.clock = clock;
     }
 
@@ -223,6 +230,19 @@ public class PaymentService {
                 "Encaissement " + receiptNumber + " (" + payment.getPaymentMethod() + ")",
                 actorId,
                 now);
+
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.FINANCE,
+                AuditAction.PAYMENT_RECORDED,
+                "PAYMENT",
+                payment.getId(),
+                "Enregistrement d'un encaissement financier et émission du reçu.",
+                Map.of(
+                        "invoiceId", invoice.getId().toString(),
+                        "studentId", invoice.getStudentId().toString(),
+                        "amountXof", payment.getAmountXof(),
+                        "paymentMethod", payment.getPaymentMethod().name(),
+                        "receiptNumber", receiptNumber)));
 
         return new PaymentView(payment, receipt, allocations, null, false);
     }

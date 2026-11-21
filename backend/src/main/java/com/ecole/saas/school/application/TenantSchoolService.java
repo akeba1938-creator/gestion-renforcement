@@ -1,10 +1,15 @@
 package com.ecole.saas.school.application;
 
+import com.ecole.saas.audit.AuditAction;
+import com.ecole.saas.audit.AuditCategory;
+import com.ecole.saas.audit.AuditLogPort;
+import com.ecole.saas.audit.AuditRecordCommand;
 import com.ecole.saas.school.domain.GradingPeriodSystem;
 import com.ecole.saas.school.domain.School;
 import com.ecole.saas.school.domain.SchoolNotFoundException;
 import com.ecole.saas.school.infrastructure.SchoolRepository;
 import com.ecole.saas.shared.domain.TenantContext;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
@@ -18,9 +23,11 @@ import org.springframework.transaction.annotation.Transactional;
 public class TenantSchoolService {
 
     private final SchoolRepository schoolRepository;
+    private final AuditLogPort auditLogPort;
 
-    public TenantSchoolService(SchoolRepository schoolRepository) {
+    public TenantSchoolService(SchoolRepository schoolRepository, AuditLogPort auditLogPort) {
         this.schoolRepository = schoolRepository;
+        this.auditLogPort = auditLogPort;
     }
 
     @PreAuthorize("hasAnyRole('PROMOTER', 'DIRECTOR', 'CENTER_MANAGER')")
@@ -66,6 +73,18 @@ public class TenantSchoolService {
                 timezone,
                 gradingPeriodSystem,
                 gradingScale);
-        return schoolRepository.save(school);
+        School saved = schoolRepository.save(school);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.SCHOOL,
+                AuditAction.SCHOOL_PROFILE_UPDATED,
+                "SCHOOL",
+                saved.getId(),
+                "Mise à jour du profil et des paramètres de l'établissement.",
+                Map.of(
+                        "schoolCode", saved.getCode(),
+                        "timezone", saved.getTimezone(),
+                        "gradingScale", saved.getGradingScale(),
+                        "gradingPeriodSystem", saved.getGradingPeriodSystem().name())));
+        return saved;
     }
 }

@@ -20,6 +20,11 @@ import com.ecole.saas.academic.infrastructure.ClassRoomRepository;
 import com.ecole.saas.academic.infrastructure.ClassSubjectRepository;
 import com.ecole.saas.academic.infrastructure.GradeLevelRepository;
 import com.ecole.saas.academic.infrastructure.SubjectRepository;
+import com.ecole.saas.audit.AuditAction;
+import com.ecole.saas.audit.AuditCategory;
+import com.ecole.saas.audit.AuditLogPort;
+import com.ecole.saas.audit.AuditOutcome;
+import com.ecole.saas.audit.AuditRecordCommand;
 import com.ecole.saas.shared.domain.TenantContext;
 import jakarta.persistence.criteria.Predicate;
 import java.util.ArrayList;
@@ -51,18 +56,21 @@ public class ClassRoomService {
     private final AcademicYearRepository academicYearRepository;
     private final GradeLevelRepository gradeLevelRepository;
     private final SubjectRepository subjectRepository;
+    private final AuditLogPort auditLogPort;
 
     public ClassRoomService(
             ClassRoomRepository classRoomRepository,
             ClassSubjectRepository classSubjectRepository,
             AcademicYearRepository academicYearRepository,
             GradeLevelRepository gradeLevelRepository,
-            SubjectRepository subjectRepository) {
+            SubjectRepository subjectRepository,
+            AuditLogPort auditLogPort) {
         this.classRoomRepository = classRoomRepository;
         this.classSubjectRepository = classSubjectRepository;
         this.academicYearRepository = academicYearRepository;
         this.gradeLevelRepository = gradeLevelRepository;
         this.subjectRepository = subjectRepository;
+        this.auditLogPort = auditLogPort;
     }
 
     @PreAuthorize(READ_ROLES)
@@ -143,6 +151,13 @@ public class ClassRoomService {
         int effectiveCapacity = capacity != null ? capacity : ClassRoom.DEFAULT_CAPACITY;
         ClassRoom saved = classRoomRepository.save(new ClassRoom(
                 academicYearId, gradeLevelId, normalizedCode, name, series, roomName, effectiveCapacity));
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.ACADEMIC,
+                AuditAction.CLASSROOM_CREATED,
+                "CLASS_ROOM",
+                saved.getId(),
+                "Création d'une classe.",
+                Map.of("code", saved.getCode(), "academicYearId", academicYearId.toString(), "capacity", saved.getCapacity())));
         return toClassRoomView(saved, year, level);
     }
 
@@ -180,6 +195,14 @@ public class ClassRoomService {
 
         room.archive();
         ClassRoom saved = classRoomRepository.save(room);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.warning(
+                AuditCategory.ACADEMIC,
+                AuditAction.CLASSROOM_ARCHIVED,
+                AuditOutcome.SUCCESS,
+                "CLASS_ROOM",
+                saved.getId(),
+                "Archivage d'une classe.",
+                Map.of("code", saved.getCode())));
         GradeLevel level = gradeLevelRepository.findById(saved.getGradeLevelId()).orElse(null);
         return toClassRoomView(saved, year, level);
     }
@@ -194,6 +217,13 @@ public class ClassRoomService {
 
         room.reactivate();
         ClassRoom saved = classRoomRepository.save(room);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.ACADEMIC,
+                AuditAction.CLASSROOM_REACTIVATED,
+                "CLASS_ROOM",
+                saved.getId(),
+                "Réactivation d'une classe.",
+                Map.of("code", saved.getCode())));
         GradeLevel level = gradeLevelRepository.findById(saved.getGradeLevelId()).orElse(null);
         return toClassRoomView(saved, year, level);
     }

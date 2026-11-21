@@ -1,5 +1,9 @@
 package com.ecole.saas.family.application;
 
+import com.ecole.saas.audit.AuditAction;
+import com.ecole.saas.audit.AuditCategory;
+import com.ecole.saas.audit.AuditLogPort;
+import com.ecole.saas.audit.AuditRecordCommand;
 import com.ecole.saas.family.domain.Family;
 import com.ecole.saas.family.domain.FamilyArchivedException;
 import com.ecole.saas.family.domain.FamilyNotFoundException;
@@ -43,6 +47,7 @@ public class GuardianService {
     private final StudentGuardianLinkRepository linkRepository;
     private final StudentDirectoryPort studentDirectoryPort;
     private final FamilySubscriptionGuard subscriptionGuard;
+    private final AuditLogPort auditLogPort;
     private final Clock clock;
 
     public GuardianService(
@@ -51,12 +56,14 @@ public class GuardianService {
             StudentGuardianLinkRepository linkRepository,
             StudentDirectoryPort studentDirectoryPort,
             FamilySubscriptionGuard subscriptionGuard,
+            AuditLogPort auditLogPort,
             Clock clock) {
         this.guardianRepository = guardianRepository;
         this.familyRepository = familyRepository;
         this.linkRepository = linkRepository;
         this.studentDirectoryPort = studentDirectoryPort;
         this.subscriptionGuard = subscriptionGuard;
+        this.auditLogPort = auditLogPort;
         this.clock = clock;
     }
 
@@ -151,6 +158,13 @@ public class GuardianService {
                 address,
                 nationalIdNumber,
                 preferredLanguage));
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.FAMILY,
+                AuditAction.GUARDIAN_CREATED,
+                "GUARDIAN",
+                saved.getId(),
+                "Création d'un dossier parent ou tuteur légal.",
+                familyId != null ? Map.of("familyId", familyId.toString()) : Map.of()));
         return toView(saved, family);
     }
 

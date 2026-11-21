@@ -6,6 +6,11 @@ import com.ecole.saas.academic.ClassRoomSummary;
 import com.ecole.saas.academic.ClassSubjectSummary;
 import com.ecole.saas.academic.EvaluationPeriodSummary;
 import com.ecole.saas.academic.SubjectSummary;
+import com.ecole.saas.audit.AuditAction;
+import com.ecole.saas.audit.AuditCategory;
+import com.ecole.saas.audit.AuditLogPort;
+import com.ecole.saas.audit.AuditOutcome;
+import com.ecole.saas.audit.AuditRecordCommand;
 import com.ecole.saas.grade.domain.Evaluation;
 import com.ecole.saas.grade.domain.EvaluationPeriodClosedException;
 import com.ecole.saas.grade.domain.EvaluationStatus;
@@ -88,6 +93,7 @@ public class EvaluationService {
     private final GradeSchoolContext schoolContext;
     private final GradeSubscriptionGuard subscriptionGuard;
     private final GradeTeacherScopeGuard teacherScopeGuard;
+    private final AuditLogPort auditLogPort;
     private final Clock clock;
 
     public EvaluationService(
@@ -99,6 +105,7 @@ public class EvaluationService {
             GradeSchoolContext schoolContext,
             GradeSubscriptionGuard subscriptionGuard,
             GradeTeacherScopeGuard teacherScopeGuard,
+            AuditLogPort auditLogPort,
             Clock clock) {
         this.evaluationRepository = evaluationRepository;
         this.studentGradeRepository = studentGradeRepository;
@@ -108,6 +115,7 @@ public class EvaluationService {
         this.schoolContext = schoolContext;
         this.subscriptionGuard = subscriptionGuard;
         this.teacherScopeGuard = teacherScopeGuard;
+        this.auditLogPort = auditLogPort;
         this.clock = clock;
     }
 
@@ -246,6 +254,17 @@ public class EvaluationService {
                 effectiveWeight,
                 actorId,
                 notes));
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.GRADE,
+                AuditAction.EVALUATION_CREATED,
+                "EVALUATION",
+                saved.getId(),
+                "Création d'une évaluation scolaire.",
+                Map.of(
+                        "evaluationPeriodId", period.id().toString(),
+                        "classRoomId", classRoomId.toString(),
+                        "subjectId", subjectId.toString(),
+                        "evaluationType", saved.getEvaluationType().name())));
         return toEvaluationView(saved);
     }
 
@@ -305,7 +324,17 @@ public class EvaluationService {
         assertPeriodOpenForGrading(period);
 
         evaluation.validate(actorId, clock.instant());
-        return toEvaluationView(evaluationRepository.save(evaluation));
+        Evaluation saved = evaluationRepository.save(evaluation);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.GRADE,
+                AuditAction.EVALUATION_VALIDATED,
+                "EVALUATION",
+                saved.getId(),
+                "Validation d'une évaluation scolaire.",
+                Map.of(
+                        "classRoomId", saved.getClassRoomId().toString(),
+                        "subjectId", saved.getSubjectId().toString())));
+        return toEvaluationView(saved);
     }
 
     @PreAuthorize(GradeRoles.EVALUATION_LOCK_ROLES)
@@ -322,7 +351,18 @@ public class EvaluationService {
         }
 
         evaluation.lock(actorId, clock.instant());
-        return toEvaluationView(evaluationRepository.save(evaluation));
+        Evaluation saved = evaluationRepository.save(evaluation);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.critical(
+                AuditCategory.GRADE,
+                AuditAction.EVALUATION_LOCKED,
+                AuditOutcome.SUCCESS,
+                "EVALUATION",
+                saved.getId(),
+                "Verrouillage définitif d'une évaluation scolaire.",
+                Map.of(
+                        "classRoomId", saved.getClassRoomId().toString(),
+                        "subjectId", saved.getSubjectId().toString())));
+        return toEvaluationView(saved);
     }
 
     @PreAuthorize(GradeRoles.EVALUATION_WRITE_ROLES)
@@ -339,7 +379,18 @@ public class EvaluationService {
         assertCanMutateEvaluation(evaluation);
 
         evaluation.cancel(reason);
-        return toEvaluationView(evaluationRepository.save(evaluation));
+        Evaluation saved = evaluationRepository.save(evaluation);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.warning(
+                AuditCategory.GRADE,
+                AuditAction.EVALUATION_CANCELLED,
+                AuditOutcome.SUCCESS,
+                "EVALUATION",
+                saved.getId(),
+                "Annulation d'une évaluation scolaire.",
+                Map.of(
+                        "classRoomId", saved.getClassRoomId().toString(),
+                        "subjectId", saved.getSubjectId().toString())));
+        return toEvaluationView(saved);
     }
 
     @PreAuthorize(GradeRoles.READ_ROLES)
@@ -427,6 +478,16 @@ public class EvaluationService {
         }
 
         studentGradeRepository.saveAll(toSave);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.GRADE,
+                AuditAction.GRADES_RECORDED,
+                "EVALUATION",
+                evaluationId,
+                "Saisie ou mise à jour d'un lot de notes d'évaluation.",
+                Map.of(
+                        "classRoomId", evaluation.getClassRoomId().toString(),
+                        "subjectId", evaluation.getSubjectId().toString(),
+                        "gradeCount", toSave.size())));
         List<StudentGrade> refreshed = studentGradeRepository.findByEvaluationIdOrderByCreatedAtAsc(evaluationId);
         return enrichGradeViews(refreshed);
     }

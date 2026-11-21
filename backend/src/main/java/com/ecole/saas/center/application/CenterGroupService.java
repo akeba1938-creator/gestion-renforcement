@@ -4,6 +4,11 @@ import com.ecole.saas.academic.AcademicStructurePort;
 import com.ecole.saas.academic.AcademicYearSummary;
 import com.ecole.saas.academic.GradeLevelSummary;
 import com.ecole.saas.academic.SubjectSummary;
+import com.ecole.saas.audit.AuditAction;
+import com.ecole.saas.audit.AuditCategory;
+import com.ecole.saas.audit.AuditLogPort;
+import com.ecole.saas.audit.AuditOutcome;
+import com.ecole.saas.audit.AuditRecordCommand;
 import com.ecole.saas.center.domain.CenterConflictException;
 import com.ecole.saas.center.domain.CenterGroup;
 import com.ecole.saas.center.domain.CenterGroupEnrollment;
@@ -59,6 +64,7 @@ public class CenterGroupService {
     private final CenterSubscriptionGuard subscriptionGuard;
     private final CenterSchoolGuard schoolGuard;
     private final CenterTutorScopeGuard tutorScopeGuard;
+    private final AuditLogPort auditLogPort;
 
     public CenterGroupService(
             CenterGroupRepository groupRepository,
@@ -71,7 +77,8 @@ public class CenterGroupService {
             StudentDirectoryPort studentDirectoryPort,
             CenterSubscriptionGuard subscriptionGuard,
             CenterSchoolGuard schoolGuard,
-            CenterTutorScopeGuard tutorScopeGuard) {
+            CenterTutorScopeGuard tutorScopeGuard,
+            AuditLogPort auditLogPort) {
         this.groupRepository = groupRepository;
         this.groupTutorRepository = groupTutorRepository;
         this.enrollmentRepository = enrollmentRepository;
@@ -83,6 +90,7 @@ public class CenterGroupService {
         this.subscriptionGuard = subscriptionGuard;
         this.schoolGuard = schoolGuard;
         this.tutorScopeGuard = tutorScopeGuard;
+        this.auditLogPort = auditLogPort;
     }
 
     @PreAuthorize(CenterRoles.READ_ROLES)
@@ -177,7 +185,18 @@ public class CenterGroupService {
                 capacity,
                 startDate,
                 endDate);
-        return toGroupView(groupRepository.save(group));
+        CenterGroup saved = groupRepository.save(group);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.CENTER,
+                AuditAction.CENTER_GROUP_CREATED,
+                "CENTER_GROUP",
+                saved.getId(),
+                "Création d'une cohorte de renforcement.",
+                Map.of(
+                        "code", saved.getCode(),
+                        "groupType", saved.getGroupType().name(),
+                        "capacity", saved.getCapacity())));
+        return toGroupView(saved);
     }
 
     @PreAuthorize(CenterRoles.GROUP_MANAGE_ROLES)
@@ -225,7 +244,15 @@ public class CenterGroupService {
         CenterGroup group = requireGroup(groupId);
         validateMutableAcademicYear(group.getAcademicYearId());
         group.activate();
-        return toGroupView(groupRepository.save(group));
+        CenterGroup saved = groupRepository.save(group);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.CENTER,
+                AuditAction.CENTER_GROUP_STATUS_CHANGED,
+                "CENTER_GROUP",
+                saved.getId(),
+                "Activation d'une cohorte de renforcement.",
+                Map.of("code", saved.getCode(), "status", saved.getStatus().name())));
+        return toGroupView(saved);
     }
 
     @PreAuthorize(CenterRoles.GROUP_MANAGE_ROLES)
@@ -235,7 +262,15 @@ public class CenterGroupService {
         schoolGuard.requireActiveSchoolForWrite();
         CenterGroup group = requireGroup(groupId);
         group.complete(reason);
-        return toGroupView(groupRepository.save(group));
+        CenterGroup saved = groupRepository.save(group);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.CENTER,
+                AuditAction.CENTER_GROUP_STATUS_CHANGED,
+                "CENTER_GROUP",
+                saved.getId(),
+                "Clôture d'une cohorte de renforcement.",
+                Map.of("code", saved.getCode(), "status", saved.getStatus().name())));
+        return toGroupView(saved);
     }
 
     @PreAuthorize(CenterRoles.GROUP_MANAGE_ROLES)
@@ -245,7 +280,16 @@ public class CenterGroupService {
         schoolGuard.requireActiveSchoolForWrite();
         CenterGroup group = requireGroup(groupId);
         group.archive(reason, Instant.now());
-        return toGroupView(groupRepository.save(group));
+        CenterGroup saved = groupRepository.save(group);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.warning(
+                AuditCategory.CENTER,
+                AuditAction.CENTER_GROUP_STATUS_CHANGED,
+                AuditOutcome.SUCCESS,
+                "CENTER_GROUP",
+                saved.getId(),
+                "Archivage d'une cohorte de renforcement.",
+                Map.of("code", saved.getCode(), "status", saved.getStatus().name())));
+        return toGroupView(saved);
     }
 
     // --- Affectations d'intervenants ---
@@ -317,7 +361,18 @@ public class CenterGroupService {
         }
         CenterGroupTutor assignment = new CenterGroupTutor(
                 groupId, teacherId, subjectId, leadTutor, hourlyRateXof, startDate, endDate, notes);
-        return new GroupTutorView(groupTutorRepository.save(assignment), teacher);
+        CenterGroupTutor saved = groupTutorRepository.save(assignment);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.CENTER,
+                AuditAction.CENTER_GROUP_TUTOR_ASSIGNED,
+                "CENTER_GROUP_TUTOR",
+                saved.getId(),
+                "Affectation d'un intervenant à une cohorte de renforcement.",
+                Map.of(
+                        "groupId", groupId.toString(),
+                        "teacherId", teacherId.toString(),
+                        "leadTutor", leadTutor)));
+        return new GroupTutorView(saved, teacher);
     }
 
     @PreAuthorize(CenterRoles.GROUP_MANAGE_ROLES)
@@ -426,7 +481,17 @@ public class CenterGroupService {
         LocalDate effectiveDate = enrolledAt != null ? enrolledAt : LocalDate.now();
         CenterGroupEnrollment enrollment = new CenterGroupEnrollment(
                 groupId, studentId, studentPackId, effectiveDate, notes);
-        return new GroupEnrollmentView(enrollmentRepository.save(enrollment), student);
+        CenterGroupEnrollment saved = enrollmentRepository.save(enrollment);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.CENTER,
+                AuditAction.CENTER_GROUP_STUDENT_ENROLLED,
+                "CENTER_GROUP_ENROLLMENT",
+                saved.getId(),
+                "Inscription d'un élève dans une cohorte de renforcement.",
+                Map.of(
+                        "groupId", groupId.toString(),
+                        "studentId", studentId.toString())));
+        return new GroupEnrollmentView(saved, student);
     }
 
     @PreAuthorize(CenterRoles.ENROLLMENT_WRITE_ROLES)

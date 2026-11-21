@@ -5,6 +5,11 @@ import com.ecole.saas.academic.AcademicYearSummary;
 import com.ecole.saas.academic.ClassRoomSummary;
 import com.ecole.saas.academic.ClassSubjectSummary;
 import com.ecole.saas.academic.SubjectSummary;
+import com.ecole.saas.audit.AuditAction;
+import com.ecole.saas.audit.AuditCategory;
+import com.ecole.saas.audit.AuditLogPort;
+import com.ecole.saas.audit.AuditOutcome;
+import com.ecole.saas.audit.AuditRecordCommand;
 import com.ecole.saas.shared.domain.TenantContext;
 import com.ecole.saas.teacher.domain.Teacher;
 import com.ecole.saas.teacher.domain.TeacherAssignment;
@@ -51,16 +56,19 @@ public class TeacherAssignmentService {
     private final TeacherRepository teacherRepository;
     private final AcademicStructurePort academicStructurePort;
     private final TeacherSubscriptionGuard subscriptionGuard;
+    private final AuditLogPort auditLogPort;
 
     public TeacherAssignmentService(
             TeacherAssignmentRepository assignmentRepository,
             TeacherRepository teacherRepository,
             AcademicStructurePort academicStructurePort,
-            TeacherSubscriptionGuard subscriptionGuard) {
+            TeacherSubscriptionGuard subscriptionGuard,
+            AuditLogPort auditLogPort) {
         this.assignmentRepository = assignmentRepository;
         this.teacherRepository = teacherRepository;
         this.academicStructurePort = academicStructurePort;
         this.subscriptionGuard = subscriptionGuard;
+        this.auditLogPort = auditLogPort;
     }
 
     @PreAuthorize(TeacherRoles.BACKOFFICE_READ_ROLES)
@@ -194,6 +202,17 @@ public class TeacherAssignmentService {
                 startDate,
                 endDate,
                 notes));
+        auditLogPort.recordTenantEvent(AuditRecordCommand.success(
+                AuditCategory.TEACHER,
+                AuditAction.TEACHER_ASSIGNMENT_CREATED,
+                "TEACHER_ASSIGNMENT",
+                saved.getId(),
+                "Affectation d'un enseignant à une classe et une matière.",
+                Map.of(
+                        "teacherId", teacherId.toString(),
+                        "classRoomId", classRoomId.toString(),
+                        "subjectId", subjectId.toString(),
+                        "homeroomTeacher", homeroomTeacher)));
         return new AssignmentView(
                 saved,
                 teacher.getEmployeeCode(),
@@ -249,6 +268,17 @@ public class TeacherAssignmentService {
 
         assignment.deactivate(endDate, reason);
         TeacherAssignment saved = assignmentRepository.save(assignment);
+        auditLogPort.recordTenantEvent(AuditRecordCommand.warning(
+                AuditCategory.TEACHER,
+                AuditAction.TEACHER_ASSIGNMENT_DEACTIVATED,
+                AuditOutcome.SUCCESS,
+                "TEACHER_ASSIGNMENT",
+                saved.getId(),
+                "Désactivation d'une affectation enseignant.",
+                Map.of(
+                        "teacherId", saved.getTeacherId().toString(),
+                        "classRoomId", saved.getClassRoomId().toString(),
+                        "subjectId", saved.getSubjectId().toString())));
         Teacher teacher = teacherRepository.findById(saved.getTeacherId()).orElse(null);
         return toView(saved, teacher);
     }
