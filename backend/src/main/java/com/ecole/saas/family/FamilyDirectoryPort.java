@@ -14,7 +14,11 @@ public interface FamilyDirectoryPort {
 
     Optional<FamilySummary> findFamilyById(UUID familyId);
 
+    List<FamilySummary> findFamiliesByCodes(Collection<String> codes);
+
     Optional<GuardianSummary> findGuardianById(UUID guardianId);
+
+    List<GuardianContactSummary> findGuardiansByPhones(Collection<String> phones);
 
     Optional<GuardianContactSummary> findGuardianContactById(UUID guardianId);
 

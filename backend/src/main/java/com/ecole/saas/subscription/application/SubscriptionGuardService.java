@@ -3,6 +3,7 @@ package com.ecole.saas.subscription.application;
 import com.ecole.saas.shared.domain.TenantContext;
 import com.ecole.saas.subscription.QuotaCheckResult;
 import com.ecole.saas.subscription.QuotaResource;
+import com.ecole.saas.subscription.QuotaUsageProvider;
 import com.ecole.saas.subscription.SubscriptionAccessPort;
 import com.ecole.saas.subscription.SubscriptionSnapshot;
 import com.ecole.saas.subscription.domain.Subscription;
@@ -11,6 +12,10 @@ import com.ecole.saas.subscription.infrastructure.SubscriptionPlanRepository;
 import com.ecole.saas.subscription.infrastructure.SubscriptionRepository;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.EnumMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,14 +29,24 @@ public class SubscriptionGuardService implements SubscriptionAccessPort {
 
     private final SubscriptionRepository subscriptionRepository;
     private final SubscriptionPlanRepository planRepository;
+    private final Map<QuotaResource, List<QuotaUsageProvider>> usageProviders;
     private final Clock clock;
 
     public SubscriptionGuardService(
             SubscriptionRepository subscriptionRepository,
             SubscriptionPlanRepository planRepository,
+            List<QuotaUsageProvider> providers,
             Clock clock) {
         this.subscriptionRepository = subscriptionRepository;
         this.planRepository = planRepository;
+        this.usageProviders = new EnumMap<>(QuotaResource.class);
+        if (providers != null) {
+            for (QuotaUsageProvider provider : providers) {
+                this.usageProviders
+                        .computeIfAbsent(provider.resource(), ignored -> new ArrayList<>())
+                        .add(provider);
+            }
+        }
         this.clock = clock;
     }
 
@@ -94,5 +109,23 @@ public class SubscriptionGuardService implements SubscriptionAccessPort {
         Subscription subscription = SubscriptionSupport.findCurrentSubscription(subscriptionRepository)
                 .orElse(null);
         SubscriptionPolicy.assertQuotaAvailable(subscription, resource, currentUsage, requestedAdditional, now);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public long currentUsage(QuotaResource resource) {
+        TenantContext.requireCurrent();
+        if (resource == null) {
+            return 0L;
+        }
+        List<QuotaUsageProvider> providers = usageProviders.get(resource);
+        if (providers == null || providers.isEmpty()) {
+            return 0L;
+        }
+        long total = 0L;
+        for (QuotaUsageProvider provider : providers) {
+            total = Math.addExact(total, Math.max(0L, provider.currentUsageForCurrentTenant()));
+        }
+        return total;
     }
 }

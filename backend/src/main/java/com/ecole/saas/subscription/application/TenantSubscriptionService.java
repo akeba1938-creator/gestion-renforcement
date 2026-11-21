@@ -14,6 +14,7 @@ import com.ecole.saas.subscription.infrastructure.SubscriptionPlanRepository;
 import com.ecole.saas.subscription.infrastructure.SubscriptionRepository;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.EnumMap;
 import java.util.List;
@@ -36,7 +37,7 @@ public class TenantSubscriptionService {
     private final SubscriptionRepository subscriptionRepository;
     private final SubscriptionPlanRepository planRepository;
     private final SubscriptionEventRepository eventRepository;
-    private final Map<QuotaResource, QuotaUsageProvider> usageProviders;
+    private final Map<QuotaResource, List<QuotaUsageProvider>> usageProviders;
     private final Clock clock;
 
     public TenantSubscriptionService(
@@ -51,7 +52,9 @@ public class TenantSubscriptionService {
         this.usageProviders = new EnumMap<>(QuotaResource.class);
         if (providers != null) {
             for (QuotaUsageProvider provider : providers) {
-                this.usageProviders.put(provider.resource(), provider);
+                this.usageProviders
+                        .computeIfAbsent(provider.resource(), ignored -> new ArrayList<>())
+                        .add(provider);
             }
         }
         this.clock = clock;
@@ -108,11 +111,14 @@ public class TenantSubscriptionService {
         };
         int effective = quotas.limitFor(resource);
 
-        QuotaUsageProvider provider = usageProviders.get(resource);
-        if (provider == null) {
+        List<QuotaUsageProvider> providers = usageProviders.get(resource);
+        if (providers == null || providers.isEmpty()) {
             return new QuotaUsageItem(resource, base, extra, effective, null, null, null);
         }
-        long usage = Math.max(0L, provider.currentUsageForCurrentTenant());
+        long usage = 0L;
+        for (QuotaUsageProvider provider : providers) {
+            usage = Math.addExact(usage, Math.max(0L, provider.currentUsageForCurrentTenant()));
+        }
         long remaining = Math.max(0L, (long) effective - usage);
         boolean withinLimit = usage <= effective;
         return new QuotaUsageItem(resource, base, extra, effective, usage, remaining, withinLimit);
