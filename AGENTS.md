@@ -26,6 +26,7 @@ Une tâche n'est pas terminée tant que ces commandes ne passent pas. Indique le
 5. **Architecture** : couches `api / application / domain / infrastructure` ; aucune annotation Spring dans `domain` ; pas d'accès direct aux tables d'un autre module ; entités JPA jamais exposées par l'API.
 6. **Tests** : aucun code accepté sans tests. Pas de H2 pour les tests d'intégration (Testcontainers PostgreSQL).
 7. **Périmètre** : ne développe rien de V2/V3 sans demande explicite (voir `docs/product/roadmap.md`).
+8. **Quality Gate obligatoire** : appliquer systématiquement `.agents/rules/quality-gate.md` à chaque ajout, modification ou suppression de code, migration SQL ou configuration, avant toute fin de tâche (et inclure le récapitulatif **Contrôle Quality Gate : OK / Points vérifiés**).
 
 ## Méthode de travail
 1. Lire la spécification du module (`docs/specs/`). Si elle manque ou est ambiguë, la compléter ou poser la question.
