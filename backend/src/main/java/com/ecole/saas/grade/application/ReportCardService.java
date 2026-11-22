@@ -134,8 +134,7 @@ public class ReportCardService {
         }
 
         List<PeriodReportCard> existingCards = reportCardRepository
-                .findByEvaluationPeriodIdAndClassRoomIdOrderByRankInClassAscStudentIdAsc(
-                        evaluationPeriodId, classRoomId);
+                .findByEvaluationPeriodIdAndClassRoomIdForUpdate(evaluationPeriodId, classRoomId);
         for (PeriodReportCard existing : existingCards) {
             if (existing.getStatus() != ReportCardStatus.DRAFT) {
                 throw new GradeConflictException(
@@ -465,7 +464,7 @@ public class ReportCardService {
         TenantContext.requireCurrent();
         subscriptionGuard.requireWriteAccess();
 
-        PeriodReportCard card = requireReportCard(reportCardId);
+        PeriodReportCard card = requireReportCardForUpdate(reportCardId);
         assertPeriodNotLocked(card.getEvaluationPeriodId());
         card.assertDraft();
         teacherScopeGuard.assertCanAccessClassSubject(card.getClassRoomId(), subjectId);
@@ -491,7 +490,7 @@ public class ReportCardService {
         TenantContext.requireCurrent();
         subscriptionGuard.requireWriteAccess();
 
-        PeriodReportCard card = requireReportCard(reportCardId);
+        PeriodReportCard card = requireReportCardForUpdate(reportCardId);
         assertPeriodNotLocked(card.getEvaluationPeriodId());
         card.assertNotLocked();
 
@@ -514,7 +513,7 @@ public class ReportCardService {
         TenantContext.requireCurrent();
         subscriptionGuard.requireWriteAccess();
 
-        PeriodReportCard card = requireReportCard(reportCardId);
+        PeriodReportCard card = requireReportCardForUpdate(reportCardId);
         assertPeriodNotLocked(card.getEvaluationPeriodId());
         card.validate(actorId, clock.instant());
         PeriodReportCard saved = reportCardRepository.save(card);
@@ -536,7 +535,7 @@ public class ReportCardService {
         TenantContext.requireCurrent();
         subscriptionGuard.requireWriteAccess();
 
-        PeriodReportCard card = requireReportCard(reportCardId);
+        PeriodReportCard card = requireReportCardForUpdate(reportCardId);
         card.lock(actorId, clock.instant());
         PeriodReportCard saved = reportCardRepository.save(card);
         auditLogPort.recordTenantEvent(AuditRecordCommand.critical(
@@ -566,6 +565,12 @@ public class ReportCardService {
 
     private PeriodReportCard requireReportCard(UUID reportCardId) {
         return reportCardRepository.findById(reportCardId)
+                .orElseThrow(() -> new GradeNotFoundException(
+                        "report-card-not-found", "Bulletin introuvable", "Le bulletin de période demandé est introuvable."));
+    }
+
+    private PeriodReportCard requireReportCardForUpdate(UUID reportCardId) {
+        return reportCardRepository.findByIdForUpdate(reportCardId)
                 .orElseThrow(() -> new GradeNotFoundException(
                         "report-card-not-found", "Bulletin introuvable", "Le bulletin de période demandé est introuvable."));
     }

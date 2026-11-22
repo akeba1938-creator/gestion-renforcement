@@ -12,9 +12,9 @@ import com.ecole.saas.communication.infrastructure.MessageDeliveryRepository;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import org.springframework.data.domain.Page;
@@ -96,8 +96,9 @@ public class InAppInboxService {
     @Transactional
     public MessageDelivery markAsRead(UUID currentUserId, UUID deliveryId) {
         subscriptionGuard.requireReadAccess();
-        MessageDelivery delivery = deliveryRepository
-                .findByIdAndRecipientUserIdAndChannel(deliveryId, currentUserId, CommunicationChannel.IN_APP)
+        MessageDelivery delivery = deliveryRepository.findByIdForUpdate(deliveryId)
+                .filter(d -> currentUserId.equals(d.getRecipientUserId())
+                        && d.getChannel() == CommunicationChannel.IN_APP)
                 .orElseThrow(() -> new CommunicationNotFoundException("Notification in-app introuvable."));
         if (delivery.getStatus() == DeliveryStatus.READ) {
             return delivery;
@@ -124,7 +125,7 @@ public class InAppInboxService {
     @Transactional
     public int markAllAsRead(UUID currentUserId) {
         subscriptionGuard.requireReadAccess();
-        List<MessageDelivery> unread = deliveryRepository.findByRecipientUserIdAndChannelAndStatusIn(
+        List<MessageDelivery> unread = deliveryRepository.findByRecipientUserIdAndChannelAndStatusInForUpdate(
                 currentUserId, CommunicationChannel.IN_APP, UNREAD_STATUSES);
         List<MessageDelivery> eligible = unread.stream()
                 .filter(d -> d.getStatus() != DeliveryStatus.QUEUED)
@@ -143,7 +144,7 @@ public class InAppInboxService {
 
         Instant now = clock.instant();
         List<DeliveryEvent> eventsToSave = new ArrayList<>(eligible.size());
-        Map<UUID, int[]> deltasByCampaign = new LinkedHashMap<>();
+        Map<UUID, int[]> deltasByCampaign = new TreeMap<>();
 
         for (MessageDelivery delivery : eligible) {
             DeliveryStatus previous = delivery.markRead(now);
@@ -169,8 +170,10 @@ public class InAppInboxService {
 
         deliveryRepository.saveAll(eligible);
         deliveryEventRepository.saveAll(eventsToSave);
-        deltasByCampaign.forEach((campaignId, deltas) ->
-                campaignRepository.incrementReadCounters(campaignId, deltas[0], deltas[1], deltas[2], now));
+        deltasByCampaign.forEach((campaignId, deltas) -> {
+            campaignRepository.findByIdForUpdate(campaignId);
+            campaignRepository.incrementReadCounters(campaignId, deltas[0], deltas[1], deltas[2], now);
+        });
         return eligible.size();
     }
 
@@ -185,6 +188,7 @@ public class InAppInboxService {
     private void applyReadCounterDelta(UUID campaignId, DeliveryStatus previousStatus, Instant now) {
         int sentDelta = previousStatus == DeliveryStatus.SENT ? -1 : 0;
         int deliveredDelta = previousStatus == DeliveryStatus.DELIVERED ? -1 : 0;
+        campaignRepository.findByIdForUpdate(campaignId);
         campaignRepository.incrementReadCounters(campaignId, sentDelta, deliveredDelta, 1, now);
     }
 }

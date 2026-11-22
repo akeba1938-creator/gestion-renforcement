@@ -301,6 +301,42 @@ class TeacherGradeAttendanceIntegrationTest {
                         .content(json(Map.of("directorAppreciation", "Tentative après verrou"))))
                 .andExpect(status().isConflict());
 
+        // V16 : trigger SQL BEFORE UPDATE OR DELETE sur period_subject_results lorsque le bulletin parent est LOCKED
+        assertThatThrownBy(() -> TenantContext.runWithTenant(TenantId.of(school.getId()), () ->
+                transactionTemplate.executeWithoutResult(status -> {
+                    jdbcTemplate.execute("SET LOCAL ROLE ecole_app");
+                    jdbcTemplate.update(
+                            "UPDATE period_subject_results SET teacher_appreciation = 'Altération SQL' WHERE report_card_id = ?",
+                            cardStu1Id);
+                })))
+                .isInstanceOf(org.springframework.dao.DataAccessException.class);
+
+        assertThatThrownBy(() -> TenantContext.runWithTenant(TenantId.of(school.getId()), () ->
+                transactionTemplate.executeWithoutResult(status -> {
+                    jdbcTemplate.execute("SET LOCAL ROLE ecole_app");
+                    jdbcTemplate.update(
+                            "DELETE FROM period_subject_results WHERE report_card_id = ?",
+                            cardStu1Id);
+                })))
+                .isInstanceOf(org.springframework.dao.DataAccessException.class);
+
+        // V16 : le trigger laisse passer les mises à jour sur un bulletin encore en DRAFT, et @Version s'incrémente
+        UUID cardStu2Id = UUID.fromString(cardStu2.get("id").asString());
+        TenantContext.runWithTenant(TenantId.of(school.getId()), () ->
+                transactionTemplate.executeWithoutResult(status -> {
+                    jdbcTemplate.execute("SET LOCAL ROLE ecole_app");
+                    int updatedDraft = jdbcTemplate.update(
+                            "UPDATE period_subject_results SET teacher_appreciation = 'Draft OK' WHERE report_card_id = ? AND subject_id = ?",
+                            cardStu2Id,
+                            mathId);
+                    assertThat(updatedDraft).isEqualTo(1);
+                    Long lockedVersion = jdbcTemplate.queryForObject(
+                            "SELECT version FROM period_report_cards WHERE id = ?",
+                            Long.class,
+                            cardStu1Id);
+                    assertThat(lockedVersion).isNotNull().isGreaterThan(0L);
+                }));
+
         // 5. Module Attendance : 2 séances d'appel + justification d'une absence + synthèses
         UUID session1Id = createAttendanceSessionViaApi(
                 teacherToken, class3eAId, periodId, mathId, "2026-10-16", "MORNING", "08:00", "10:00", true);
@@ -1040,35 +1076,103 @@ class TeacherGradeAttendanceIntegrationTest {
             }
         }
         assertThat(foundPreservedAppreciation).isTrue();
+
+        // Masquage PII TeacherResponse (nationalIdNumber / hourlyRateXof) et validation rôle TEACHER/TUTOR au lien userId
+        User nonTeachingUser = createTenantUser(schoolA.getId(), "sec.link@ecole.sn", "Mariama", "Diouf", RoleCode.SECRETARY);
+        mockMvc.perform(post("/api/v1/teachers")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(dirTokenA))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "employeeCode", "ENS-BAD-ROLE",
+                                "userId", nonTeachingUser.getId(),
+                                "firstName", "Mariama",
+                                "lastName", "Diouf",
+                                "teacherType", "PERMANENT",
+                                "phone", "+221779990099"))))
+                .andExpect(status().isBadRequest());
+
+        User maskedTeacherUser = createTenantUser(schoolA.getId(), "prof.pii@ecole.sn", "Ousmane", "Fall", RoleCode.TEACHER);
+        MvcResult piiTeacherRes = mockMvc.perform(post("/api/v1/teachers")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(dirTokenA))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "employeeCode", "ENS-PII-01",
+                                "userId", maskedTeacherUser.getId(),
+                                "firstName", "Ousmane",
+                                "lastName", "Fall",
+                                "teacherType", "PART_TIME",
+                                "phone", "+221779990088",
+                                "nationalIdNumber", "CNI-TEACHER-2026",
+                                "hourlyRateXof", 7500L))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.nationalIdNumber").value("CNI-TEACHER-2026"))
+                .andExpect(jsonPath("$.hourlyRateXof").value(7500))
+                .andReturn();
+        UUID piiTeacherId = UUID.fromString(readJson(piiTeacherRes).get("id").asString());
+
+        String secretaryTokenA = tenantTokenForUser(schoolA.getId(), nonTeachingUser.getId(), RoleCode.SECRETARY);
+        String promoterTokenA = tenantToken(schoolA.getId(), RoleCode.PROMOTER);
+        String censorTokenA = tenantToken(schoolA.getId(), RoleCode.CENSOR);
+        String maskedTeacherToken = tenantTokenForUser(schoolA.getId(), maskedTeacherUser.getId(), RoleCode.TEACHER);
+
+        // SECRETARY voit nationalIdNumber mais pas hourlyRateXof
+        mockMvc.perform(get("/api/v1/teachers/" + piiTeacherId)
+                        .header(HttpHeaders.AUTHORIZATION, bearer(secretaryTokenA)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.nationalIdNumber").value("CNI-TEACHER-2026"))
+                .andExpect(jsonPath("$.hourlyRateXof").isEmpty());
+
+        // PROMOTER voit hourlyRateXof mais pas nationalIdNumber
+        mockMvc.perform(get("/api/v1/teachers/" + piiTeacherId)
+                        .header(HttpHeaders.AUTHORIZATION, bearer(promoterTokenA)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.nationalIdNumber").isEmpty())
+                .andExpect(jsonPath("$.hourlyRateXof").value(7500));
+
+        // CENSOR ne voit ni nationalIdNumber ni hourlyRateXof
+        mockMvc.perform(get("/api/v1/teachers/" + piiTeacherId)
+                        .header(HttpHeaders.AUTHORIZATION, bearer(censorTokenA)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.nationalIdNumber").isEmpty())
+                .andExpect(jsonPath("$.hourlyRateXof").isEmpty());
+
+        // /me expose bien les deux champs à l'enseignant lui-même
+        mockMvc.perform(get("/api/v1/teachers/me")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(maskedTeacherToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.nationalIdNumber").value("CNI-TEACHER-2026"))
+                .andExpect(jsonPath("$.hourlyRateXof").value(7500));
     }
 
     // --- Helpers ---
 
     private School createSchool(String prefix, SchoolType type) {
         String code = prefix + "-" + UUID.randomUUID().toString().substring(0, 6).toUpperCase();
-        return schoolService.createSchool(
-                code, "Établissement " + code, type, "+221770000000", "contact@" + code.toLowerCase() + ".sn", "Dakar");
+        return TestSecuritySupport.runAsAdminSaas(() -> schoolService.createSchool(
+                code, "Établissement " + code, type, "+221770000000", "contact@" + code.toLowerCase() + ".sn", "Dakar"));
     }
 
     private void createSubscription(School school, SubscriptionStatus status, Instant endsAt) {
-        SubscriptionPlan plan = subscriptionService.createPlan(
-                "PLAN-" + UUID.randomUUID().toString().substring(0, 6).toUpperCase(),
-                "Forfait Test",
-                25_000L,
-                250_000L,
-                200,
-                50,
-                5_000);
-        Instant startsAt = endsAt.minus(60, ChronoUnit.DAYS);
-        TenantContext.runWithTenant(TenantId.of(school.getId()), () -> subscriptionService.createSubscription(
-                plan.getId(), status, BillingCycle.MONTHLY, startsAt, endsAt));
+        TestSecuritySupport.runAsAdminSaas(() -> {
+            SubscriptionPlan plan = subscriptionService.createPlan(
+                    "PLAN-" + UUID.randomUUID().toString().substring(0, 6).toUpperCase(),
+                    "Forfait Test",
+                    25_000L,
+                    250_000L,
+                    200,
+                    50,
+                    5_000);
+            Instant startsAt = endsAt.minus(60, ChronoUnit.DAYS);
+            TenantContext.runWithTenant(TenantId.of(school.getId()), () -> subscriptionService.createSubscription(
+                    plan.getId(), status, BillingCycle.MONTHLY, startsAt, endsAt));
+        });
     }
 
     private User createTenantUser(UUID schoolId, String email, String firstName, String lastName, RoleCode role) {
-        return TenantContext.executeWithTenant(
+        return TestSecuritySupport.runAsDirector(() -> TenantContext.executeWithTenant(
                 TenantId.of(schoolId),
                 () -> userAccountService.createUserWithRole(
-                        email, "+221770000001", firstName, lastName, "argon2-test-hash", role));
+                        email, "+221770000001", firstName, lastName, "argon2-test-hash", role)));
     }
 
     private UUID createAcademicYearViaApi(String token, String code, String startDate, String endDate) throws Exception {

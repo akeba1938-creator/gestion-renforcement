@@ -15,6 +15,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,6 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
  * {@link SubscriptionPlanService}, {@link PlatformSubscriptionService} et {@link TenantSubscriptionService}.
  */
 @Service
+@PreAuthorize("hasRole('ADMIN_SAAS')")
 public class SubscriptionService {
 
     private final SubscriptionPlanRepository planRepository;

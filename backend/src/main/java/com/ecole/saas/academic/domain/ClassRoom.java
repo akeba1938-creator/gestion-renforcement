@@ -74,12 +74,29 @@ public class ClassRoom extends TenantScopedEntity {
     }
 
     public void update(UUID newGradeLevelId, String newName, String newSeries, String newRoomName, int newCapacity) {
+        update(newGradeLevelId, newName, newSeries, newRoomName, newCapacity, 0L);
+    }
+
+    public void update(
+            UUID newGradeLevelId,
+            String newName,
+            String newSeries,
+            String newRoomName,
+            int newCapacity,
+            long currentActiveEnrollments) {
         assertActive();
+        int validatedCapacity = validateCapacity(newCapacity);
+        if (validatedCapacity < currentActiveEnrollments) {
+            throw new ClassRoomCapacityConflictException(
+                    "La capacité demandée (" + validatedCapacity
+                            + ") est inférieure au nombre d'élèves actuellement inscrits dans la classe ("
+                            + currentActiveEnrollments + ").");
+        }
         this.gradeLevelId = Objects.requireNonNull(newGradeLevelId, "Le niveau est obligatoire.");
         this.name = requireName(newName);
         this.series = normalizeOptional(newSeries, 30, "La série");
         this.roomName = normalizeOptional(newRoomName, 60, "Le nom de la salle");
-        this.capacity = validateCapacity(newCapacity);
+        this.capacity = validatedCapacity;
     }
 
     public void archive() {

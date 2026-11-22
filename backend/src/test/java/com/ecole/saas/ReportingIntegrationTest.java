@@ -623,6 +623,24 @@ class ReportingIntegrationTest {
                                 .andExpect(jsonPath("$.totalElements").value(1))
                                 .andExpect(jsonPath("$.items[0].id").value(teacherSnapId.toString()));
 
+                // Une fois l'affectation de l'enseignant désactivée, listSnapshots ne doit plus exposer son ancien snapshot
+                transactionTemplate.executeWithoutResult(status -> {
+                        jdbcTemplate.execute("SELECT set_config('app.current_tenant_id', '" + school.getId() + "', true)");
+                        jdbcTemplate.update(
+                                        "UPDATE teacher_assignments SET active = false WHERE class_room_id = ?",
+                                        classAId);
+                });
+                mockMvc.perform(get("/api/v1/reporting/snapshots")
+                                .header(HttpHeaders.AUTHORIZATION, bearer(teacherToken)))
+                                .andExpect(status().isOk())
+                                .andExpect(jsonPath("$.totalElements").value(0));
+                transactionTemplate.executeWithoutResult(status -> {
+                        jdbcTemplate.execute("SELECT set_config('app.current_tenant_id', '" + school.getId() + "', true)");
+                        jdbcTemplate.update(
+                                        "UPDATE teacher_assignments SET active = true WHERE class_room_id = ?",
+                                        classAId);
+                });
+
                 // PARENT : accès uniquement à stuA1 (avec finance), refus 403 sur stuA2, stuB1,
                 // academic, financial
                 mockMvc.perform(get("/api/v1/reporting/students/" + stuA1 + "/overview")
@@ -679,9 +697,7 @@ class ReportingIntegrationTest {
                 School expiredSchool = createSchool("RPTEXP", SchoolType.PRIVATE_SCHOOL);
                 createSubscription(expiredSchool, SubscriptionStatus.ACTIVE, Instant.now().minus(2, ChronoUnit.DAYS),
                                 100, 50);
-                User expDir = createTenantUser(expiredSchool.getId(), "dir@rptexp.sn", "Aliou", "Ndiaye",
-                                RoleCode.DIRECTOR);
-                String expDirToken = tenantTokenForUser(expiredSchool.getId(), expDir.getId(), RoleCode.DIRECTOR);
+                String expDirToken = tenantTokenForUser(expiredSchool.getId(), UUID.randomUUID(), RoleCode.DIRECTOR);
 
                 // EXPIRED : lecture et export autorisés (200), génération snapshot refusée
                 // (403)
@@ -704,9 +720,7 @@ class ReportingIntegrationTest {
                 School suspendedSchool = createSchool("RPTSUSP", SchoolType.PRIVATE_SCHOOL);
                 createSubscription(suspendedSchool, SubscriptionStatus.SUSPENDED,
                                 Instant.now().plus(30, ChronoUnit.DAYS), 100, 50);
-                User suspDir = createTenantUser(suspendedSchool.getId(), "dir@rptsusp.sn", "Bamba", "Diop",
-                                RoleCode.DIRECTOR);
-                String suspDirToken = tenantTokenForUser(suspendedSchool.getId(), suspDir.getId(), RoleCode.DIRECTOR);
+                String suspDirToken = tenantTokenForUser(suspendedSchool.getId(), UUID.randomUUID(), RoleCode.DIRECTOR);
 
                 mockMvc.perform(get("/api/v1/reporting/executive")
                                 .header(HttpHeaders.AUTHORIZATION, bearer(suspDirToken)))
@@ -835,31 +849,33 @@ class ReportingIntegrationTest {
 
         private School createSchool(String prefix, SchoolType type) {
                 String code = prefix + "-" + UUID.randomUUID().toString().substring(0, 6).toUpperCase();
-                return schoolService.createSchool(
+                return TestSecuritySupport.runAsAdminSaas(() -> schoolService.createSchool(
                                 code, "École " + code, type, "+221770000000", "contact@" + code.toLowerCase() + ".sn",
-                                "Dakar");
+                                "Dakar"));
         }
 
         private void createSubscription(
                         School school, SubscriptionStatus status, Instant endsAt, int maxStudents, int maxStorageMb) {
-                SubscriptionPlan plan = subscriptionService.createPlan(
-                                "PLAN-" + UUID.randomUUID().toString().substring(0, 6).toUpperCase(),
-                                "Forfait Reporting",
-                                20_000L,
-                                200_000L,
-                                maxStudents,
-                                50,
-                                maxStorageMb);
-                Instant startsAt = endsAt.minus(60, ChronoUnit.DAYS);
-                TenantContext.runWithTenant(TenantId.of(school.getId()), () -> subscriptionService.createSubscription(
-                                plan.getId(), status, BillingCycle.MONTHLY, startsAt, endsAt));
+                TestSecuritySupport.runAsAdminSaas(() -> {
+                        SubscriptionPlan plan = subscriptionService.createPlan(
+                                        "PLAN-" + UUID.randomUUID().toString().substring(0, 6).toUpperCase(),
+                                        "Forfait Reporting",
+                                        20_000L,
+                                        200_000L,
+                                        maxStudents,
+                                        50,
+                                        maxStorageMb);
+                        Instant startsAt = endsAt.minus(60, ChronoUnit.DAYS);
+                        TenantContext.runWithTenant(TenantId.of(school.getId()), () -> subscriptionService.createSubscription(
+                                        plan.getId(), status, BillingCycle.MONTHLY, startsAt, endsAt));
+                });
         }
 
         private User createTenantUser(UUID schoolId, String email, String firstName, String lastName, RoleCode role) {
-                return TenantContext.executeWithTenant(
+                return TestSecuritySupport.runAsDirector(() -> TenantContext.executeWithTenant(
                                 TenantId.of(schoolId),
                                 () -> userAccountService.createUserWithRole(
-                                                email, "+221770000001", firstName, lastName, "argon2-test-hash", role));
+                                                email, "+221770000001", firstName, lastName, "argon2-test-hash", role)));
         }
 
         private void linkUserToGuardian(UUID schoolId, UUID guardianId, UUID userId) {

@@ -159,8 +159,10 @@ class AuditIntegrationTest {
         // 2. Authentification : échec puis succès sans exposer le mot de passe
         String rawPassword = "MotDePasseTresSecret!2026";
         String userEmail = "sec-" + shortCode().toLowerCase() + "@audit-ecole.sn";
-        TenantContext.runWithTenant(TenantId.of(schoolId), () -> userAccountService.createUserWithRole(
-                userEmail, "+221772220001", "Awa", "Diallo", passwordHasher.hash(rawPassword), RoleCode.SECRETARY));
+        TestSecuritySupport.runAsDirector(() -> TenantContext.executeWithTenant(
+                TenantId.of(schoolId),
+                () -> userAccountService.createUserWithRole(
+                        userEmail, "+221772220001", "Awa", "Diallo", passwordHasher.hash(rawPassword), RoleCode.SECRETARY)));
 
         mockMvc.perform(post("/api/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -501,6 +503,34 @@ class AuditIntegrationTest {
     void shouldEnforceMultiTenantIsolationPostgresqlRlsAndStrictImmutability() throws Exception {
         School schoolA = createSchool("ISOA", SchoolType.PRIVATE_SCHOOL);
         School schoolB = createSchool("ISOB", SchoolType.TUTORING_CENTER);
+        createActiveSubscription(schoolA);
+        createActiveSubscription(schoolB);
+
+        // Garde d'abonnement sur /api/v1/audit/** : SUSPENDED bloqué (403), EXPIRED autorisé en lecture (200)
+        School suspendedAuditSchool = createSchool("AUDSUSP", SchoolType.PRIVATE_SCHOOL);
+        SubscriptionPlan suspPlan = TestSecuritySupport.runAsAdminSaas(() -> subscriptionService.createPlan(
+                "AUDSUSP-" + shortCode(), "Forfait Audit Susp", 20_000L, 200_000L, 100, 10, 1_024));
+        Instant nowAudit = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+        TestSecuritySupport.runAsAdminSaas(() -> TenantContext.runWithTenant(
+                TenantId.of(suspendedAuditSchool.getId()),
+                () -> subscriptionService.createSubscription(
+                        suspPlan.getId(), SubscriptionStatus.SUSPENDED, BillingCycle.MONTHLY, nowAudit.minus(1, ChronoUnit.DAYS), nowAudit.plus(30, ChronoUnit.DAYS))));
+        String suspAuditToken = tenantToken(suspendedAuditSchool.getId(), RoleCode.DIRECTOR);
+        mockMvc.perform(get("/api/v1/audit/logs").header(HttpHeaders.AUTHORIZATION, bearer(suspAuditToken)))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/audit/summary").header(HttpHeaders.AUTHORIZATION, bearer(suspAuditToken)))
+                .andExpect(status().isForbidden());
+
+        School expiredAuditSchool = createSchool("AUDEXP", SchoolType.PRIVATE_SCHOOL);
+        TestSecuritySupport.runAsAdminSaas(() -> TenantContext.runWithTenant(
+                TenantId.of(expiredAuditSchool.getId()),
+                () -> subscriptionService.createSubscription(
+                        suspPlan.getId(), SubscriptionStatus.ACTIVE, BillingCycle.MONTHLY, nowAudit.minus(40, ChronoUnit.DAYS), nowAudit.minus(2, ChronoUnit.DAYS))));
+        String expAuditToken = tenantToken(expiredAuditSchool.getId(), RoleCode.DIRECTOR);
+        mockMvc.perform(get("/api/v1/audit/logs").header(HttpHeaders.AUTHORIZATION, bearer(expAuditToken)))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/audit/summary").header(HttpHeaders.AUTHORIZATION, bearer(expAuditToken)))
+                .andExpect(status().isOk());
 
         UUID resA = UUID.randomUUID();
         UUID resB = UUID.randomUUID();
@@ -644,6 +674,7 @@ class AuditIntegrationTest {
     @Test
     void shouldSanitizeSensitiveMetadataBeforePersistence() throws Exception {
         School school = createSchool("SAN", SchoolType.PRIVATE_SCHOOL);
+        createActiveSubscription(school);
         String jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyIn0.signatureValide123456";
         UUID resourceId = UUID.randomUUID();
 
@@ -731,16 +762,18 @@ class AuditIntegrationTest {
 
     private School createSchool(String prefix, SchoolType type) {
         String code = prefix + "-" + shortCode();
-        return schoolService.createSchool(
-                code, "Établissement " + code, type, "+221770001122", code.toLowerCase() + "@ecole.sn", "Dakar");
+        return TestSecuritySupport.runAsAdminSaas(() -> schoolService.createSchool(
+                code, "Établissement " + code, type, "+221770001122", code.toLowerCase() + "@ecole.sn", "Dakar"));
     }
 
     private void createActiveSubscription(School school) {
-        SubscriptionPlan plan = subscriptionService.createPlan(
-                "PLAN-" + shortCode(), "Forfait Test", 25_000L, 250_000L, 500, 30, 5_120);
-        Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS);
-        TenantContext.runWithTenant(TenantId.of(school.getId()), () -> subscriptionService.createSubscription(
-                plan.getId(), SubscriptionStatus.ACTIVE, BillingCycle.MONTHLY, now, now.plus(30, ChronoUnit.DAYS)));
+        TestSecuritySupport.runAsAdminSaas(() -> {
+            SubscriptionPlan plan = subscriptionService.createPlan(
+                    "PLAN-" + shortCode(), "Forfait Test", 25_000L, 250_000L, 500, 30, 5_120);
+            Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+            TenantContext.runWithTenant(TenantId.of(school.getId()), () -> subscriptionService.createSubscription(
+                    plan.getId(), SubscriptionStatus.ACTIVE, BillingCycle.MONTHLY, now, now.plus(30, ChronoUnit.DAYS)));
+        });
     }
 
     private String tenantToken(UUID tenantId, RoleCode role) {

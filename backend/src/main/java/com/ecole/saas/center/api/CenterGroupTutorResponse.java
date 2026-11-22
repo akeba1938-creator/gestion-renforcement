@@ -24,6 +24,10 @@ public record CenterGroupTutorResponse(
         Instant updatedAt) {
 
     static CenterGroupTutorResponse from(CenterGroupService.GroupTutorView view) {
+        return from(view, false);
+    }
+
+    static CenterGroupTutorResponse from(CenterGroupService.GroupTutorView view, boolean includeHourlyRate) {
         CenterGroupTutor assignment = view.assignment();
         return new CenterGroupTutorResponse(
                 assignment.getId(),
@@ -34,7 +38,7 @@ public record CenterGroupTutorResponse(
                 view.teacher() != null ? view.teacher().lastName() : null,
                 assignment.getSubjectId(),
                 assignment.isLeadTutor(),
-                assignment.getHourlyRateXof(),
+                includeHourlyRate ? assignment.getHourlyRateXof() : null,
                 assignment.getStartDate(),
                 assignment.getEndDate(),
                 assignment.isActive(),

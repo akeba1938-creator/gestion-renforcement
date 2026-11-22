@@ -253,6 +253,39 @@ class FinanceIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("REJECTED"));
 
+        // V16 : cumul des demandes PENDING_APPROVAL soustrait du solde disponible dès requestAdjustment
+        MvcResult pendingAdjRes = mockMvc.perform(post("/api/v1/finance/invoices/" + invoiceId + "/adjustments")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(secretaryToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "adjustmentType", "DISCOUNT",
+                                "calculationMode", "FIXED_AMOUNT",
+                                "fixedAmountXof", 50_000L,
+                                "reason", "Première remise en attente"))))
+                .andExpect(status().isCreated())
+                .andReturn();
+        UUID pendingAdjId = UUID.fromString(readJson(pendingAdjRes).get("id").asString());
+
+        // Solde = 80 000, en attente = 50 000 -> disponible = 30 000 ; une demande de 35 000 doit être refusée (409)
+        mockMvc.perform(post("/api/v1/finance/invoices/" + invoiceId + "/adjustments")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(secretaryToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "adjustmentType", "DISCOUNT",
+                                "calculationMode", "FIXED_AMOUNT",
+                                "fixedAmountXof", 35_000L,
+                                "reason", "Seconde remise dépassant le solde disponible"))))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type").value("urn:ecole:problem:adjustment-exceeds-balance"));
+
+        // Rejet de la demande temporaire pour laisser le solde intact pour la suite du scénario
+        mockMvc.perform(post("/api/v1/finance/adjustments/" + pendingAdjId + "/reject")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(promoterToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("decisionNote", "Nettoyage test cumul pending"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("REJECTED"));
+
         // 5. Encaissement espèces partiel (50 000) par CASHIER + test d'idempotence + conflit idempotence
         MvcResult cashPayRes = mockMvc.perform(post("/api/v1/finance/payments")
                         .header(HttpHeaders.AUTHORIZATION, bearer(cashierToken))
@@ -1113,6 +1146,45 @@ class FinanceIntegrationTest {
                 .andExpect(jsonPath("$.discrepancyXof").value(-2_000));
     }
 
+    @Test
+    void shouldResetBalanceAndRejectPendingAdjustmentsWhenCancellingInvoice() throws Exception {
+        School school = createSchool("FIN-CANCEL", SchoolType.PRIVATE_SCHOOL);
+        createActiveSubscription(school, 50);
+        String directorToken = tenantToken(school.getId(), RoleCode.DIRECTOR);
+        String cashierToken = tenantToken(school.getId(), RoleCode.CASHIER);
+
+        Fixture fixture = createIssuedInvoiceFixture(school, directorToken, 80_000L);
+
+        // Demander une remise en attente d'approbation sur la facture émise
+        MvcResult adjRes = mockMvc.perform(post("/api/v1/finance/invoices/" + fixture.invoiceId() + "/adjustments")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(cashierToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "adjustmentType", "DISCOUNT",
+                                "calculationMode", "FIXED_AMOUNT",
+                                "fixedAmountXof", 15_000L,
+                                "reason", "Demande de remise avant annulation"))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("PENDING_APPROVAL"))
+                .andReturn();
+        UUID adjustmentId = UUID.fromString(readJson(adjRes).get("id").asString());
+
+        // Annuler la facture -> balanceXof passe à 0 et la demande PENDING_APPROVAL est automatiquement REJECTED
+        mockMvc.perform(post("/api/v1/finance/invoices/" + fixture.invoiceId() + "/cancel")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(directorToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("reason", "Désinscription confirmée avant paiement"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.invoice.status").value("CANCELLED"))
+                .andExpect(jsonPath("$.invoice.balanceXof").value(0));
+
+        mockMvc.perform(get("/api/v1/finance/adjustments/" + adjustmentId)
+                        .header(HttpHeaders.AUTHORIZATION, bearer(directorToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("REJECTED"))
+                .andExpect(jsonPath("$.decisionNote").value(org.hamcrest.Matchers.containsString("Rejet automatique")));
+    }
+
     private int recordPaymentConcurrently(
             String token,
             UUID invoiceId,
@@ -1264,10 +1336,12 @@ class FinanceIntegrationTest {
 
     private void createSubscriptionWithStatus(
             School school, SubscriptionStatus status, Instant startsAt, Instant endsAt, int maxStudents) {
-        SubscriptionPlan plan = subscriptionService.createPlan(
-                uniqueCode("PLAN"), "Forfait Finance", 25_000L, 250_000L, maxStudents, 20, 2_048);
-        TenantContext.runWithTenant(TenantId.of(school.getId()), () ->
-                subscriptionService.createSubscription(plan.getId(), status, BillingCycle.MONTHLY, startsAt, endsAt));
+        TestSecuritySupport.runAsAdminSaas(() -> {
+            SubscriptionPlan plan = subscriptionService.createPlan(
+                    uniqueCode("PLAN"), "Forfait Finance", 25_000L, 250_000L, maxStudents, 20, 2_048);
+            TenantContext.runWithTenant(TenantId.of(school.getId()), () ->
+                    subscriptionService.createSubscription(plan.getId(), status, BillingCycle.MONTHLY, startsAt, endsAt));
+        });
     }
 
     private void activateAcademicYear(String token, UUID yearId) throws Exception {
@@ -1426,8 +1500,8 @@ class FinanceIntegrationTest {
 
     private School createSchool(String prefix, SchoolType type) {
         String code = uniqueCode(prefix);
-        return schoolService.createSchool(
-                code, "Établissement " + code, type, "+221770000000", "contact@" + code.toLowerCase() + ".sn", "Dakar");
+        return TestSecuritySupport.runAsAdminSaas(() -> schoolService.createSchool(
+                code, "Établissement " + code, type, "+221770000000", "contact@" + code.toLowerCase() + ".sn", "Dakar"));
     }
 
     private String platformAdminToken() {

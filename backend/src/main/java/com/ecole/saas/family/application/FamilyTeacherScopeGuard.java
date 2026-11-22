@@ -1,5 +1,6 @@
 package com.ecole.saas.family.application;
 
+import com.ecole.saas.center.CenterDirectoryPort;
 import com.ecole.saas.family.domain.FamilyAccessForbiddenException;
 import com.ecole.saas.family.domain.Guardian;
 import com.ecole.saas.family.domain.StudentGuardianLink;
@@ -7,7 +8,10 @@ import com.ecole.saas.family.infrastructure.GuardianRepository;
 import com.ecole.saas.family.infrastructure.StudentGuardianLinkRepository;
 import com.ecole.saas.student.StudentDirectoryPort;
 import com.ecole.saas.teacher.TeacherDirectoryPort;
+import com.ecole.saas.teacher.TeacherSummary;
+import java.util.HashSet;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -40,16 +44,19 @@ class FamilyTeacherScopeGuard {
             "ROLE_SECRETARY");
 
     private final TeacherDirectoryPort teacherDirectoryPort;
+    private final CenterDirectoryPort centerDirectoryPort;
     private final StudentDirectoryPort studentDirectoryPort;
     private final StudentGuardianLinkRepository linkRepository;
     private final GuardianRepository guardianRepository;
 
     FamilyTeacherScopeGuard(
             TeacherDirectoryPort teacherDirectoryPort,
+            CenterDirectoryPort centerDirectoryPort,
             StudentDirectoryPort studentDirectoryPort,
             StudentGuardianLinkRepository linkRepository,
             GuardianRepository guardianRepository) {
         this.teacherDirectoryPort = teacherDirectoryPort;
+        this.centerDirectoryPort = centerDirectoryPort;
         this.studentDirectoryPort = studentDirectoryPort;
         this.linkRepository = linkRepository;
         this.guardianRepository = guardianRepository;
@@ -79,11 +86,31 @@ class FamilyTeacherScopeGuard {
     }
 
     Set<UUID> resolveVisibleStudentIds() {
+        Set<UUID> visible = new HashSet<>();
         Set<UUID> classRoomIds = resolveAssignedClassRoomIds();
-        if (classRoomIds.isEmpty()) {
+        if (!classRoomIds.isEmpty()) {
+            visible.addAll(studentDirectoryPort.findActiveStudentIdsByClassRooms(classRoomIds));
+        }
+        if (currentAuthorities().contains("ROLE_TUTOR")) {
+            visible.addAll(resolveTutorCohortStudentIds());
+        }
+        return Set.copyOf(visible);
+    }
+
+    private Set<UUID> resolveTutorCohortStudentIds() {
+        UUID userId = extractCurrentUserId();
+        if (userId == null) {
             return Set.of();
         }
-        return studentDirectoryPort.findActiveStudentIdsByClassRooms(classRoomIds);
+        Optional<TeacherSummary> teacherOpt = teacherDirectoryPort.findTeacherByUserId(userId);
+        if (teacherOpt.isEmpty()) {
+            return Set.of();
+        }
+        Set<UUID> groupIds = centerDirectoryPort.findAssignedGroupIdsByTeacherId(teacherOpt.get().id());
+        if (groupIds.isEmpty()) {
+            return Set.of();
+        }
+        return centerDirectoryPort.findActiveStudentIdsByGroupIds(groupIds);
     }
 
     Set<UUID> resolveVisibleGuardianIds() {
@@ -112,10 +139,13 @@ class FamilyTeacherScopeGuard {
             return;
         }
         Set<UUID> classRoomIds = resolveAssignedClassRoomIds();
-        if (classRoomIds.isEmpty()
-                || !studentDirectoryPort.isStudentActivelyEnrolledInAnyClass(studentId, classRoomIds)) {
+        boolean inAssignedClass = !classRoomIds.isEmpty()
+                && studentDirectoryPort.isStudentActivelyEnrolledInAnyClass(studentId, classRoomIds);
+        boolean inTutorCohort = currentAuthorities().contains("ROLE_TUTOR")
+                && resolveTutorCohortStudentIds().contains(studentId);
+        if (!inAssignedClass && !inTutorCohort) {
             throw new FamilyAccessForbiddenException(
-                    "Vous ne pouvez consulter que les tuteurs des élèves inscrits dans vos classes affectées.");
+                    "Vous ne pouvez consulter que les tuteurs des élèves inscrits dans vos classes ou cohortes affectées.");
         }
     }
 

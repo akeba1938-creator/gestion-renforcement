@@ -839,6 +839,40 @@ class SchoolDocsIntegrationTest {
                                 "body", "Ne doit pas passer le quota de 1 Mo."))))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.type").value("urn:ecole:problem:subscription-quota-exceeded"));
+
+        // 4. Quota STORAGE_MB inter-modules : un snapshot reporting de 1 Mo sature déjà le plafond de 1 Mo pour schooldocs
+        School crossQuotaSchool = createSchool("DOCXQT", SchoolType.PRIVATE_SCHOOL);
+        createSubscription(crossQuotaSchool, SubscriptionStatus.ACTIVE, Instant.now().plus(30, ChronoUnit.DAYS), 1);
+        User dirCross = createTenantUser(crossQuotaSchool.getId(), "dir@docxqt.sn", "Dir", "Cross", RoleCode.DIRECTOR);
+        String dirCrossToken = tenantTokenForUser(crossQuotaSchool.getId(), dirCross.getId(), RoleCode.DIRECTOR);
+        UUID studentCross = createStudentViaApi(dirCrossToken, "Aissatou", "Fall", "FEMALE", null, null);
+
+        MvcResult crossSnapRes = mockMvc.perform(post("/api/v1/reporting/snapshots")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(dirCrossToken))
+                        .header("Idempotency-Key", "cross-quota-snap-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("reportType", "OPERATIONS", "outputFormat", "JSON"))))
+                .andExpect(status().isCreated())
+                .andReturn();
+        UUID crossSnapId = UUID.fromString(readJson(crossSnapRes).get("id").asString());
+        transactionTemplate.executeWithoutResult(status -> {
+            jdbcTemplate.execute("SELECT set_config('app.current_tenant_id', '" + crossQuotaSchool.getId() + "', true)");
+            jdbcTemplate.update(
+                    "UPDATE reporting_snapshots SET file_size_bytes = 1048576 WHERE id = ?",
+                    crossSnapId);
+        });
+
+        mockMvc.perform(post("/api/v1/schooldocs/documents")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(dirCrossToken))
+                        .header("Idempotency-Key", "cross-quota-doc-blocked")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "documentType", "SCHOOLING_CERTIFICATE",
+                                "studentId", studentCross,
+                                "title", "Bloqué par quota global",
+                                "body", "Doit être refusé car reporting consomme déjà 1 Mo sur 1 Mo."))))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type").value("urn:ecole:problem:subscription-quota-exceeded"));
     }
 
     @Test
@@ -1015,29 +1049,31 @@ class SchoolDocsIntegrationTest {
 
     private School createSchool(String prefix, SchoolType type) {
         String code = prefix + "-" + UUID.randomUUID().toString().substring(0, 6).toUpperCase();
-        return schoolService.createSchool(
-                code, "École " + code, type, "+221770000000", "contact@" + code.toLowerCase() + ".sn", "Dakar");
+        return TestSecuritySupport.runAsAdminSaas(() -> schoolService.createSchool(
+                code, "École " + code, type, "+221770000000", "contact@" + code.toLowerCase() + ".sn", "Dakar"));
     }
 
     private void createSubscription(School school, SubscriptionStatus status, Instant endsAt, int maxStorageMb) {
-        SubscriptionPlan plan = subscriptionService.createPlan(
-                "PLAN-" + UUID.randomUUID().toString().substring(0, 6).toUpperCase(),
-                "Forfait Docs",
-                20_000L,
-                200_000L,
-                200,
-                50,
-                maxStorageMb);
-        Instant startsAt = endsAt.minus(60, ChronoUnit.DAYS);
-        TenantContext.runWithTenant(TenantId.of(school.getId()), () -> subscriptionService.createSubscription(
-                plan.getId(), status, BillingCycle.MONTHLY, startsAt, endsAt));
+        TestSecuritySupport.runAsAdminSaas(() -> {
+            SubscriptionPlan plan = subscriptionService.createPlan(
+                    "PLAN-" + UUID.randomUUID().toString().substring(0, 6).toUpperCase(),
+                    "Forfait Docs",
+                    20_000L,
+                    200_000L,
+                    200,
+                    50,
+                    maxStorageMb);
+            Instant startsAt = endsAt.minus(60, ChronoUnit.DAYS);
+            TenantContext.runWithTenant(TenantId.of(school.getId()), () -> subscriptionService.createSubscription(
+                    plan.getId(), status, BillingCycle.MONTHLY, startsAt, endsAt));
+        });
     }
 
     private User createTenantUser(UUID schoolId, String email, String firstName, String lastName, RoleCode role) {
-        return TenantContext.executeWithTenant(
+        return TestSecuritySupport.runAsDirector(() -> TenantContext.executeWithTenant(
                 TenantId.of(schoolId),
                 () -> userAccountService.createUserWithRole(
-                        email, "+221770000001", firstName, lastName, "argon2-test-hash", role));
+                        email, "+221770000001", firstName, lastName, "argon2-test-hash", role)));
     }
 
     private void linkUserToGuardian(UUID schoolId, UUID guardianId, UUID userId) {

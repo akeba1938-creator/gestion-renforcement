@@ -272,12 +272,36 @@ public class ReportSnapshotService {
         if (scope.allowedReportTypes().isEmpty()) {
             return Page.empty(pageable);
         }
+        if ((scope.mode() == ScopeMode.PARENT_STUDENTS || scope.mode() == ScopeMode.SELF_STUDENT)
+                && scope.studentIds().isEmpty()) {
+            return Page.empty(pageable);
+        }
+        if (scope.mode() == ScopeMode.TEACHER_CLASSES
+                && scope.classRoomIds().isEmpty()
+                && scope.studentIds().isEmpty()) {
+            return Page.empty(pageable);
+        }
 
         Specification<ReportSnapshot> spec = (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
             predicates.add(root.get("reportType").in(scope.allowedReportTypes()));
             if (scope.ownSnapshotsOnly()) {
                 predicates.add(cb.equal(root.get("generatedBy"), actorUserId));
+            }
+            if (scope.mode() == ScopeMode.TEACHER_CLASSES) {
+                List<Predicate> scopeBranches = new ArrayList<>();
+                if (!scope.classRoomIds().isEmpty()) {
+                    scopeBranches.add(root.get("classRoomId").in(scope.classRoomIds()));
+                    scopeBranches.add(cb.and(
+                            cb.isNull(root.get("classRoomId")),
+                            cb.isNull(root.get("studentId"))));
+                }
+                if (!scope.studentIds().isEmpty()) {
+                    scopeBranches.add(root.get("studentId").in(scope.studentIds()));
+                }
+                predicates.add(cb.or(scopeBranches.toArray(Predicate[]::new)));
+            } else if (scope.mode() == ScopeMode.PARENT_STUDENTS || scope.mode() == ScopeMode.SELF_STUDENT) {
+                predicates.add(root.get("studentId").in(scope.studentIds()));
             }
             if (reportType != null) {
                 predicates.add(cb.equal(root.get("reportType"), reportType));

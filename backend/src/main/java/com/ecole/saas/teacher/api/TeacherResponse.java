@@ -31,6 +31,10 @@ public record TeacherResponse(
         Instant updatedAt) {
 
     public static TeacherResponse from(Teacher teacher) {
+        return from(teacher, false, false);
+    }
+
+    public static TeacherResponse from(Teacher teacher, boolean includeNationalId, boolean includeHourlyRate) {
         return new TeacherResponse(
                 teacher.getId(),
                 teacher.getEmployeeCode(),
@@ -43,9 +47,9 @@ public record TeacherResponse(
                 teacher.getSecondaryPhone(),
                 teacher.getEmail(),
                 teacher.getAddress(),
-                teacher.getNationalIdNumber(),
+                includeNationalId ? teacher.getNationalIdNumber() : null,
                 teacher.getHireDate(),
-                teacher.getHourlyRateXof(),
+                includeHourlyRate ? teacher.getHourlyRateXof() : null,
                 teacher.getStatus(),
                 teacher.getStatusReason(),
                 teacher.getArchivedAt(),

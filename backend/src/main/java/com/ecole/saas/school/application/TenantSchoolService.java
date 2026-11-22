@@ -8,6 +8,7 @@ import com.ecole.saas.school.domain.GradingPeriodSystem;
 import com.ecole.saas.school.domain.School;
 import com.ecole.saas.school.domain.SchoolNotFoundException;
 import com.ecole.saas.school.infrastructure.SchoolRepository;
+import com.ecole.saas.shared.application.SubscriptionGatePort;
 import com.ecole.saas.shared.domain.TenantContext;
 import java.util.Map;
 import java.util.UUID;
@@ -23,10 +24,15 @@ import org.springframework.transaction.annotation.Transactional;
 public class TenantSchoolService {
 
     private final SchoolRepository schoolRepository;
+    private final SubscriptionGatePort subscriptionGatePort;
     private final AuditLogPort auditLogPort;
 
-    public TenantSchoolService(SchoolRepository schoolRepository, AuditLogPort auditLogPort) {
+    public TenantSchoolService(
+            SchoolRepository schoolRepository,
+            SubscriptionGatePort subscriptionGatePort,
+            AuditLogPort auditLogPort) {
         this.schoolRepository = schoolRepository;
+        this.subscriptionGatePort = subscriptionGatePort;
         this.auditLogPort = auditLogPort;
     }
 
@@ -34,6 +40,7 @@ public class TenantSchoolService {
     @Transactional(readOnly = true)
     public School getCurrentSchool() {
         UUID tenantId = TenantContext.requireCurrent().value();
+        subscriptionGatePort.assertReadAllowed();
         return schoolRepository.findById(tenantId)
                 .orElseThrow(() -> new SchoolNotFoundException("Établissement introuvable."));
     }
@@ -56,6 +63,7 @@ public class TenantSchoolService {
             GradingPeriodSystem gradingPeriodSystem,
             Integer gradingScale) {
         UUID tenantId = TenantContext.requireCurrent().value();
+        subscriptionGatePort.requireOperationalSubscription();
         School school = schoolRepository.findById(tenantId)
                 .orElseThrow(() -> new SchoolNotFoundException("Établissement introuvable."));
         school.updateTenantProfile(

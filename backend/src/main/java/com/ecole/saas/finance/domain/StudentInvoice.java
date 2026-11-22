@@ -246,6 +246,7 @@ public class StudentInvoice extends TenantScopedEntity {
         this.cancellationReason = requireNonBlank(reason, "Le motif d'annulation est obligatoire.", 255);
         this.cancelledAt = Objects.requireNonNull(cancelledAt, "La date d'annulation est obligatoire.");
         this.cancelledBy = Objects.requireNonNull(actorId, "L'auteur de l'annulation est obligatoire.");
+        this.balanceXof = 0L;
         this.status = InvoiceStatus.CANCELLED;
         return wasIssued;
     }

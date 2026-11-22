@@ -9,6 +9,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
@@ -61,6 +62,10 @@ public class AttendanceRecord extends TenantScopedEntity {
 
     @Column(name = "updated_by")
     private UUID updatedBy;
+
+    @Version
+    @Column(name = "version", nullable = false)
+    private long version;
 
     protected AttendanceRecord() {
     }
@@ -184,6 +189,10 @@ public class AttendanceRecord extends TenantScopedEntity {
 
     public UUID getUpdatedBy() {
         return updatedBy;
+    }
+
+    public long getVersion() {
+        return version;
     }
 
     private static String normalizeNotes(String notes) {

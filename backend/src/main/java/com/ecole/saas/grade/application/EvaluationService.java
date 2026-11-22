@@ -282,7 +282,7 @@ public class EvaluationService {
         TenantContext.requireCurrent();
         subscriptionGuard.requireWriteAccess();
 
-        Evaluation evaluation = requireEvaluation(evaluationId);
+        Evaluation evaluation = requireEvaluationForUpdate(evaluationId);
         teacherScopeGuard.assertCanAccessClassSubject(evaluation.getClassRoomId(), evaluation.getSubjectId());
 
         EvaluationPeriodSummary period = requirePeriod(evaluation.getEvaluationPeriodId());
@@ -320,7 +320,7 @@ public class EvaluationService {
         TenantContext.requireCurrent();
         subscriptionGuard.requireWriteAccess();
 
-        Evaluation evaluation = requireEvaluation(evaluationId);
+        Evaluation evaluation = requireEvaluationForUpdate(evaluationId);
         EvaluationPeriodSummary period = requirePeriod(evaluation.getEvaluationPeriodId());
         assertPeriodOpenForGrading(period);
 
@@ -344,7 +344,7 @@ public class EvaluationService {
         TenantContext.requireCurrent();
         subscriptionGuard.requireWriteAccess();
 
-        Evaluation evaluation = requireEvaluation(evaluationId);
+        Evaluation evaluation = requireEvaluationForUpdate(evaluationId);
         EvaluationPeriodSummary period = requirePeriod(evaluation.getEvaluationPeriodId());
         if ("LOCKED".equals(period.status())) {
             throw new EvaluationPeriodClosedException(
@@ -372,7 +372,7 @@ public class EvaluationService {
         TenantContext.requireCurrent();
         subscriptionGuard.requireWriteAccess();
 
-        Evaluation evaluation = requireEvaluation(evaluationId);
+        Evaluation evaluation = requireEvaluationForUpdate(evaluationId);
         teacherScopeGuard.assertCanAccessClassSubject(evaluation.getClassRoomId(), evaluation.getSubjectId());
 
         EvaluationPeriodSummary period = requirePeriod(evaluation.getEvaluationPeriodId());
@@ -417,7 +417,7 @@ public class EvaluationService {
             throw new GradeValidationException("Au moins une note doit être fournie pour la saisie.");
         }
 
-        Evaluation evaluation = requireEvaluation(evaluationId);
+        Evaluation evaluation = requireEvaluationForUpdate(evaluationId);
         teacherScopeGuard.assertCanAccessClassSubject(evaluation.getClassRoomId(), evaluation.getSubjectId());
 
         EvaluationPeriodSummary period = requirePeriod(evaluation.getEvaluationPeriodId());
@@ -548,6 +548,11 @@ public class EvaluationService {
 
     private Evaluation requireEvaluation(UUID evaluationId) {
         return evaluationRepository.findById(evaluationId)
+                .orElseThrow(() -> new GradeNotFoundException("Évaluation introuvable."));
+    }
+
+    private Evaluation requireEvaluationForUpdate(UUID evaluationId) {
+        return evaluationRepository.findByIdForUpdate(evaluationId)
                 .orElseThrow(() -> new GradeNotFoundException("Évaluation introuvable."));
     }
 

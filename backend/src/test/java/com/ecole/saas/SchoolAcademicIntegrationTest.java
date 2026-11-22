@@ -173,6 +173,11 @@ class SchoolAcademicIntegrationTest {
                 .andExpect(jsonPath("$.totalElements").value(1))
                 .andExpect(jsonPath("$.content[0].id").value(centerId.toString()));
 
+        // Provisionner un abonnement actif avant les appels tenant sur /api/v1/school
+        Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+        provisionSubscription(schoolId, SubscriptionStatus.ACTIVE, now.minus(1, ChronoUnit.DAYS), now.plus(365, ChronoUnit.DAYS));
+        provisionSubscription(centerId, SubscriptionStatus.ACTIVE, now.minus(1, ChronoUnit.DAYS), now.plus(365, ChronoUnit.DAYS));
+
         // Consultation et mise à jour du profil côté établissement par DIRECTOR / CENTER_MANAGER
         String directorToken = tenantToken(schoolId, RoleCode.DIRECTOR);
         String centerManagerToken = tenantToken(centerId, RoleCode.CENTER_MANAGER);
@@ -883,6 +888,15 @@ class SchoolAcademicIntegrationTest {
         School noSubSchool = createSchoolWithoutSubscription("NO-SUB-ACAD", SchoolType.PRIVATE_SCHOOL);
         String noSubDirector = tenantToken(noSubSchool.getId(), RoleCode.DIRECTOR);
 
+        mockMvc.perform(get("/api/v1/school")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(noSubDirector)))
+                .andExpect(status().isForbidden())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
+        mockMvc.perform(put("/api/v1/school")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(noSubDirector))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("name", "Modif sans abonnement"))))
+                .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/academic/years")
                         .header(HttpHeaders.AUTHORIZATION, bearer(noSubDirector)))
                 .andExpect(status().isForbidden())
@@ -902,6 +916,14 @@ class SchoolAcademicIntegrationTest {
                 Instant.now().minus(1, ChronoUnit.DAYS));
         String expiredDirector = tenantToken(expiredSchool.getId(), RoleCode.DIRECTOR);
 
+        mockMvc.perform(get("/api/v1/school")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(expiredDirector)))
+                .andExpect(status().isOk());
+        mockMvc.perform(put("/api/v1/school")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(expiredDirector))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("name", "Modif abonnement expiré"))))
+                .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/academic/years")
                         .header(HttpHeaders.AUTHORIZATION, bearer(expiredDirector)))
                 .andExpect(status().isOk());
@@ -920,6 +942,14 @@ class SchoolAcademicIntegrationTest {
                 Instant.now().plus(365, ChronoUnit.DAYS));
         String suspendedDirector = tenantToken(suspendedSchool.getId(), RoleCode.DIRECTOR);
 
+        mockMvc.perform(get("/api/v1/school")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(suspendedDirector)))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(put("/api/v1/school")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(suspendedDirector))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("name", "Modif abonnement suspendu"))))
+                .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/academic/years")
                         .header(HttpHeaders.AUTHORIZATION, bearer(suspendedDirector)))
                 .andExpect(status().isForbidden());
@@ -943,20 +973,22 @@ class SchoolAcademicIntegrationTest {
 
     private School createSchoolWithoutSubscription(String prefix, SchoolType type) {
         String code = uniqueCode(prefix);
-        return schoolService.createSchool(
+        return TestSecuritySupport.runAsAdminSaas(() -> schoolService.createSchool(
                 code,
                 "Établissement " + code,
                 type,
                 "+221770000000",
                 "contact@" + code.toLowerCase() + ".sn",
-                "Dakar");
+                "Dakar"));
     }
 
     private void provisionSubscription(UUID schoolId, SubscriptionStatus status, Instant startsAt, Instant endsAt) {
-        SubscriptionPlan plan = subscriptionService.createPlan(
-                uniqueCode("PLAN"), "Forfait Académique", 50_000L, 500_000L, 500, 30, 10_240);
-        TenantContext.runWithTenant(TenantId.of(schoolId), () -> subscriptionService.createSubscription(
-                plan.getId(), status, BillingCycle.YEARLY, startsAt.truncatedTo(ChronoUnit.SECONDS), endsAt.truncatedTo(ChronoUnit.SECONDS)));
+        TestSecuritySupport.runAsAdminSaas(() -> {
+            SubscriptionPlan plan = subscriptionService.createPlan(
+                    uniqueCode("PLAN"), "Forfait Académique", 50_000L, 500_000L, 500, 30, 10_240);
+            TenantContext.runWithTenant(TenantId.of(schoolId), () -> subscriptionService.createSubscription(
+                    plan.getId(), status, BillingCycle.YEARLY, startsAt.truncatedTo(ChronoUnit.SECONDS), endsAt.truncatedTo(ChronoUnit.SECONDS)));
+        });
     }
 
     private String platformAdminToken() {

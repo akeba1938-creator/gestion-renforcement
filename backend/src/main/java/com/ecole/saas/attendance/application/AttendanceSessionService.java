@@ -296,7 +296,7 @@ public class AttendanceSessionService {
             throw new AttendanceValidationException("Au moins un pointage élève doit être fourni.");
         }
 
-        AttendanceSession session = requireSession(sessionId);
+        AttendanceSession session = requireSessionForUpdate(sessionId);
         teacherScopeGuard.assertCanAccessSessionScope(session.getClassRoomId(), session.getSubjectId());
         session.assertRollCallEditable();
         if (session.getStatus() == AttendanceSessionStatus.SUBMITTED && teacherScopeGuard.isRestrictedTeacher()) {
@@ -362,7 +362,7 @@ public class AttendanceSessionService {
         TenantContext.requireCurrent();
         subscriptionGuard.requireWriteAccess();
 
-        AttendanceSession session = requireSession(sessionId);
+        AttendanceSession session = requireSessionForUpdate(sessionId);
         teacherScopeGuard.assertCanAccessSessionScope(session.getClassRoomId(), session.getSubjectId());
         assertPeriodNotLocked(session.getEvaluationPeriodId());
 
@@ -385,7 +385,7 @@ public class AttendanceSessionService {
         TenantContext.requireCurrent();
         subscriptionGuard.requireWriteAccess();
 
-        AttendanceSession session = requireSession(sessionId);
+        AttendanceSession session = requireSessionForUpdate(sessionId);
         session.lock(actorId, clock.instant());
         AttendanceSession saved = sessionRepository.save(session);
         auditLogPort.recordTenantEvent(AuditRecordCommand.critical(
@@ -406,7 +406,7 @@ public class AttendanceSessionService {
         TenantContext.requireCurrent();
         subscriptionGuard.requireWriteAccess();
 
-        AttendanceSession session = requireSession(sessionId);
+        AttendanceSession session = requireSessionForUpdate(sessionId);
         session.cancel(reason);
         AttendanceSession saved = sessionRepository.save(session);
         auditLogPort.recordTenantEvent(AuditRecordCommand.warning(
@@ -437,7 +437,7 @@ public class AttendanceSessionService {
                         "Pointage introuvable",
                         "L'enregistrement d'assiduité demandé est introuvable."));
 
-        AttendanceSession session = requireSession(record.getSessionId());
+        AttendanceSession session = requireSessionForUpdate(record.getSessionId());
         session.assertJustifiable();
         assertPeriodNotLocked(session.getEvaluationPeriodId());
 
@@ -700,6 +700,14 @@ public class AttendanceSessionService {
 
     private AttendanceSession requireSession(UUID sessionId) {
         return sessionRepository.findById(sessionId)
+                .orElseThrow(() -> new AttendanceNotFoundException(
+                        "attendance-session-not-found",
+                        "Séance d'appel introuvable",
+                        "La feuille d'appel demandée est introuvable."));
+    }
+
+    private AttendanceSession requireSessionForUpdate(UUID sessionId) {
+        return sessionRepository.findByIdForUpdate(sessionId)
                 .orElseThrow(() -> new AttendanceNotFoundException(
                         "attendance-session-not-found",
                         "Séance d'appel introuvable",

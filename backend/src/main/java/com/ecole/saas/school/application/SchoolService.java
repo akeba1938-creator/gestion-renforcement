@@ -9,6 +9,7 @@ import com.ecole.saas.school.infrastructure.SchoolRepository;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,17 +27,20 @@ public class SchoolService implements SchoolDirectory {
         this.schoolRepository = schoolRepository;
     }
 
+    @PreAuthorize("hasRole('ADMIN_SAAS')")
     @Transactional
     public School createSchool(String code, String name, SchoolType type, String phone, String email, String address) {
         School school = new School(code, name, type, phone, email, address);
         return schoolRepository.save(school);
     }
 
+    @PreAuthorize("hasRole('ADMIN_SAAS')")
     @Transactional(readOnly = true)
     public Optional<School> findById(UUID id) {
         return schoolRepository.findById(id);
     }
 
+    @PreAuthorize("hasRole('ADMIN_SAAS')")
     @Transactional(readOnly = true)
     public Optional<School> findByCode(String code) {
         return schoolRepository.findByCode(code);

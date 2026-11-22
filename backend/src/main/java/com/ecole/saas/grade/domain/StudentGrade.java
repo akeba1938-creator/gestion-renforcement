@@ -9,6 +9,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
@@ -47,6 +48,10 @@ public class StudentGrade extends TenantScopedEntity {
 
     @Column(name = "updated_by")
     private UUID updatedBy;
+
+    @Version
+    @Column(name = "version", nullable = false)
+    private long version;
 
     protected StudentGrade() {
     }
@@ -138,6 +143,10 @@ public class StudentGrade extends TenantScopedEntity {
 
     public UUID getUpdatedBy() {
         return updatedBy;
+    }
+
+    public long getVersion() {
+        return version;
     }
 
     private static String normalizeComment(String comment) {

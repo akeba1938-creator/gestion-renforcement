@@ -384,6 +384,12 @@ public class TeacherService {
         if (!user.active()) {
             throw new TeacherValidationException("Le compte utilisateur associé doit être actif.");
         }
+        boolean hasTeachingRole = user.roles() != null
+                && (user.roles().contains("TEACHER") || user.roles().contains("TUTOR"));
+        if (!hasTeachingRole) {
+            throw new TeacherValidationException(
+                    "Le compte utilisateur associé doit disposer du rôle TEACHER ou TUTOR.");
+        }
     }
 
     private Teacher requireTeacher(UUID teacherId) {

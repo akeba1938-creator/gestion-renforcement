@@ -419,7 +419,7 @@ public class CenterSessionService {
     public SessionView startSession(UUID sessionId) {
         subscriptionGuard.requireWriteAccess();
         schoolGuard.requireActiveSchoolForWrite();
-        CenterSession session = requireSession(sessionId);
+        CenterSession session = requireSessionForUpdate(sessionId);
         tutorScopeGuard.assertCanAccessSession(session);
         session.start();
         CenterSession saved = sessionRepository.save(session);
@@ -438,7 +438,7 @@ public class CenterSessionService {
     public SessionView completeSession(UUID sessionId, String topic, String notes, UUID actorId) {
         subscriptionGuard.requireWriteAccess();
         schoolGuard.requireActiveSchoolForWrite();
-        CenterSession session = requireSession(sessionId);
+        CenterSession session = requireSessionForUpdate(sessionId);
         tutorScopeGuard.assertCanAccessSession(session);
         Long hourlyRateSnapshot = resolveHourlyRateSnapshot(session);
         session.complete(actorId, clock.instant(), topic, notes, hourlyRateSnapshot);
@@ -489,7 +489,7 @@ public class CenterSessionService {
     public SessionView cancelSession(UUID sessionId, String reason) {
         subscriptionGuard.requireWriteAccess();
         schoolGuard.requireActiveSchoolForWrite();
-        CenterSession session = requireSession(sessionId);
+        CenterSession session = requireSessionForUpdate(sessionId);
         session.cancel(reason);
 
         int refundedCredits = 0;
@@ -547,7 +547,7 @@ public class CenterSessionService {
     public SessionView upsertAttendance(UUID sessionId, List<AttendanceInput> inputs, UUID actorId) {
         subscriptionGuard.requireWriteAccess();
         schoolGuard.requireActiveSchoolForWrite();
-        CenterSession session = requireSession(sessionId);
+        CenterSession session = requireSessionForUpdate(sessionId);
         tutorScopeGuard.assertCanAccessSession(session);
         if (!session.isAttendanceMutable()) {
             throw new CenterConflictException(
@@ -831,6 +831,12 @@ public class CenterSessionService {
 
     private CenterSession requireSession(UUID sessionId) {
         return sessionRepository.findById(sessionId)
+                .orElseThrow(() -> new CenterNotFoundException(
+                        "center-session-not-found", "Séance introuvable", "La séance demandée est introuvable."));
+    }
+
+    private CenterSession requireSessionForUpdate(UUID sessionId) {
+        return sessionRepository.findByIdForUpdate(sessionId)
                 .orElseThrow(() -> new CenterNotFoundException(
                         "center-session-not-found", "Séance introuvable", "La séance demandée est introuvable."));
     }

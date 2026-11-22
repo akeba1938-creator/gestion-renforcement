@@ -6,12 +6,16 @@ import com.ecole.saas.center.domain.CenterGroupType;
 import jakarta.validation.Valid;
 import java.net.URI;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -129,12 +133,17 @@ public class CenterGroupController {
                 .body(CenterGroupResponse.from(groupService.archiveGroup(groupId, request.reason())));
     }
 
+    private static final Set<String> HOURLY_RATE_VIEW_AUTHORITIES = Set.of(
+            "ROLE_PROMOTER",
+            "ROLE_DIRECTOR",
+            "ROLE_CENTER_MANAGER");
+
     // --- Intervenants ---
 
     @GetMapping("/{groupId}/tutors")
     public ResponseEntity<List<CenterGroupTutorResponse>> listTutors(@PathVariable UUID groupId) {
         List<CenterGroupTutorResponse> list = groupService.listGroupTutors(groupId).stream()
-                .map(CenterGroupTutorResponse::from)
+                .map(CenterGroupController::toMaskedTutorResponse)
                 .toList();
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
@@ -157,7 +166,7 @@ public class CenterGroupController {
         return ResponseEntity.created(
                         URI.create("/api/v1/center/groups/" + groupId + "/tutors/" + created.assignment().getId()))
                 .cacheControl(CacheControl.noStore())
-                .body(CenterGroupTutorResponse.from(created));
+                .body(toMaskedTutorResponse(created));
     }
 
     @PostMapping("/{groupId}/tutors/{assignmentId}/deactivate")
@@ -172,7 +181,41 @@ public class CenterGroupController {
                 request != null ? request.reason() : null);
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
-                .body(CenterGroupTutorResponse.from(updated));
+                .body(toMaskedTutorResponse(updated));
+    }
+
+    private static CenterGroupTutorResponse toMaskedTutorResponse(CenterGroupService.GroupTutorView view) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        boolean includeHourlyRate = isSelfTutor(view, auth) || hasHourlyRateAuthority(auth);
+        return CenterGroupTutorResponse.from(view, includeHourlyRate);
+    }
+
+    private static boolean isSelfTutor(CenterGroupService.GroupTutorView view, Authentication auth) {
+        if (view == null
+                || view.teacher() == null
+                || view.teacher().userId() == null
+                || auth == null
+                || !auth.isAuthenticated()
+                || auth.getName() == null) {
+            return false;
+        }
+        try {
+            return view.teacher().userId().equals(UUID.fromString(auth.getName()));
+        } catch (IllegalArgumentException ex) {
+            return false;
+        }
+    }
+
+    private static boolean hasHourlyRateAuthority(Authentication auth) {
+        if (auth == null || !auth.isAuthenticated() || auth.getAuthorities() == null) {
+            return false;
+        }
+        for (GrantedAuthority authority : auth.getAuthorities()) {
+            if (HOURLY_RATE_VIEW_AUTHORITIES.contains(authority.getAuthority())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // --- Inscriptions ---

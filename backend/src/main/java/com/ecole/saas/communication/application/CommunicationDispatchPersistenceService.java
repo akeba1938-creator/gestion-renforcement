@@ -275,7 +275,7 @@ class CommunicationDispatchPersistenceService {
     @Transactional
     PreparedCampaignDispatch prepareDispatchExistingCampaign(UUID campaignId, UUID actorUserId) {
         subscriptionGuard.requireWriteAccess();
-        CommunicationCampaign campaign = requireCampaign(campaignId);
+        CommunicationCampaign campaign = requireCampaignForUpdate(campaignId);
         scopeGuard.assertCanMutateCampaign(actorUserId, campaign);
         SchoolProfileSnapshot school = subscriptionGuard.requireSchoolProfile();
         MessageTemplate template = campaign.getTemplateId() != null
@@ -294,6 +294,7 @@ class CommunicationDispatchPersistenceService {
     CommunicationCampaign finalizeCampaignDispatch(UUID campaignId, List<DispatchedDeliveryOutcome> outcomes) {
         Instant now = clock.instant();
         CounterDelta delta = persistGatewayOutcomes(outcomes, null);
+        requireCampaignForUpdate(campaignId);
         campaignRepository.applyCounterDeltasAndRefreshStatus(
                 campaignId,
                 delta.queuedDelta,
@@ -311,9 +312,9 @@ class CommunicationDispatchPersistenceService {
     @Transactional
     PreparedRetryDispatch prepareRetryFailedDeliveries(UUID campaignId) {
         subscriptionGuard.requireWriteAccess();
-        CommunicationCampaign campaign = requireCampaign(campaignId);
         List<MessageDelivery> failedDeliveries =
-                deliveryRepository.findByCampaignIdAndStatusOrderByCreatedAtAsc(campaignId, DeliveryStatus.FAILED);
+                deliveryRepository.findByCampaignIdAndStatusForUpdate(campaignId, DeliveryStatus.FAILED);
+        CommunicationCampaign campaign = requireCampaignForUpdate(campaignId);
         List<MessageDelivery> retryable = failedDeliveries.stream()
                 .filter(MessageDelivery::isRetryableFailure)
                 .toList();
@@ -376,6 +377,7 @@ class CommunicationDispatchPersistenceService {
         Instant now = clock.instant();
         int[] succeededCounter = new int[1];
         CounterDelta delta = persistGatewayOutcomes(outcomes, succeededCounter);
+        requireCampaignForUpdate(campaignId);
         campaignRepository.applyCounterDeltasAndRefreshStatus(
                 campaignId,
                 delta.queuedDelta,
@@ -547,8 +549,14 @@ class CommunicationDispatchPersistenceService {
         List<UUID> deliveryIds = outcomes.stream()
                 .map(o -> o.item().deliveryId())
                 .toList();
-        Map<UUID, MessageDelivery> deliveriesById = deliveryRepository.findAllById(deliveryIds).stream()
+        Map<UUID, MessageDelivery> deliveriesById = deliveryRepository.findByIdInForUpdate(deliveryIds).stream()
                 .collect(Collectors.toMap(MessageDelivery::getId, Function.identity()));
+        Map<UUID, Integer> maxSeqByDeliveryId = deliveryEventRepository
+                .findMaxSequenceNoByDeliveryIdIn(deliveryIds)
+                .stream()
+                .collect(Collectors.toMap(
+                        DeliveryEventRepository.DeliveryMaxSequence::getDeliveryId,
+                        DeliveryEventRepository.DeliveryMaxSequence::getMaxSequenceNo));
 
         List<MessageDelivery> deliveriesToSave = new ArrayList<>(outcomes.size());
         List<DeliveryEvent> eventsToSave = new ArrayList<>(outcomes.size());
@@ -560,9 +568,11 @@ class CommunicationDispatchPersistenceService {
             }
             long previousCost = delivery.getChargedCostXof();
             DeliveryStatus previousStatus = delivery.getStatus();
+            int nextSeq = maxSeqByDeliveryId.getOrDefault(delivery.getId(), 0) + 1;
             DeliveryEvent event = applyGatewayResult(
-                    delivery, outcome.result(), outcome.item().nextEventSequenceNo(), outcome.dispatchedAt());
+                    delivery, outcome.result(), nextSeq, outcome.dispatchedAt());
             if (event != null) {
+                maxSeqByDeliveryId.put(delivery.getId(), nextSeq);
                 eventsToSave.add(event);
             }
             if (delivery.getStatus() != previousStatus) {
@@ -707,6 +717,11 @@ class CommunicationDispatchPersistenceService {
 
     private CommunicationCampaign requireCampaign(UUID campaignId) {
         return campaignRepository.findById(campaignId)
+                .orElseThrow(() -> new CommunicationNotFoundException("Campagne de communication introuvable."));
+    }
+
+    private CommunicationCampaign requireCampaignForUpdate(UUID campaignId) {
+        return campaignRepository.findByIdForUpdate(campaignId)
                 .orElseThrow(() -> new CommunicationNotFoundException("Campagne de communication introuvable."));
     }
 
