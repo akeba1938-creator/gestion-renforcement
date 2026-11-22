@@ -15,6 +15,7 @@ import com.ecole.saas.family.domain.StudentGuardianLink;
 import com.ecole.saas.family.infrastructure.FamilyRepository;
 import com.ecole.saas.family.infrastructure.GuardianRepository;
 import com.ecole.saas.family.infrastructure.StudentGuardianLinkRepository;
+import com.ecole.saas.shared.application.SqlLikePatterns;
 import com.ecole.saas.shared.domain.TenantContext;
 import com.ecole.saas.student.StudentDirectoryPort;
 import com.ecole.saas.student.StudentSummary;
@@ -22,7 +23,6 @@ import jakarta.persistence.criteria.Predicate;
 import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -100,13 +100,13 @@ public class GuardianService {
             if (status != null) {
                 predicates.add(cb.equal(root.get("status"), status));
             }
-            if (search != null && !search.isBlank()) {
-                String pattern = "%" + search.trim().toLowerCase(Locale.ROOT) + "%";
+            String pattern = SqlLikePatterns.containsLower(search);
+            if (pattern != null) {
                 predicates.add(cb.or(
-                        cb.like(cb.lower(root.get("firstName")), pattern),
-                        cb.like(cb.lower(root.get("lastName")), pattern),
-                        cb.like(cb.lower(root.get("phone")), pattern),
-                        cb.like(cb.lower(root.get("email")), pattern)));
+                        cb.like(cb.lower(root.get("firstName")), pattern, SqlLikePatterns.ESCAPE_CHAR),
+                        cb.like(cb.lower(root.get("lastName")), pattern, SqlLikePatterns.ESCAPE_CHAR),
+                        cb.like(cb.lower(root.get("phone")), pattern, SqlLikePatterns.ESCAPE_CHAR),
+                        cb.like(cb.lower(root.get("email")), pattern, SqlLikePatterns.ESCAPE_CHAR)));
             }
             return cb.and(predicates.toArray(Predicate[]::new));
         };

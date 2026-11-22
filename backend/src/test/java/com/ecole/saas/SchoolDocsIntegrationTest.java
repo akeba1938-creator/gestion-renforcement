@@ -444,6 +444,7 @@ class SchoolDocsIntegrationTest {
             assertThat(summary.status()).isEqualTo(DocumentStatus.REVOKED);
             assertThat(summary.documentType()).isEqualTo(DocumentType.SCHOOLING_CERTIFICATE);
             assertThat(schoolDocsDirectoryPort.findDocumentsByStudentId(studentId)).hasSize(7);
+            assertThat(schoolDocsDirectoryPort.countIssuedDocumentsByStudentId(studentId)).isEqualTo(6L);
         });
 
         // 8. Audit immuable SCHOOLDOCS sans aucune fuite du jeton opaque de vérification

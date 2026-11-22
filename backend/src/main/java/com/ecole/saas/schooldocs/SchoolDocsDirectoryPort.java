@@ -17,6 +17,8 @@ public interface SchoolDocsDirectoryPort {
 
     List<IssuedDocumentSummary> findDocumentsByStudentId(UUID studentId);
 
+    long countIssuedDocumentsByStudentId(UUID studentId);
+
     long countDocumentsForCurrentTenant();
 
     long totalStorageBytesForCurrentTenant();

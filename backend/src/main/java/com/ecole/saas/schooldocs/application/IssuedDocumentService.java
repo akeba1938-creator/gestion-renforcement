@@ -64,7 +64,9 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * Orchestration applicative du cycle de vie des documents scolaires officiels :
@@ -90,6 +92,7 @@ public class IssuedDocumentService {
     private final StudentDirectoryPort studentDirectoryPort;
     private final FamilyDirectoryPort familyDirectoryPort;
     private final AuditLogPort auditLogPort;
+    private final TransactionTemplate readOnlyTransactionTemplate;
     private final Clock clock;
 
     public IssuedDocumentService(
@@ -105,6 +108,7 @@ public class IssuedDocumentService {
             StudentDirectoryPort studentDirectoryPort,
             FamilyDirectoryPort familyDirectoryPort,
             AuditLogPort auditLogPort,
+            PlatformTransactionManager transactionManager,
             Clock clock) {
         this.documentRepository = documentRepository;
         this.templateRepository = templateRepository;
@@ -118,6 +122,8 @@ public class IssuedDocumentService {
         this.studentDirectoryPort = studentDirectoryPort;
         this.familyDirectoryPort = familyDirectoryPort;
         this.auditLogPort = auditLogPort;
+        this.readOnlyTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.readOnlyTransactionTemplate.setReadOnly(true);
         this.clock = clock;
     }
 
@@ -609,18 +615,22 @@ public class IssuedDocumentService {
     }
 
     @PreAuthorize(SchoolDocsRoles.DOCUMENT_READ_ROLES)
-    @Transactional
     public DownloadableDocument downloadDocument(UUID documentId, UUID actorId) {
         TenantContext.requireCurrent();
-        subscriptionGuard.requireReadAccess();
+        DocumentDownloadContext download = readOnlyTransactionTemplate.execute(status -> {
+            subscriptionGuard.requireReadAccess();
+            IssuedDocument document = documentRepository.findById(documentId)
+                    .orElseThrow(() -> new SchoolDocNotFoundException("Document officiel introuvable."));
+            CallerReadScope scope = scopeGuard.resolveReadScope(actorId);
+            scopeGuard.assertCanAccessDocument(scope, document);
 
-        IssuedDocument document = documentRepository.findById(documentId)
-                .orElseThrow(() -> new SchoolDocNotFoundException("Document officiel introuvable."));
-        CallerReadScope scope = scopeGuard.resolveReadScope(actorId);
-        scopeGuard.assertCanAccessDocument(scope, document);
+            DocumentBinaryStorage.StoredBinary stored = binaryStorage.load(document.getId())
+                    .orElseThrow(() -> new SchoolDocNotFoundException("Contenu binaire du document introuvable."));
+            return new DocumentDownloadContext(document, stored);
+        });
 
-        DocumentBinaryStorage.StoredBinary stored = binaryStorage.load(document.getId())
-                .orElseThrow(() -> new SchoolDocNotFoundException("Contenu binaire du document introuvable."));
+        IssuedDocument document = download.document();
+        DocumentBinaryStorage.StoredBinary stored = download.stored();
         DocumentSecurityPolicy.assertIntegrity(stored.content(), document.getContentSha256());
 
         auditLogPort.recordTenantEvent(AuditRecordCommand.success(
@@ -643,6 +653,10 @@ public class IssuedDocumentService {
                 stored.fileSizeBytes(),
                 document.getContentSha256(),
                 stored.content());
+    }
+
+    private record DocumentDownloadContext(
+            IssuedDocument document, DocumentBinaryStorage.StoredBinary stored) {
     }
 
     @PreAuthorize(SchoolDocsRoles.DOCUMENT_READ_ROLES)

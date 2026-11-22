@@ -22,7 +22,8 @@ import java.util.Map;
 import java.util.UUID;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * Service applicatif d'export direct sécurisé (JSON / CSV anti-CSV-Injection) avec contrôle RBAC,
@@ -36,6 +37,7 @@ public class ReportExportService {
     private final ReportingSubscriptionGuard subscriptionGuard;
     private final ReportingAccessScopeGuard scopeGuard;
     private final AuditLogPort auditLogPort;
+    private final TransactionTemplate readOnlyTransactionTemplate;
     private final Clock clock;
 
     public ReportExportService(
@@ -44,17 +46,19 @@ public class ReportExportService {
             ReportingSubscriptionGuard subscriptionGuard,
             ReportingAccessScopeGuard scopeGuard,
             AuditLogPort auditLogPort,
+            PlatformTransactionManager transactionManager,
             Clock clock) {
         this.queryService = queryService;
         this.serializer = serializer;
         this.subscriptionGuard = subscriptionGuard;
         this.scopeGuard = scopeGuard;
         this.auditLogPort = auditLogPort;
+        this.readOnlyTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.readOnlyTransactionTemplate.setReadOnly(true);
         this.clock = clock;
     }
 
     @PreAuthorize(ReportingRoles.ANY_REPORTING_ROLE)
-    @Transactional
     public DownloadableReport exportReport(
             ReportType reportType,
             ReportFormat format,
@@ -66,36 +70,40 @@ public class ReportExportService {
             LocalDate toDate,
             UUID actorUserId) {
         TenantContext.requireCurrent();
-        subscriptionGuard.assertReadAllowed();
         if (reportType == null) {
             throw new ReportingValidationException("Le type de rapport (reportType) est obligatoire.");
         }
         ReportFormat resolvedFormat = format != null ? format : ReportFormat.CSV;
         ReportingMetricsCalculator.validateDateRange(fromDate, toDate);
 
-        CallerReportingScope scope = scopeGuard.resolveScope(actorUserId);
-        scopeGuard.assertCanAccessReportType(scope, reportType);
+        ExportReadContext readContext = readOnlyTransactionTemplate.execute(status -> {
+            subscriptionGuard.assertReadAllowed();
+            CallerReportingScope scope = scopeGuard.resolveScope(actorUserId);
+            scopeGuard.assertCanAccessReportType(scope, reportType);
 
-        Object payload = switch (reportType) {
-            case EXECUTIVE -> queryService.buildExecutiveReport(
-                    academicYearId, evaluationPeriodId, fromDate, toDate, scope);
-            case ACADEMIC -> queryService.buildAcademicReport(
-                    academicYearId, evaluationPeriodId, classRoomId, scope);
-            case ATTENDANCE -> queryService.buildAttendanceReport(
-                    academicYearId, evaluationPeriodId, classRoomId, fromDate, toDate, scope);
-            case FINANCIAL -> queryService.buildFinancialReport(
-                    academicYearId, classRoomId, fromDate, toDate);
-            case OPERATIONS -> queryService.buildOperationsReport(
-                    academicYearId, fromDate, toDate);
-            case STUDENT_OVERVIEW -> queryService.buildStudentOverview(
-                    studentId, academicYearId, evaluationPeriodId, fromDate, toDate, scope);
-        };
+            Object payload = switch (reportType) {
+                case EXECUTIVE -> queryService.buildExecutiveReport(
+                        academicYearId, evaluationPeriodId, fromDate, toDate, scope);
+                case ACADEMIC -> queryService.buildAcademicReport(
+                        academicYearId, evaluationPeriodId, classRoomId, scope);
+                case ATTENDANCE -> queryService.buildAttendanceReport(
+                        academicYearId, evaluationPeriodId, classRoomId, fromDate, toDate, scope);
+                case FINANCIAL -> queryService.buildFinancialReport(
+                        academicYearId, classRoomId, fromDate, toDate);
+                case OPERATIONS -> queryService.buildOperationsReport(
+                        academicYearId, fromDate, toDate);
+                case STUDENT_OVERVIEW -> queryService.buildStudentOverview(
+                        studentId, academicYearId, evaluationPeriodId, fromDate, toDate, scope);
+            };
+            SchoolProfileSnapshot school = subscriptionGuard.requireSchoolProfile();
+            return new ExportReadContext(payload, school);
+        });
 
-        byte[] content = serializer.serialize(reportType, resolvedFormat, payload);
+        byte[] content = serializer.serialize(reportType, resolvedFormat, readContext.payload());
         ReportSecurityPolicy.assertValidPayload(content);
         String sha256 = ReportSecurityPolicy.sha256Hex(content);
 
-        SchoolProfileSnapshot school = subscriptionGuard.requireSchoolProfile();
+        SchoolProfileSnapshot school = readContext.school();
         ZoneId zone = subscriptionGuard.resolveSchoolZone(school);
         LocalDate today = LocalDate.now(clock.withZone(zone));
         String baseName = "export_" + school.code().toLowerCase(Locale.ROOT)
@@ -137,5 +145,8 @@ public class ReportExportService {
                 content.length,
                 sha256,
                 content);
+    }
+
+    private record ExportReadContext(Object payload, SchoolProfileSnapshot school) {
     }
 }

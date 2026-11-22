@@ -39,12 +39,14 @@ class SecurityPropertiesAndTenantFilterTest {
                 new SecurityProperties.Jwt("", "ecole-saas"),
                 new SecurityProperties.Mfa(validSecret),
                 null,
+                null,
                 null);
         assertThatThrownBy(missingJwt::decodedJwtSecretBytes).isInstanceOf(IllegalStateException.class);
 
         SecurityProperties shortJwt = new SecurityProperties(
                 new SecurityProperties.Jwt(shortSecret, "ecole-saas"),
                 new SecurityProperties.Mfa(validSecret),
+                null,
                 null,
                 null);
         assertThatThrownBy(shortJwt::decodedJwtSecretBytes).isInstanceOf(IllegalStateException.class);
@@ -53,6 +55,7 @@ class SecurityPropertiesAndTenantFilterTest {
                 new SecurityProperties.Jwt(validSecret, "ecole-saas"),
                 new SecurityProperties.Mfa("!!!not-base64!!!"),
                 null,
+                null,
                 null);
         assertThatThrownBy(badBase64Mfa::decodedMfaEncryptionKeyBytes).isInstanceOf(IllegalStateException.class);
 
@@ -60,10 +63,12 @@ class SecurityPropertiesAndTenantFilterTest {
                 new SecurityProperties.Jwt(validSecret, "ecole-saas"),
                 new SecurityProperties.Mfa(validSecret),
                 null,
-                null);
+                null,
+                new SecurityProperties.Cors(List.of(" https://app.ecole.sn ", "", "https://app.ecole.sn")));
         assertThat(valid.decodedJwtSecretBytes()).hasSize(32);
         assertThat(valid.decodedMfaEncryptionKeyBytes()).hasSize(32);
         assertThat(valid.toString()).doesNotContain(validSecret);
+        assertThat(valid.cors().normalizedAllowedOrigins()).containsExactly("https://app.ecole.sn");
     }
 
     @Test

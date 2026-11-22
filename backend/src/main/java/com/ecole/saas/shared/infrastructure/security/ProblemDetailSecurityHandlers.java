@@ -4,7 +4,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.net.URI;
-import java.time.Instant;
+import java.time.Clock;
+import java.util.UUID;
 import org.slf4j.MDC;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -21,9 +22,11 @@ import tools.jackson.databind.ObjectMapper;
 public class ProblemDetailSecurityHandlers implements AuthenticationEntryPoint, AccessDeniedHandler {
 
     private final ObjectMapper objectMapper;
+    private final Clock clock;
 
-    public ProblemDetailSecurityHandlers(ObjectMapper objectMapper) {
+    public ProblemDetailSecurityHandlers(ObjectMapper objectMapper, Clock clock) {
         this.objectMapper = objectMapper;
+        this.clock = clock;
     }
 
     @Override
@@ -77,16 +80,32 @@ public class ProblemDetailSecurityHandlers implements AuthenticationEntryPoint, 
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, detail);
         problem.setType(URI.create(type));
         problem.setTitle(title);
-        problem.setInstance(URI.create(request.getRequestURI()));
-        problem.setProperty("timestamp", Instant.now().toString());
+        problem.setInstance(safeInstanceUri(request));
+        problem.setProperty("timestamp", clock.instant().toString());
         String requestId = MDC.get("requestId");
-        if (requestId != null && !requestId.isBlank()) {
-            problem.setProperty("requestId", requestId);
+        if (requestId == null || requestId.isBlank()) {
+            requestId = UUID.randomUUID().toString();
         }
+        problem.setProperty("requestId", requestId);
 
         response.setStatus(status.value());
         response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
         response.setCharacterEncoding("UTF-8");
         response.getOutputStream().write(objectMapper.writeValueAsBytes(problem));
+    }
+
+    private static URI safeInstanceUri(HttpServletRequest request) {
+        if (request == null) {
+            return URI.create("/");
+        }
+        String rawUri = request.getRequestURI();
+        if (rawUri == null || rawUri.isBlank()) {
+            return URI.create("/");
+        }
+        try {
+            return URI.create(rawUri);
+        } catch (IllegalArgumentException ex) {
+            return URI.create("/");
+        }
     }
 }

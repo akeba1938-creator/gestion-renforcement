@@ -1,5 +1,6 @@
 package com.ecole.saas.schooldocs.infrastructure;
 
+import com.ecole.saas.schooldocs.DocumentStatus;
 import com.ecole.saas.schooldocs.DocumentType;
 import com.ecole.saas.schooldocs.domain.IssuedDocument;
 import jakarta.persistence.LockModeType;
@@ -29,6 +30,8 @@ public interface IssuedDocumentRepository
     List<IssuedDocument> findByOriginalDocumentIdOrderByEditionNumberAsc(UUID originalDocumentId);
 
     List<IssuedDocument> findByStudentIdOrderByIssuedAtDesc(UUID studentId);
+
+    long countByStudentIdAndStatus(UUID studentId, DocumentStatus status);
 
     @Query("""
             SELECT COALESCE(MAX(d.editionNumber), 1)

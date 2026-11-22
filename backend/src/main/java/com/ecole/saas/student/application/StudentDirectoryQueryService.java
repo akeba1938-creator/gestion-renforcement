@@ -209,6 +209,19 @@ public class StudentDirectoryQueryService implements StudentDirectoryPort {
 
     @Override
     @Transactional(readOnly = true)
+    public List<StudentEnrollmentSummary> findEnrollmentsByStudent(UUID studentId) {
+        TenantContext.requireCurrent();
+        if (studentId == null) {
+            return List.of();
+        }
+        return enrollmentRepository.findByStudentIdOrderByCreatedAtDesc(studentId)
+                .stream()
+                .map(StudentDirectoryQueryService::toEnrollmentSummary)
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public List<StudentEnrollmentSummary> findActiveEnrollmentsByClassRoom(UUID classRoomId) {
         TenantContext.requireCurrent();
         if (classRoomId == null) {

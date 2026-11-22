@@ -1,5 +1,6 @@
 package com.ecole.saas.schooldocs.application;
 
+import com.ecole.saas.schooldocs.DocumentStatus;
 import com.ecole.saas.schooldocs.DocumentType;
 import com.ecole.saas.schooldocs.IssuedDocumentSummary;
 import com.ecole.saas.schooldocs.SchoolDocsActivitySummary;
@@ -68,6 +69,16 @@ public class SchoolDocsDirectoryQueryService implements SchoolDocsDirectoryPort 
         return documentRepository.findByStudentIdOrderByIssuedAtDesc(studentId).stream()
                 .map(doc -> toSummary(doc, now))
                 .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public long countIssuedDocumentsByStudentId(UUID studentId) {
+        TenantContext.requireCurrent();
+        if (studentId == null) {
+            return 0L;
+        }
+        return documentRepository.countByStudentIdAndStatus(studentId, DocumentStatus.ISSUED);
     }
 
     @Override

@@ -43,7 +43,8 @@ class AuthCryptoInfrastructureTest {
                 new SecurityProperties.Jwt(TEST_JWT_SECRET, "ecole-saas"),
                 new SecurityProperties.Mfa(TEST_MFA_KEY),
                 new SecurityProperties.Cookie("ecole_refresh_token", true, "Strict", "/api/v1/auth"),
-                new SecurityProperties.Csrf("XSRF-TOKEN", "X-XSRF-TOKEN"));
+                new SecurityProperties.Csrf("XSRF-TOKEN", "X-XSRF-TOKEN"),
+                new SecurityProperties.Cors(java.util.List.of()));
     }
 
     @Test

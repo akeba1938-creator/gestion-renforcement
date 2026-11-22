@@ -31,4 +31,7 @@ public interface AttendanceSessionRepository
 
     List<AttendanceSession> findByAcademicYearIdAndStatusNot(
             UUID academicYearId, AttendanceSessionStatus excludedStatus);
+
+    List<AttendanceSession> findByClassRoomIdAndAcademicYearIdAndStatusNot(
+            UUID classRoomId, UUID academicYearId, AttendanceSessionStatus excludedStatus);
 }

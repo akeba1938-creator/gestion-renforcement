@@ -5,11 +5,11 @@ import com.ecole.saas.academic.domain.SubjectAlreadyExistsException;
 import com.ecole.saas.academic.domain.SubjectCategory;
 import com.ecole.saas.academic.domain.SubjectNotFoundException;
 import com.ecole.saas.academic.infrastructure.SubjectRepository;
+import com.ecole.saas.shared.application.SqlLikePatterns;
 import com.ecole.saas.shared.domain.TenantContext;
 import jakarta.persistence.criteria.Predicate;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -55,11 +55,11 @@ public class SubjectService {
             if (Boolean.TRUE.equals(activeOnly)) {
                 predicates.add(cb.isTrue(root.get("active")));
             }
-            if (search != null && !search.isBlank()) {
-                String pattern = "%" + search.trim().toLowerCase(Locale.ROOT) + "%";
+            String pattern = SqlLikePatterns.containsLower(search);
+            if (pattern != null) {
                 predicates.add(cb.or(
-                        cb.like(cb.lower(root.get("code")), pattern),
-                        cb.like(cb.lower(root.get("name")), pattern)));
+                        cb.like(cb.lower(root.get("code")), pattern, SqlLikePatterns.ESCAPE_CHAR),
+                        cb.like(cb.lower(root.get("name")), pattern, SqlLikePatterns.ESCAPE_CHAR)));
             }
             return cb.and(predicates.toArray(Predicate[]::new));
         };

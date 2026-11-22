@@ -1,6 +1,8 @@
 package com.ecole.saas.shared.infrastructure.security;
 
 import java.util.Base64;
+import java.util.List;
+import java.util.Objects;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
@@ -9,7 +11,8 @@ public record SecurityProperties(
         @DefaultValue Jwt jwt,
         @DefaultValue Mfa mfa,
         @DefaultValue Cookie cookie,
-        @DefaultValue Csrf csrf) {
+        @DefaultValue Csrf csrf,
+        @DefaultValue Cors cors) {
 
     public static final int MIN_JWT_SECRET_BYTES = 32;
     public static final int AES_256_KEY_BYTES = 32;
@@ -79,5 +82,21 @@ public record SecurityProperties(
     public record Csrf(
             @DefaultValue("XSRF-TOKEN") String cookieName,
             @DefaultValue("X-XSRF-TOKEN") String headerName) {
+    }
+
+    public record Cors(
+            @DefaultValue("") List<String> allowedOrigins) {
+
+        public List<String> normalizedAllowedOrigins() {
+            if (allowedOrigins == null || allowedOrigins.isEmpty()) {
+                return List.of();
+            }
+            return allowedOrigins.stream()
+                    .filter(Objects::nonNull)
+                    .map(String::trim)
+                    .filter(origin -> !origin.isBlank())
+                    .distinct()
+                    .toList();
+        }
     }
 }

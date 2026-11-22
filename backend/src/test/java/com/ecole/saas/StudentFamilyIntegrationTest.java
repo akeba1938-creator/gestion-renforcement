@@ -174,6 +174,13 @@ class StudentFamilyIntegrationTest {
                                 .andExpect(jsonPath("$.totalElements").value(1))
                                 .andExpect(jsonPath("$.content[0].id").value(student1Id.toString()));
 
+                // Les caractères jokers LIKE (% et _) sont échappés littéralement
+                mockMvc.perform(get("/api/v1/students")
+                                .header(HttpHeaders.AUTHORIZATION, bearer(secretaryToken))
+                                .param("search", "%"))
+                                .andExpect(status().isOk())
+                                .andExpect(jsonPath("$.totalElements").value(0));
+
                 // Mise à jour du dossier (matricule reste immuable)
                 mockMvc.perform(put("/api/v1/students/" + student1Id)
                                 .header(HttpHeaders.AUTHORIZATION, bearer(secretaryToken))
@@ -516,6 +523,23 @@ class StudentFamilyIntegrationTest {
                                 .andExpect(status().isOk())
                                 .andExpect(jsonPath("$.totalElements").value(2));
 
+                mockMvc.perform(get("/api/v1/families/" + familyId + "/students")
+                                .header(HttpHeaders.AUTHORIZATION, bearer(secretaryToken))
+                                .param("page", "0")
+                                .param("size", "1"))
+                                .andExpect(status().isOk())
+                                .andExpect(jsonPath("$.totalElements").value(2))
+                                .andExpect(jsonPath("$.totalPages").value(2))
+                                .andExpect(jsonPath("$.content.length()").value(1));
+
+                mockMvc.perform(get("/api/v1/families/" + familyId + "/students")
+                                .header(HttpHeaders.AUTHORIZATION, bearer(secretaryToken))
+                                .param("page", "1")
+                                .param("size", "1"))
+                                .andExpect(status().isOk())
+                                .andExpect(jsonPath("$.totalElements").value(2))
+                                .andExpect(jsonPath("$.content.length()").value(1));
+
                 mockMvc.perform(get("/api/v1/guardians/" + fatherId + "/students")
                                 .header(HttpHeaders.AUTHORIZATION, bearer(secretaryToken)))
                                 .andExpect(status().isOk())
@@ -574,10 +598,12 @@ class StudentFamilyIntegrationTest {
                 UUID guardianId = createGuardianViaApi(
                                 directorToken, familyId, "Ousmane", "Gueye", "+221770001002", null);
 
-                // Non authentifié -> 401 RFC 9457
+                // Non authentifié -> 401 RFC 9457 avec requestId et timestamp
                 mockMvc.perform(get("/api/v1/students"))
                                 .andExpect(status().isUnauthorized())
-                                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
+                                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                                .andExpect(jsonPath("$.requestId").isNotEmpty())
+                                .andExpect(jsonPath("$.timestamp").isNotEmpty());
 
                 // Jeton MFA_PENDING -> 403
                 String mfaPending = tokenIssuer

@@ -19,6 +19,7 @@ import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -65,10 +66,21 @@ public class GradeSummaryQueryService implements GradeSummaryPort {
         if (studentId == null || academicYearId == null) {
             return List.of();
         }
-        return reportCardRepository
-                .findByStudentIdAndAcademicYearIdOrderByComputedAtAsc(studentId, academicYearId)
+        List<PeriodReportCard> cards = reportCardRepository
+                .findByStudentIdAndAcademicYearIdOrderByComputedAtAsc(studentId, academicYearId);
+        if (cards.isEmpty()) {
+            return List.of();
+        }
+        List<UUID> cardIds = cards.stream().map(PeriodReportCard::getId).toList();
+        Map<UUID, List<PeriodSubjectResult>> subjectsByCard = subjectResultRepository
+                .findByReportCardIdIn(cardIds)
                 .stream()
-                .map(this::toSummary)
+                .collect(Collectors.groupingBy(PeriodSubjectResult::getReportCardId));
+        for (List<PeriodSubjectResult> results : subjectsByCard.values()) {
+            results.sort(Comparator.comparing(PeriodSubjectResult::getSubjectName, String.CASE_INSENSITIVE_ORDER));
+        }
+        return cards.stream()
+                .map(card -> toSummary(card, subjectsByCard.getOrDefault(card.getId(), List.of())))
                 .toList();
     }
 
@@ -266,9 +278,12 @@ public class GradeSummaryQueryService implements GradeSummaryPort {
     }
 
     private StudentPeriodGradeSummary toSummary(PeriodReportCard card) {
-        List<SubjectGradeSummary> subjects = subjectResultRepository
-                .findByReportCardIdOrderBySubjectNameAsc(card.getId())
-                .stream()
+        return toSummary(card, subjectResultRepository.findByReportCardIdOrderBySubjectNameAsc(card.getId()));
+    }
+
+    private static StudentPeriodGradeSummary toSummary(
+            PeriodReportCard card, List<PeriodSubjectResult> subjectResults) {
+        List<SubjectGradeSummary> subjects = subjectResults.stream()
                 .map(GradeSummaryQueryService::toSubjectSummary)
                 .toList();
         return new StudentPeriodGradeSummary(

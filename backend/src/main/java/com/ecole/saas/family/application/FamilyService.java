@@ -9,10 +9,10 @@ import com.ecole.saas.family.domain.FamilyCodeAlreadyExistsException;
 import com.ecole.saas.family.domain.FamilyNotFoundException;
 import com.ecole.saas.family.domain.FamilyStatus;
 import com.ecole.saas.family.domain.Guardian;
-import com.ecole.saas.family.domain.StudentGuardianLink;
 import com.ecole.saas.family.infrastructure.FamilyRepository;
 import com.ecole.saas.family.infrastructure.GuardianRepository;
 import com.ecole.saas.family.infrastructure.StudentGuardianLinkRepository;
+import com.ecole.saas.shared.application.SqlLikePatterns;
 import com.ecole.saas.shared.domain.TenantContext;
 import com.ecole.saas.student.StudentDirectoryPort;
 import com.ecole.saas.student.StudentSummary;
@@ -21,13 +21,12 @@ import java.time.Clock;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.stream.Collectors;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -95,13 +94,13 @@ public class FamilyService {
             if (status != null) {
                 predicates.add(cb.equal(root.get("status"), status));
             }
-            if (search != null && !search.isBlank()) {
-                String pattern = "%" + search.trim().toLowerCase(Locale.ROOT) + "%";
+            String pattern = SqlLikePatterns.containsLower(search);
+            if (pattern != null) {
                 predicates.add(cb.or(
-                        cb.like(cb.lower(root.get("name")), pattern),
-                        cb.like(cb.lower(root.get("code")), pattern),
-                        cb.like(cb.lower(root.get("primaryPhone")), pattern),
-                        cb.like(cb.lower(root.get("city")), pattern)));
+                        cb.like(cb.lower(root.get("name")), pattern, SqlLikePatterns.ESCAPE_CHAR),
+                        cb.like(cb.lower(root.get("code")), pattern, SqlLikePatterns.ESCAPE_CHAR),
+                        cb.like(cb.lower(root.get("primaryPhone")), pattern, SqlLikePatterns.ESCAPE_CHAR),
+                        cb.like(cb.lower(root.get("city")), pattern, SqlLikePatterns.ESCAPE_CHAR)));
             }
             return cb.and(predicates.toArray(Predicate[]::new));
         };
@@ -214,6 +213,8 @@ public class FamilyService {
                 guardian, family.getCode(), family.getName(), includeNationalId));
     }
 
+    private static final int MAX_FAMILY_STUDENTS_PAGE_SIZE = 100;
+
     @PreAuthorize(READ_ROLES)
     @Transactional(readOnly = true)
     public Page<StudentSummary> listFamilyStudents(UUID familyId, Pageable pageable) {
@@ -222,35 +223,35 @@ public class FamilyService {
         requireFamily(familyId);
         teacherScopeGuard.assertCanAccessFamily(familyId);
 
-        List<UUID> guardianIds = guardianRepository.findByFamilyId(familyId).stream()
-                .map(Guardian::getId)
-                .toList();
-        if (guardianIds.isEmpty()) {
-            return new PageImpl<>(List.of(), pageable, 0);
-        }
+        int pageNumber = pageable != null && pageable.isPaged() ? pageable.getPageNumber() : 0;
+        int pageSize = pageable != null && pageable.isPaged()
+                ? Math.min(Math.max(pageable.getPageSize(), 1), MAX_FAMILY_STUDENTS_PAGE_SIZE)
+                : 20;
+        Pageable boundedPageable = PageRequest.of(pageNumber, pageSize);
 
-        Set<UUID> studentIds = linkRepository.findByGuardianIdInAndActiveTrue(guardianIds).stream()
-                .map(StudentGuardianLink::getStudentId)
-                .collect(Collectors.toSet());
+        Page<UUID> studentIdPage;
         if (teacherScopeGuard.isRestrictedTeacher()) {
-            studentIds.retainAll(teacherScopeGuard.resolveVisibleStudentIds());
-        }
-        if (studentIds.isEmpty()) {
-            return new PageImpl<>(List.of(), pageable, 0);
+            Set<UUID> visibleStudentIds = teacherScopeGuard.resolveVisibleStudentIds();
+            if (visibleStudentIds.isEmpty()) {
+                return new PageImpl<>(List.of(), boundedPageable, 0);
+            }
+            studentIdPage = linkRepository.findDistinctActiveStudentIdsByFamilyIdAndStudentIdIn(
+                    familyId, visibleStudentIds, boundedPageable);
+        } else {
+            studentIdPage = linkRepository.findDistinctActiveStudentIdsByFamilyId(familyId, boundedPageable);
         }
 
-        List<StudentSummary> sortedStudents = studentDirectoryPort.findStudentsByIds(studentIds).stream()
+        if (studentIdPage.isEmpty()) {
+            return new PageImpl<>(List.of(), boundedPageable, studentIdPage.getTotalElements());
+        }
+
+        List<StudentSummary> pageStudents = studentDirectoryPort.findStudentsByIds(studentIdPage.getContent()).stream()
                 .sorted(Comparator.comparing(StudentSummary::lastName, String.CASE_INSENSITIVE_ORDER)
                         .thenComparing(StudentSummary::firstName, String.CASE_INSENSITIVE_ORDER)
                         .thenComparing(StudentSummary::matricule))
                 .toList();
 
-        int start = (int) pageable.getOffset();
-        if (start >= sortedStudents.size()) {
-            return new PageImpl<>(List.of(), pageable, sortedStudents.size());
-        }
-        int end = Math.min(start + pageable.getPageSize(), sortedStudents.size());
-        return new PageImpl<>(sortedStudents.subList(start, end), pageable, sortedStudents.size());
+        return new PageImpl<>(pageStudents, boundedPageable, studentIdPage.getTotalElements());
     }
 
     private Family requireFamily(UUID familyId) {

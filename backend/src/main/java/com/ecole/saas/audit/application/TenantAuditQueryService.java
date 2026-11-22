@@ -4,6 +4,7 @@ import com.ecole.saas.audit.domain.AuditLog;
 import com.ecole.saas.audit.domain.AuditLogNotFoundException;
 import com.ecole.saas.audit.domain.AuditQueryCriteria;
 import com.ecole.saas.audit.infrastructure.AuditLogRepository;
+import com.ecole.saas.shared.application.SqlLikePatterns;
 import com.ecole.saas.shared.application.SubscriptionGatePort;
 import com.ecole.saas.shared.domain.TenantContext;
 import jakarta.persistence.EntityManager;
@@ -125,7 +126,10 @@ public class TenantAuditQueryService {
                 predicates.add(cb.lessThanOrEqualTo(root.get("occurredAt"), effective.to()));
             }
             if (normalizedSearch != null) {
-                predicates.add(cb.like(cb.lower(root.get("summary")), "%" + normalizedSearch + "%"));
+                predicates.add(cb.like(
+                        cb.lower(root.get("summary")),
+                        "%" + SqlLikePatterns.escape(normalizedSearch) + "%",
+                        SqlLikePatterns.ESCAPE_CHAR));
             }
             return cb.and(predicates.toArray(Predicate[]::new));
         };

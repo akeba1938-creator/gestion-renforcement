@@ -214,10 +214,11 @@ public class FinanceAccountQueryService implements FinanceAccountPort {
         Instant startInclusive = fromDate != null ? fromDate.atStartOfDay(schoolZone).toInstant() : MIN_INSTANT;
         Instant endExclusive = toDate != null ? toDate.plusDays(1).atStartOfDay(schoolZone).toInstant() : MAX_INSTANT;
 
-        List<StudentInvoice> invoices = academicYearId != null
-                ? invoiceRepository.findByAcademicYearId(academicYearId)
-                : invoiceRepository.findAll();
+        List<Object[]> invoiceRows = academicYearId != null
+                ? invoiceRepository.aggregateByStatusForYear(academicYearId)
+                : invoiceRepository.aggregateByStatusAll();
 
+        long totalInvoiceCount = 0L;
         long draftCount = 0L;
         long issuedCount = 0L;
         long partiallyPaidCount = 0L;
@@ -228,35 +229,44 @@ public class FinanceAccountQueryService implements FinanceAccountPort {
         long totalNetXof = 0L;
         long totalInvoicePaidXof = 0L;
         long totalOutstandingXof = 0L;
-        List<UUID> activeInvoiceIds = new ArrayList<>();
 
-        for (StudentInvoice inv : invoices) {
-            switch (inv.getStatus()) {
-                case DRAFT -> draftCount++;
-                case ISSUED -> issuedCount++;
-                case PARTIALLY_PAID -> partiallyPaidCount++;
-                case PAID -> paidCount++;
-                case CANCELLED -> cancelledCount++;
+        for (Object[] row : invoiceRows) {
+            InvoiceStatus status = (InvoiceStatus) row[0];
+            long count = ((Number) row[1]).longValue();
+            long gross = ((Number) row[2]).longValue();
+            long discount = ((Number) row[3]).longValue();
+            long net = ((Number) row[4]).longValue();
+            long paid = ((Number) row[5]).longValue();
+            long balance = ((Number) row[6]).longValue();
+
+            totalInvoiceCount = Math.addExact(totalInvoiceCount, count);
+            switch (status) {
+                case DRAFT -> draftCount = Math.addExact(draftCount, count);
+                case ISSUED -> issuedCount = Math.addExact(issuedCount, count);
+                case PARTIALLY_PAID -> partiallyPaidCount = Math.addExact(partiallyPaidCount, count);
+                case PAID -> paidCount = Math.addExact(paidCount, count);
+                case CANCELLED -> cancelledCount = Math.addExact(cancelledCount, count);
             }
-            if (inv.isIssuedOrActive()) {
-                activeInvoiceIds.add(inv.getId());
-                totalGrossXof = MoneyMath.addExact(totalGrossXof, inv.getGrossAmountXof());
-                totalDiscountXof = MoneyMath.addExact(totalDiscountXof, inv.getDiscountAmountXof());
-                totalNetXof = MoneyMath.addExact(totalNetXof, inv.getNetAmountXof());
-                totalInvoicePaidXof = MoneyMath.addExact(totalInvoicePaidXof, inv.getPaidAmountXof());
-                totalOutstandingXof = MoneyMath.addExact(totalOutstandingXof, inv.getBalanceXof());
+            if (status == InvoiceStatus.ISSUED
+                    || status == InvoiceStatus.PARTIALLY_PAID
+                    || status == InvoiceStatus.PAID) {
+                totalGrossXof = MoneyMath.addExact(totalGrossXof, gross);
+                totalDiscountXof = MoneyMath.addExact(totalDiscountXof, discount);
+                totalNetXof = MoneyMath.addExact(totalNetXof, net);
+                totalInvoicePaidXof = MoneyMath.addExact(totalInvoicePaidXof, paid);
+                totalOutstandingXof = MoneyMath.addExact(totalOutstandingXof, balance);
             }
         }
 
         long overdueInstallmentCount = 0L;
         long overdueAmountXof = 0L;
-        if (!activeInvoiceIds.isEmpty()) {
-            for (PaymentSchedule schedule : scheduleRepository.findByInvoiceIdIn(activeInvoiceIds)) {
-                if (schedule.isOverdueAt(today)) {
-                    overdueInstallmentCount++;
-                    overdueAmountXof = MoneyMath.addExact(overdueAmountXof, schedule.remainingAmountXof());
-                }
-            }
+        List<Object[]> overdueRows = academicYearId != null
+                ? scheduleRepository.aggregateOverdueForYear(academicYearId, today)
+                : scheduleRepository.aggregateOverdueAll(today);
+        if (!overdueRows.isEmpty() && overdueRows.getFirst() != null) {
+            Object[] overdueRow = overdueRows.getFirst();
+            overdueInstallmentCount = ((Number) overdueRow[0]).longValue();
+            overdueAmountXof = ((Number) overdueRow[1]).longValue();
         }
 
         List<Object[]> adjustmentRows = academicYearId != null
@@ -368,7 +378,7 @@ public class FinanceAccountQueryService implements FinanceAccountPort {
                 academicYearId,
                 fromDate,
                 toDate,
-                invoices.size(),
+                totalInvoiceCount,
                 draftCount,
                 issuedCount,
                 partiallyPaidCount,
@@ -406,48 +416,65 @@ public class FinanceAccountQueryService implements FinanceAccountPort {
     private List<StudentFinancialSummary> aggregateStudentsBatch(
             List<StudentSummary> students, UUID academicYearId) {
         List<UUID> studentIds = students.stream().map(StudentSummary::id).toList();
-        List<StudentInvoice> invoices = academicYearId != null
-                ? invoiceRepository.findByStudentIdInAndAcademicYearId(studentIds, academicYearId)
-                : invoiceRepository.findByStudentIdIn(studentIds);
-        Map<UUID, List<StudentInvoice>> invoicesByStudent = new HashMap<>();
-        for (StudentInvoice invoice : invoices) {
-            invoicesByStudent.computeIfAbsent(invoice.getStudentId(), k -> new ArrayList<>()).add(invoice);
-        }
-
-        List<UUID> activeInvoiceIds = invoices.stream()
-                .filter(StudentInvoice::isIssuedOrActive)
-                .map(StudentInvoice::getId)
-                .toList();
-        Map<UUID, List<PaymentSchedule>> schedulesByInvoice = new HashMap<>();
-        if (!activeInvoiceIds.isEmpty()) {
-            for (PaymentSchedule schedule : scheduleRepository.findByInvoiceIdIn(activeInvoiceIds)) {
-                schedulesByInvoice.computeIfAbsent(schedule.getInvoiceId(), k -> new ArrayList<>()).add(schedule);
-            }
-        }
-
-        Map<UUID, List<LedgerEntry>> ledgerByStudent = new HashMap<>();
-        for (LedgerEntry entry : ledgerEntryRepository.findByStudentIdIn(studentIds)) {
-            ledgerByStudent.computeIfAbsent(entry.getStudentId(), k -> new ArrayList<>()).add(entry);
+        List<Object[]> invoiceRows = academicYearId != null
+                ? invoiceRepository.aggregateActiveByStudentIdsAndYear(studentIds, academicYearId)
+                : invoiceRepository.aggregateActiveByStudentIds(studentIds);
+        Map<UUID, long[]> invoiceTotalsByStudent = new HashMap<>(invoiceRows.size());
+        for (Object[] row : invoiceRows) {
+            UUID sid = (UUID) row[0];
+            invoiceTotalsByStudent.put(sid, new long[] {
+                ((Number) row[1]).longValue(),
+                ((Number) row[2]).longValue(),
+                ((Number) row[3]).longValue(),
+                ((Number) row[4]).longValue(),
+                ((Number) row[5]).longValue(),
+                ((Number) row[6]).longValue()
+            });
         }
 
         LocalDate today = schoolContext.todayInSchoolZone();
+        List<Object[]> overdueRows = academicYearId != null
+                ? scheduleRepository.countOverdueByStudentIdsAndYear(studentIds, academicYearId, today)
+                : scheduleRepository.countOverdueByStudentIds(studentIds, today);
+        Map<UUID, Integer> overdueByStudent = new HashMap<>(overdueRows.size());
+        for (Object[] row : overdueRows) {
+            overdueByStudent.put((UUID) row[0], Math.toIntExact(((Number) row[1]).longValue()));
+        }
+
+        List<Object[]> ledgerRows = academicYearId != null
+                ? ledgerEntryRepository.sumSignedNetBalanceByStudentIdsAndAcademicYear(studentIds, academicYearId)
+                : ledgerEntryRepository.sumSignedNetBalanceByStudentIds(studentIds);
+        Map<UUID, Long> ledgerByStudent = new HashMap<>(ledgerRows.size());
+        for (Object[] row : ledgerRows) {
+            ledgerByStudent.put((UUID) row[0], ((Number) row[1]).longValue());
+        }
+
         List<StudentFinancialSummary> summaries = new ArrayList<>(students.size());
         for (StudentSummary student : students) {
-            List<StudentInvoice> studentInvoices = invoicesByStudent.getOrDefault(student.id(), List.of());
-            List<StudentInvoice> active = studentInvoices.stream()
-                    .filter(StudentInvoice::isIssuedOrActive)
-                    .toList();
-            List<PaymentSchedule> studentSchedules = new ArrayList<>();
-            for (StudentInvoice inv : active) {
-                studentSchedules.addAll(schedulesByInvoice.getOrDefault(inv.getId(), List.of()));
-            }
-            Set<UUID> scopedIds = studentInvoices.stream().map(StudentInvoice::getId).collect(Collectors.toSet());
-            long ledgerBalance = ledgerByStudent.getOrDefault(student.id(), List.of()).stream()
-                    .filter(e -> academicYearId == null || scopedIds.contains(e.getInvoiceId()))
-                    .map(LedgerEntry::signedBalanceDeltaXof)
-                    .reduce(0L, MoneyMath::addExact);
+            long[] totals = invoiceTotalsByStudent.get(student.id());
+            int activeCount = totals != null ? Math.toIntExact(totals[0]) : 0;
+            long gross = totals != null ? totals[1] : 0L;
+            long discount = totals != null ? totals[2] : 0L;
+            long net = totals != null ? totals[3] : 0L;
+            long paid = totals != null ? totals[4] : 0L;
+            long balance = totals != null ? totals[5] : 0L;
+            int overdueCount = overdueByStudent.getOrDefault(student.id(), 0);
+            long ledgerBalance = ledgerByStudent.getOrDefault(student.id(), 0L);
 
-            summaries.add(aggregateStudent(student, academicYearId, active, studentSchedules, ledgerBalance, today));
+            summaries.add(new StudentFinancialSummary(
+                    student.id(),
+                    student.matricule(),
+                    student.firstName(),
+                    student.lastName(),
+                    academicYearId,
+                    gross,
+                    discount,
+                    net,
+                    paid,
+                    balance,
+                    ledgerBalance,
+                    activeCount,
+                    overdueCount));
         }
         return summaries;
     }

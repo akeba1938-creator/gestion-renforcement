@@ -26,7 +26,11 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -232,7 +236,17 @@ public class CenterPackService {
             }
             return cb.and(predicates.toArray(Predicate[]::new));
         };
-        return studentPackRepository.findAll(spec, pageable).map(this::toStudentPackView);
+        Page<CenterStudentPack> page = studentPackRepository.findAll(spec, pageable);
+        if (page.isEmpty()) {
+            return page.map(pack -> new StudentPackView(pack, null));
+        }
+        Set<UUID> studentIds = page.getContent().stream()
+                .map(CenterStudentPack::getStudentId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Map<UUID, StudentSummary> studentsById = studentDirectoryPort.findStudentsByIds(studentIds).stream()
+                .collect(Collectors.toMap(StudentSummary::id, Function.identity(), (a, b) -> a));
+        return page.map(pack -> new StudentPackView(pack, studentsById.get(pack.getStudentId())));
     }
 
     @PreAuthorize(CenterRoles.STAFF_READ_ROLES)
