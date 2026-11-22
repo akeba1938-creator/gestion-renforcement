@@ -1,5 +1,6 @@
 package com.ecole.saas.academic.application;
 
+import com.ecole.saas.academic.ClassRoomEnrollmentCountProvider;
 import com.ecole.saas.academic.domain.AcademicYear;
 import com.ecole.saas.academic.domain.AcademicYearNotFoundException;
 import com.ecole.saas.academic.domain.ClassRoom;
@@ -15,6 +16,7 @@ import com.ecole.saas.academic.domain.GradeLevelNotFoundException;
 import com.ecole.saas.academic.domain.Subject;
 import com.ecole.saas.academic.domain.SubjectInactiveException;
 import com.ecole.saas.academic.domain.SubjectNotFoundException;
+import com.ecole.saas.academic.infrastructure.AcademicLockRepository;
 import com.ecole.saas.academic.infrastructure.AcademicYearRepository;
 import com.ecole.saas.academic.infrastructure.ClassRoomRepository;
 import com.ecole.saas.academic.infrastructure.ClassSubjectRepository;
@@ -56,6 +58,8 @@ public class ClassRoomService {
     private final AcademicYearRepository academicYearRepository;
     private final GradeLevelRepository gradeLevelRepository;
     private final SubjectRepository subjectRepository;
+    private final AcademicLockRepository academicLockRepository;
+    private final ClassRoomEnrollmentCountProvider enrollmentCountProvider;
     private final AcademicSubscriptionGuard subscriptionGuard;
     private final AuditLogPort auditLogPort;
 
@@ -65,6 +69,8 @@ public class ClassRoomService {
             AcademicYearRepository academicYearRepository,
             GradeLevelRepository gradeLevelRepository,
             SubjectRepository subjectRepository,
+            AcademicLockRepository academicLockRepository,
+            ClassRoomEnrollmentCountProvider enrollmentCountProvider,
             AcademicSubscriptionGuard subscriptionGuard,
             AuditLogPort auditLogPort) {
         this.classRoomRepository = classRoomRepository;
@@ -72,6 +78,8 @@ public class ClassRoomService {
         this.academicYearRepository = academicYearRepository;
         this.gradeLevelRepository = gradeLevelRepository;
         this.subjectRepository = subjectRepository;
+        this.academicLockRepository = academicLockRepository;
+        this.enrollmentCountProvider = enrollmentCountProvider;
         this.subscriptionGuard = subscriptionGuard;
         this.auditLogPort = auditLogPort;
     }
@@ -178,6 +186,7 @@ public class ClassRoomService {
             int capacity) {
         TenantContext.requireCurrent();
         subscriptionGuard.requireWriteAccess();
+        academicLockRepository.lockClassRoomCapacity(classRoomId);
         ClassRoom room = requireClassRoom(classRoomId);
         AcademicYear year = requireAcademicYear(room.getAcademicYearId());
         year.assertMutable();
@@ -187,7 +196,8 @@ public class ClassRoomService {
             throw new GradeLevelInactiveException("Impossible de rattacher une classe à un niveau inactif.");
         }
 
-        room.update(gradeLevelId, name, series, roomName, capacity);
+        long activeEnrollments = enrollmentCountProvider.countActiveEnrollmentsByClassRoom(room.getId());
+        room.update(gradeLevelId, name, series, roomName, capacity, activeEnrollments);
         ClassRoom saved = classRoomRepository.save(room);
         return toClassRoomView(saved, year, level);
     }

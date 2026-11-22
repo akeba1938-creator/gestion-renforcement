@@ -2,11 +2,13 @@ package com.ecole.saas.finance.infrastructure;
 
 import com.ecole.saas.finance.domain.Payment;
 import com.ecole.saas.finance.domain.PaymentMethod;
+import jakarta.persistence.LockModeType;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.Repository;
 import org.springframework.data.repository.query.Param;
@@ -27,6 +29,10 @@ public interface PaymentRepository extends Repository<Payment, UUID>, JpaSpecifi
     Payment saveAndFlush(Payment payment);
 
     Optional<Payment> findById(UUID id);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT p FROM Payment p WHERE p.id = :id")
+    Optional<Payment> findByIdForUpdate(@Param("id") UUID id);
 
     Optional<Payment> findByIdempotencyKey(String idempotencyKey);
 

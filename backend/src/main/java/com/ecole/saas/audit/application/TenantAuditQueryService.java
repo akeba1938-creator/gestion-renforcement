@@ -4,6 +4,8 @@ import com.ecole.saas.audit.domain.AuditLog;
 import com.ecole.saas.audit.domain.AuditLogNotFoundException;
 import com.ecole.saas.audit.domain.AuditQueryCriteria;
 import com.ecole.saas.audit.infrastructure.AuditLogRepository;
+import com.ecole.saas.shared.application.SqlLikePatterns;
+import com.ecole.saas.shared.application.SubscriptionGatePort;
 import com.ecole.saas.shared.domain.TenantContext;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.Tuple;
@@ -36,15 +38,21 @@ public class TenantAuditQueryService {
 
     private final AuditLogRepository auditLogRepository;
     private final EntityManager entityManager;
+    private final SubscriptionGatePort subscriptionGatePort;
 
-    public TenantAuditQueryService(AuditLogRepository auditLogRepository, EntityManager entityManager) {
+    public TenantAuditQueryService(
+            AuditLogRepository auditLogRepository,
+            EntityManager entityManager,
+            SubscriptionGatePort subscriptionGatePort) {
         this.auditLogRepository = auditLogRepository;
         this.entityManager = entityManager;
+        this.subscriptionGatePort = subscriptionGatePort;
     }
 
     @Transactional(readOnly = true)
     public Page<AuditLog> searchAuditLogs(AuditSearchFilter filter, Pageable pageable) {
         TenantContext.requireCurrent();
+        subscriptionGatePort.assertReadAllowed();
         return auditLogRepository.findAll(buildSpecification(filter), pageable);
     }
 
@@ -52,6 +60,7 @@ public class TenantAuditQueryService {
     public AuditLog getAuditLog(UUID auditLogId) {
         Objects.requireNonNull(auditLogId, "L'identifiant d'entrée d'audit est obligatoire.");
         TenantContext.requireCurrent();
+        subscriptionGatePort.assertReadAllowed();
         return auditLogRepository.findById(auditLogId)
                 .orElseThrow(() -> new AuditLogNotFoundException("Entrée du journal d'audit introuvable."));
     }
@@ -59,6 +68,7 @@ public class TenantAuditQueryService {
     @Transactional(readOnly = true)
     public AuditSummarySnapshot getAuditSummary(Instant from, Instant to) {
         TenantContext.requireCurrent();
+        subscriptionGatePort.assertReadAllowed();
         AuditQueryCriteria.validateDateRange(from, to);
 
         Map<String, Long> byCategory = countGrouped("category", from, to);
@@ -116,7 +126,10 @@ public class TenantAuditQueryService {
                 predicates.add(cb.lessThanOrEqualTo(root.get("occurredAt"), effective.to()));
             }
             if (normalizedSearch != null) {
-                predicates.add(cb.like(cb.lower(root.get("summary")), "%" + normalizedSearch + "%"));
+                predicates.add(cb.like(
+                        cb.lower(root.get("summary")),
+                        "%" + SqlLikePatterns.escape(normalizedSearch) + "%",
+                        SqlLikePatterns.ESCAPE_CHAR));
             }
             return cb.and(predicates.toArray(Predicate[]::new));
         };

@@ -163,7 +163,7 @@ public class CommunicationCampaignService {
     @Transactional
     public CommunicationCampaign cancelCampaign(UUID campaignId, String reason, UUID actorUserId) {
         subscriptionGuard.requireWriteAccess();
-        CommunicationCampaign campaign = requireCampaign(campaignId);
+        CommunicationCampaign campaign = requireCampaignForUpdate(campaignId);
         scopeGuard.assertCanMutateCampaign(actorUserId, campaign);
         campaign.cancel(reason, clock.instant());
         CommunicationCampaign saved = campaignRepository.save(campaign);
@@ -207,7 +207,7 @@ public class CommunicationCampaignService {
             DeliveryFailureCode failureCode,
             String failureReason) {
         subscriptionGuard.requireWriteAccess();
-        MessageDelivery delivery = deliveryRepository.findById(deliveryId)
+        MessageDelivery delivery = deliveryRepository.findByIdForUpdate(deliveryId)
                 .orElseThrow(() -> new CommunicationNotFoundException("Remise de message introuvable."));
         Instant now = clock.instant();
         long previousCost = delivery.getChargedCostXof();
@@ -259,6 +259,7 @@ public class CommunicationCampaignService {
             CommunicationDispatchPersistenceService.CounterDelta delta =
                     new CommunicationDispatchPersistenceService.CounterDelta();
             delta.recordTransition(previous, saved.getStatus(), saved.getChargedCostXof() - previousCost);
+            requireCampaignForUpdate(saved.getCampaignId());
             campaignRepository.applyCounterDeltasAndRefreshStatus(
                     saved.getCampaignId(),
                     delta.queuedDelta,
@@ -526,6 +527,11 @@ public class CommunicationCampaignService {
 
     private CommunicationCampaign requireCampaign(UUID campaignId) {
         return campaignRepository.findById(campaignId)
+                .orElseThrow(() -> new CommunicationNotFoundException("Campagne de communication introuvable."));
+    }
+
+    private CommunicationCampaign requireCampaignForUpdate(UUID campaignId) {
+        return campaignRepository.findByIdForUpdate(campaignId)
                 .orElseThrow(() -> new CommunicationNotFoundException("Campagne de communication introuvable."));
     }
 

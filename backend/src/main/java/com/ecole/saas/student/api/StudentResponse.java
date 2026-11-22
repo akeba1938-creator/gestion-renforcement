@@ -29,6 +29,10 @@ public record StudentResponse(
         Instant updatedAt) {
 
     public static StudentResponse from(Student student) {
+        return from(student, false);
+    }
+
+    public static StudentResponse from(Student student, boolean includeMedicalNotes) {
         return new StudentResponse(
                 student.getId(),
                 student.getMatricule(),
@@ -42,7 +46,7 @@ public record StudentResponse(
                 student.getPhone(),
                 student.getEmail(),
                 student.getPhotoObjectKey(),
-                student.getMedicalNotes(),
+                includeMedicalNotes ? student.getMedicalNotes() : null,
                 student.getAdmissionDate(),
                 student.getStatus(),
                 student.getStatusReason(),

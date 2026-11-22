@@ -54,6 +54,11 @@ class AcademicEntitiesDomainTest {
         room.reactivate();
         assertThat(room.isActive()).isTrue();
 
+        assertThatThrownBy(() -> room.update(levelId, "Réduite", "S2", "Salle 15", 10, 15))
+                .isInstanceOf(ClassRoomCapacityConflictException.class);
+        room.update(levelId, "Ajustée", "S2", "Salle 15", 15, 15);
+        assertThat(room.getCapacity()).isEqualTo(15);
+
         assertThatThrownBy(() -> new ClassRoom(yearId, levelId, "6E-A", "6ème A", null, null, 0))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new ClassRoom(yearId, levelId, "6E-A", "6ème A", null, null, 501))

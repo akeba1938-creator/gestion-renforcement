@@ -47,6 +47,7 @@ public class AesGcmSecretCipher implements SecretCipher {
                 null,
                 new SecurityProperties.Mfa(Base64.getEncoder().encodeToString(keyBytes)),
                 null,
+                null,
                 null);
         return new AesGcmSecretCipher(properties);
     }

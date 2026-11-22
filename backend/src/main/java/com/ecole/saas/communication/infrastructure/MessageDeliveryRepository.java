@@ -4,6 +4,7 @@ import com.ecole.saas.communication.CommunicationChannel;
 import com.ecole.saas.communication.DeliveryStatus;
 import com.ecole.saas.communication.MessageCategory;
 import com.ecole.saas.communication.domain.MessageDelivery;
+import jakarta.persistence.LockModeType;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -12,10 +13,44 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 public interface MessageDeliveryRepository
         extends JpaRepository<MessageDelivery, UUID>, JpaSpecificationExecutor<MessageDelivery> {
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT d FROM MessageDelivery d WHERE d.id = :id")
+    Optional<MessageDelivery> findByIdForUpdate(@Param("id") UUID id);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT d FROM MessageDelivery d WHERE d.id IN :ids ORDER BY d.id ASC")
+    List<MessageDelivery> findByIdInForUpdate(@Param("ids") Collection<UUID> ids);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            SELECT d FROM MessageDelivery d
+            WHERE d.campaignId = :campaignId
+              AND d.status = :status
+            ORDER BY d.id ASC
+            """)
+    List<MessageDelivery> findByCampaignIdAndStatusForUpdate(
+            @Param("campaignId") UUID campaignId,
+            @Param("status") DeliveryStatus status);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            SELECT d FROM MessageDelivery d
+            WHERE d.recipientUserId = :recipientUserId
+              AND d.channel = :channel
+              AND d.status IN :statuses
+            ORDER BY d.id ASC
+            """)
+    List<MessageDelivery> findByRecipientUserIdAndChannelAndStatusInForUpdate(
+            @Param("recipientUserId") UUID recipientUserId,
+            @Param("channel") CommunicationChannel channel,
+            @Param("statuses") Collection<DeliveryStatus> statuses);
 
     interface DeliveryStatusCount {
         DeliveryStatus getStatus();

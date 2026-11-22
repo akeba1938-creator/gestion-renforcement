@@ -35,6 +35,7 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.springframework.dao.DataAccessException;
 import org.springframework.data.domain.Pageable;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -105,26 +106,30 @@ class MultiTenantIsolationTest {
 
     @Test
     void shouldIsolateTwoTenantsAcrossHibernateAndPostgresqlRls() {
-        School schoolA = schoolService.createSchool(
+        School schoolA = TestSecuritySupport.runAsAdminSaas(() -> schoolService.createSchool(
                 "ECOLE-A", "Cours Sainte-Marie Dakar", SchoolType.PRIVATE_SCHOOL,
-                "+221770000001", "contact@ecole-a.sn", "Dakar Plateau");
-        School schoolB = schoolService.createSchool(
+                "+221770000001", "contact@ecole-a.sn", "Dakar Plateau"));
+        School schoolB = TestSecuritySupport.runAsAdminSaas(() -> schoolService.createSchool(
                 "CENTRE-B", "Centre Excellence Thiès", SchoolType.TUTORING_CENTER,
-                "+221770000002", "contact@centre-b.sn", "Thiès");
+                "+221770000002", "contact@centre-b.sn", "Thiès"));
 
         TenantId tenantA = TenantId.of(schoolA.getId());
         TenantId tenantB = TenantId.of(schoolB.getId());
 
-        SubscriptionPlan plan = subscriptionService.createPlan(
+        SubscriptionPlan plan = TestSecuritySupport.runAsAdminSaas(() -> subscriptionService.createPlan(
                 "PRO-" + UUID.randomUUID().toString().substring(0, 6),
                 "Forfait Pro",
                 50_000L,
                 500_000L,
                 600,
                 30,
-                10_240);
+                10_240));
 
         Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+
+        Subscription subA = TestSecuritySupport.runAsAdminSaas(() -> TenantContext.executeWithTenant(tenantA, () ->
+                subscriptionService.createSubscription(
+                        plan.getId(), SubscriptionStatus.ACTIVE, BillingCycle.MONTHLY, now, now.plus(30, ChronoUnit.DAYS))));
 
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(
@@ -132,9 +137,17 @@ class MultiTenantIsolationTest {
                         null,
                         List.of(new SimpleGrantedAuthority("ROLE_DIRECTOR"))));
 
-        Subscription subA = TenantContext.executeWithTenant(tenantA, () ->
-                subscriptionService.createSubscription(
-                        plan.getId(), SubscriptionStatus.ACTIVE, BillingCycle.MONTHLY, now, now.plus(30, ChronoUnit.DAYS)));
+        // V16 RBAC : SchoolService (hors SchoolDirectory) et SubscriptionService réservés à ADMIN_SAAS
+        assertThatThrownBy(() -> schoolService.createSchool(
+                "FORBID", "Interdit", SchoolType.PRIVATE_SCHOOL, "+221770000003", "no@ecole.sn", "Dakar"))
+                .isInstanceOf(AccessDeniedException.class);
+        assertThatThrownBy(() -> schoolService.findById(schoolA.getId()))
+                .isInstanceOf(AccessDeniedException.class);
+        assertThatThrownBy(() -> schoolService.findByCode("ECOLE-A"))
+                .isInstanceOf(AccessDeniedException.class);
+        assertThatThrownBy(() -> subscriptionService.findAllForCurrentTenant())
+                .isInstanceOf(AccessDeniedException.class);
+
         User userA = TenantContext.executeWithTenant(tenantA, () ->
                 userAccountService.createUserWithRole(
                         "direction@exemple.sn", "+221771111111", "Awa", "Ndiaye",
@@ -148,9 +161,9 @@ class MultiTenantIsolationTest {
         });
 
         // Même code d'année scolaire et même email dans l'établissement B : autorisé grâce aux unicités incluant tenant_id
-        Subscription subB = TenantContext.executeWithTenant(tenantB, () ->
+        Subscription subB = TestSecuritySupport.runAsAdminSaas(() -> TenantContext.executeWithTenant(tenantB, () ->
                 subscriptionService.createSubscription(
-                        plan.getId(), SubscriptionStatus.ACTIVE, BillingCycle.YEARLY, now, now.plus(365, ChronoUnit.DAYS)));
+                        plan.getId(), SubscriptionStatus.ACTIVE, BillingCycle.YEARLY, now, now.plus(365, ChronoUnit.DAYS))));
         User userB = TenantContext.executeWithTenant(tenantB, () ->
                 userAccountService.createUserWithRole(
                         "direction@exemple.sn", "+221772222222", "Moussa", "Diop",
@@ -183,10 +196,12 @@ class MultiTenantIsolationTest {
                     .containsExactly(userA.getId());
             assertThat(userAccountService.findById(userB.getId())).isEmpty();
 
-            assertThat(subscriptionService.findAllForCurrentTenant())
-                    .extracting(Subscription::getId)
-                    .containsExactly(subA.getId());
-            assertThat(subscriptionService.findById(subB.getId())).isEmpty();
+            TestSecuritySupport.runAsAdminSaas(() -> {
+                assertThat(subscriptionService.findAllForCurrentTenant())
+                        .extracting(Subscription::getId)
+                        .containsExactly(subA.getId());
+                assertThat(subscriptionService.findById(subB.getId())).isEmpty();
+            });
         });
 
         // Vérifier que les données de B n'ont pas été modifiées
@@ -252,6 +267,67 @@ class MultiTenantIsolationTest {
             assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM users", Integer.class)).isZero();
             assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM user_roles", Integer.class)).isZero();
             assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM subscriptions", Integer.class)).isZero();
+
+            // V16 : contexte plateforme (current_tenant_id() IS NULL) autorisé sur schools et subscription_plans
+            List<UUID> platformVisibleSchools = jdbcTemplate.queryForList("SELECT id FROM schools", UUID.class);
+            assertThat(platformVisibleSchools).contains(schoolA.getId(), schoolB.getId());
+            int updatedPlansFromPlatform = jdbcTemplate.update(
+                    "UPDATE subscription_plans SET name = 'Forfait Pro Plateforme' WHERE id = ?", plan.getId());
+            assertThat(updatedPlansFromPlatform).isEqualTo(1);
         });
+
+        // 4. V16 : RLS fail-closed sur schools et subscription_plans en contexte tenant
+        TenantContext.runWithTenant(tenantA, () -> transactionTemplate.executeWithoutResult(status -> {
+            jdbcTemplate.execute("SET LOCAL ROLE ecole_app");
+
+            List<UUID> tenantVisibleSchools = jdbcTemplate.queryForList("SELECT id FROM schools", UUID.class);
+            assertThat(tenantVisibleSchools).containsExactly(schoolA.getId());
+
+            int updatedOtherSchool = jdbcTemplate.update(
+                    "UPDATE schools SET name = 'Piraté B' WHERE id = ?", schoolB.getId());
+            assertThat(updatedOtherSchool).isZero();
+
+            // subscription_plans : lecture autorisée à tous, écriture bloquée en contexte tenant
+            List<UUID> visiblePlans = jdbcTemplate.queryForList("SELECT id FROM subscription_plans", UUID.class);
+            assertThat(visiblePlans).contains(plan.getId());
+
+            int updatedPlanFromTenant = jdbcTemplate.update(
+                    "UPDATE subscription_plans SET name = 'Piraté' WHERE id = ?", plan.getId());
+            assertThat(updatedPlanFromTenant).isZero();
+        }));
+
+        // V16 : INSERT sur schools et subscription_plans refusé en contexte tenant (WITH CHECK)
+        TenantContext.runWithTenant(tenantA, () -> assertThatThrownBy(() ->
+                transactionTemplate.executeWithoutResult(status -> {
+                    jdbcTemplate.execute("SET LOCAL ROLE ecole_app");
+                    jdbcTemplate.update(
+                            "INSERT INTO schools (id, code, name, school_type, status) "
+                                    + "VALUES (?, 'INJ-SCH', 'Injection', 'PRIVATE_SCHOOL', 'ACTIVE')",
+                            UUID.randomUUID());
+                }))
+                .isInstanceOf(DataAccessException.class));
+
+        TenantContext.runWithTenant(tenantA, () -> assertThatThrownBy(() ->
+                transactionTemplate.executeWithoutResult(status -> {
+                    jdbcTemplate.execute("SET LOCAL ROLE ecole_app");
+                    jdbcTemplate.update(
+                            "INSERT INTO subscription_plans (id, code, name, monthly_price_xof, yearly_price_xof, max_students, max_users, max_storage_mb) "
+                                    + "VALUES (?, 'INJ-PLAN', 'Injection', 1000, 10000, 10, 5, 100)",
+                            UUID.randomUUID());
+                }))
+                .isInstanceOf(DataAccessException.class));
+
+        // 5. V16 : REVOKE DELETE ON refresh_tokens, platform_refresh_tokens FROM ecole_app
+        TenantContext.runWithTenant(tenantA, () -> assertThatThrownBy(() ->
+                transactionTemplate.executeWithoutResult(status -> {
+                    jdbcTemplate.execute("SET LOCAL ROLE ecole_app");
+                    jdbcTemplate.update("DELETE FROM refresh_tokens WHERE id = ?", UUID.randomUUID());
+                }))
+                .isInstanceOf(DataAccessException.class));
+
+        assertThatThrownBy(() -> transactionTemplate.executeWithoutResult(status -> {
+            jdbcTemplate.execute("SET LOCAL ROLE ecole_app");
+            jdbcTemplate.update("DELETE FROM platform_refresh_tokens WHERE id = ?", UUID.randomUUID());
+        })).isInstanceOf(DataAccessException.class);
     }
 }

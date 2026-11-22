@@ -1,5 +1,6 @@
 package com.ecole.saas.schooldocs.application;
 
+import com.ecole.saas.center.CenterDirectoryPort;
 import com.ecole.saas.family.FamilyDirectoryPort;
 import com.ecole.saas.family.GuardianContactSummary;
 import com.ecole.saas.schooldocs.DocumentType;
@@ -8,7 +9,9 @@ import com.ecole.saas.schooldocs.domain.SchoolDocForbiddenException;
 import com.ecole.saas.student.StudentContactSummary;
 import com.ecole.saas.student.StudentDirectoryPort;
 import com.ecole.saas.teacher.TeacherDirectoryPort;
+import com.ecole.saas.teacher.TeacherSummary;
 import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -51,14 +54,17 @@ class SchoolDocsAccessScopeGuard {
             DocumentType.SUMMONS);
 
     private final TeacherDirectoryPort teacherDirectoryPort;
+    private final CenterDirectoryPort centerDirectoryPort;
     private final StudentDirectoryPort studentDirectoryPort;
     private final FamilyDirectoryPort familyDirectoryPort;
 
     SchoolDocsAccessScopeGuard(
             TeacherDirectoryPort teacherDirectoryPort,
+            CenterDirectoryPort centerDirectoryPort,
             StudentDirectoryPort studentDirectoryPort,
             FamilyDirectoryPort familyDirectoryPort) {
         this.teacherDirectoryPort = teacherDirectoryPort;
+        this.centerDirectoryPort = centerDirectoryPort;
         this.studentDirectoryPort = studentDirectoryPort;
         this.familyDirectoryPort = familyDirectoryPort;
     }
@@ -93,11 +99,20 @@ class SchoolDocsAccessScopeGuard {
         }
         if (hasAuthority("ROLE_TEACHER") || hasAuthority("ROLE_TUTOR")) {
             Set<UUID> assignedClassRoomIds = teacherDirectoryPort.findAssignedClassRoomIdsByUserId(actorUserId);
-            if (assignedClassRoomIds.isEmpty()) {
-                return CallerReadScope.teacherScope(Set.of(), Set.of());
+            Set<UUID> visibleStudentIds = new HashSet<>();
+            if (!assignedClassRoomIds.isEmpty()) {
+                visibleStudentIds.addAll(studentDirectoryPort.findActiveStudentIdsByClassRooms(assignedClassRoomIds));
             }
-            Set<UUID> enrolledStudentIds = studentDirectoryPort.findActiveStudentIdsByClassRooms(assignedClassRoomIds);
-            return CallerReadScope.teacherScope(Set.copyOf(assignedClassRoomIds), Set.copyOf(enrolledStudentIds));
+            if (hasAuthority("ROLE_TUTOR")) {
+                Optional<TeacherSummary> teacherOpt = teacherDirectoryPort.findTeacherByUserId(actorUserId);
+                if (teacherOpt.isPresent()) {
+                    Set<UUID> groupIds = centerDirectoryPort.findAssignedGroupIdsByTeacherId(teacherOpt.get().id());
+                    if (!groupIds.isEmpty()) {
+                        visibleStudentIds.addAll(centerDirectoryPort.findActiveStudentIdsByGroupIds(groupIds));
+                    }
+                }
+            }
+            return CallerReadScope.teacherScope(Set.copyOf(assignedClassRoomIds), Set.copyOf(visibleStudentIds));
         }
         if (hasAuthority("ROLE_PARENT")) {
             Optional<GuardianContactSummary> guardianOpt =

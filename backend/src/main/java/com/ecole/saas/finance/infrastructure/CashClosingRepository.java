@@ -1,17 +1,23 @@
 package com.ecole.saas.finance.infrastructure;
 
 import com.ecole.saas.finance.domain.CashClosing;
+import jakarta.persistence.LockModeType;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface CashClosingRepository
         extends JpaRepository<CashClosing, UUID>, JpaSpecificationExecutor<CashClosing> {
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT c FROM CashClosing c WHERE c.id = :id")
+    Optional<CashClosing> findByIdForUpdate(@Param("id") UUID id);
 
     boolean existsByClosingDate(LocalDate closingDate);
 

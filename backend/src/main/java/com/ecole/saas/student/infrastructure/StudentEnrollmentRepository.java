@@ -49,6 +49,8 @@ public interface StudentEnrollmentRepository
     List<StudentEnrollment> findByClassRoomIdInAndStatus(
             Collection<UUID> classRoomIds, EnrollmentStatus status);
 
+    List<StudentEnrollment> findByStudentIdOrderByCreatedAtDesc(UUID studentId);
+
     Page<StudentEnrollment> findByStudentId(UUID studentId, Pageable pageable);
 
     Page<StudentEnrollment> findByStudentIdAndClassRoomIdIn(

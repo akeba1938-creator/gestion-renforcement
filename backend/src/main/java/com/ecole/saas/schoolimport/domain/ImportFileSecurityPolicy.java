@@ -163,17 +163,41 @@ public final class ImportFileSecurityPolicy {
     }
 
     /**
-     * Neutralise toute formule Excel/Calc potentiellement dangereuse dans une cellule CSV exportée.
+     * Neutralise toute formule Excel/Calc potentiellement dangereuse dans une cellule CSV exportée
+     * (y compris précédée d'espaces ou de retours à la ligne).
      */
     public static String neutralizeCsvFormula(String raw) {
         if (raw == null || raw.isEmpty()) {
             return "";
         }
-        char first = raw.charAt(0);
-        if (first == '=' || first == '+' || first == '-' || first == '@' || first == '\t' || first == '\r') {
-            return "'" + raw;
+        String sanitized = raw.replace("\0", "");
+        if (sanitized.isEmpty()) {
+            return "";
         }
-        return raw;
+        if (startsWithDangerousFormulaChar(sanitized)) {
+            return "'" + sanitized;
+        }
+        return sanitized;
+    }
+
+    private static boolean startsWithDangerousFormulaChar(String value) {
+        char first = value.charAt(0);
+        if (isFormulaTrigger(first)) {
+            return true;
+        }
+        int idx = 0;
+        while (idx < value.length() && (value.charAt(idx) == ' ' || value.charAt(idx) == '\t'
+                || value.charAt(idx) == '\r' || value.charAt(idx) == '\n')) {
+            if (value.charAt(idx) == '\t' || value.charAt(idx) == '\r') {
+                return true;
+            }
+            idx++;
+        }
+        return idx < value.length() && isFormulaTrigger(value.charAt(idx));
+    }
+
+    private static boolean isFormulaTrigger(char c) {
+        return c == '=' || c == '+' || c == '-' || c == '@' || c == '\t' || c == '\r';
     }
 
     public static String escapeCsvCell(String raw, char delimiter) {

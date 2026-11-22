@@ -9,6 +9,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -72,6 +73,10 @@ public class AttendanceSession extends TenantScopedEntity {
 
     @Column(name = "notes", length = 500)
     private String notes;
+
+    @Version
+    @Column(name = "version", nullable = false)
+    private long version;
 
     protected AttendanceSession() {
     }
@@ -225,6 +230,10 @@ public class AttendanceSession extends TenantScopedEntity {
 
     public String getNotes() {
         return notes;
+    }
+
+    public long getVersion() {
+        return version;
     }
 
     private static void validateTimes(LocalTime startTime, LocalTime endTime) {

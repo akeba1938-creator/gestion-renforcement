@@ -1,17 +1,23 @@
 package com.ecole.saas.communication.infrastructure;
 
 import com.ecole.saas.communication.domain.CommunicationCampaign;
+import jakarta.persistence.LockModeType;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface CommunicationCampaignRepository
         extends JpaRepository<CommunicationCampaign, UUID>, JpaSpecificationExecutor<CommunicationCampaign> {
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT c FROM CommunicationCampaign c WHERE c.id = :id")
+    Optional<CommunicationCampaign> findByIdForUpdate(@Param("id") UUID id);
 
     interface CampaignTotalsSummary {
         long getTotalCampaigns();

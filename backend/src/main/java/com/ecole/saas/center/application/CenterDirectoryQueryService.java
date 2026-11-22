@@ -25,10 +25,12 @@ import com.ecole.saas.center.infrastructure.CenterSessionAttendanceRepository;
 import com.ecole.saas.center.infrastructure.CenterSessionPackRepository;
 import com.ecole.saas.center.infrastructure.CenterSessionRepository;
 import com.ecole.saas.center.infrastructure.CenterStudentPackRepository;
+import com.ecole.saas.shared.domain.TenantContext;
 import com.ecole.saas.teacher.TeacherDirectoryPort;
 import com.ecole.saas.teacher.TeacherSummary;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -77,11 +79,13 @@ class CenterDirectoryQueryService implements CenterDirectoryPort {
 
     @Override
     public Optional<CenterGroupSummary> findGroupById(UUID groupId) {
+        TenantContext.requireCurrent();
         return groupRepository.findById(groupId).map(this::toGroupSummary);
     }
 
     @Override
     public List<CenterGroupSummary> findActiveGroupsByAcademicYear(UUID academicYearId) {
+        TenantContext.requireCurrent();
         List<CenterGroup> groups =
                 groupRepository.findByAcademicYearIdAndStatusOrderByCodeAsc(academicYearId, CenterGroupStatus.ACTIVE);
         if (groups.isEmpty()) {
@@ -101,6 +105,7 @@ class CenterDirectoryQueryService implements CenterDirectoryPort {
 
     @Override
     public List<CenterGroupEnrollmentSummary> findActiveEnrollmentsByStudent(UUID studentId) {
+        TenantContext.requireCurrent();
         List<CenterGroupEnrollment> enrollments =
                 enrollmentRepository.findByStudentIdAndStatus(studentId, CenterGroupEnrollmentStatus.ACTIVE);
         return mapEnrollments(enrollments);
@@ -108,18 +113,32 @@ class CenterDirectoryQueryService implements CenterDirectoryPort {
 
     @Override
     public List<CenterGroupEnrollmentSummary> findActiveEnrollmentsByGroup(UUID groupId) {
+        TenantContext.requireCurrent();
         List<CenterGroupEnrollment> enrollments =
                 enrollmentRepository.findByGroupIdAndStatus(groupId, CenterGroupEnrollmentStatus.ACTIVE);
         return mapEnrollments(enrollments);
     }
 
     @Override
+    public Set<UUID> findActiveStudentIdsByGroupIds(Collection<UUID> groupIds) {
+        TenantContext.requireCurrent();
+        if (groupIds == null || groupIds.isEmpty()) {
+            return Set.of();
+        }
+        return enrollmentRepository.findByGroupIdInAndStatus(groupIds, CenterGroupEnrollmentStatus.ACTIVE).stream()
+                .map(CenterGroupEnrollment::getStudentId)
+                .collect(Collectors.toUnmodifiableSet());
+    }
+
+    @Override
     public Optional<CenterSessionPackSummary> findPackById(UUID packId) {
+        TenantContext.requireCurrent();
         return packRepository.findById(packId).map(this::toPackSummary);
     }
 
     @Override
     public Set<UUID> findAssignedGroupIdsByTeacherId(UUID teacherId) {
+        TenantContext.requireCurrent();
         return groupTutorRepository.findByTeacherIdAndActiveTrue(teacherId).stream()
                 .map(CenterGroupTutor::getGroupId)
                 .collect(Collectors.toSet());
@@ -127,11 +146,13 @@ class CenterDirectoryQueryService implements CenterDirectoryPort {
 
     @Override
     public boolean isTeacherAssignedToGroup(UUID teacherId, UUID groupId) {
+        TenantContext.requireCurrent();
         return groupTutorRepository.existsByGroupIdAndTeacherIdAndActiveTrue(groupId, teacherId);
     }
 
     @Override
     public StudentCenterSummary getStudentCenterSummary(UUID studentId, LocalDate fromDate, LocalDate toDate) {
+        TenantContext.requireCurrent();
         List<CenterGroupEnrollment> activeEnrollments =
                 enrollmentRepository.findByStudentIdAndStatus(studentId, CenterGroupEnrollmentStatus.ACTIVE);
         List<CenterStudentPack> activePacks = studentPackRepository
@@ -171,6 +192,7 @@ class CenterDirectoryQueryService implements CenterDirectoryPort {
     @Override
     public TutorCenterWorkloadSummary getTutorWorkloadSummary(
             UUID teacherId, LocalDate fromDate, LocalDate toDate) {
+        TenantContext.requireCurrent();
         List<CenterGroupTutor> allAssignments = groupTutorRepository.findByTeacherId(teacherId);
         Set<UUID> activeGroupIds = allAssignments.stream()
                 .filter(CenterGroupTutor::isActive)

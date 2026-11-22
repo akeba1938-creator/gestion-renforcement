@@ -570,7 +570,7 @@ public class ReportingQueryService {
                 ? financeAccountPort.getStudentFinancialSummary(studentId, resolvedYearId)
                 : null;
 
-        long issuedDocumentsCount = schoolDocsDirectoryPort.findDocumentsByStudentId(studentId).size();
+        long issuedDocumentsCount = schoolDocsDirectoryPort.countIssuedDocumentsByStudentId(studentId);
 
         return new StudentOverviewReportView(
                 school.code(),

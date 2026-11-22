@@ -5,8 +5,9 @@ import com.ecole.saas.shared.domain.ErrorCategory;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import java.net.URI;
-import java.time.Instant;
+import java.time.Clock;
 import java.util.List;
+import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -38,6 +39,12 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 public class GlobalProblemHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalProblemHandler.class);
+
+    private final Clock clock;
+
+    public GlobalProblemHandler(Clock clock) {
+        this.clock = clock;
+    }
 
     @ExceptionHandler(BusinessException.class)
     public ProblemDetail handleBusinessException(BusinessException ex, HttpServletRequest request) {
@@ -153,25 +160,31 @@ public class GlobalProblemHandler {
 
     @ExceptionHandler(IllegalArgumentException.class)
     public ProblemDetail handleIllegalArgument(IllegalArgumentException ex, HttpServletRequest request) {
+        log.warn(
+                "Paramètre invalide sur {} {} (requestId={})",
+                request.getMethod(),
+                safeInstanceUri(request),
+                MDC.get("requestId"));
         return createProblem(
                 HttpStatus.BAD_REQUEST,
                 "urn:ecole:problem:invalid-argument",
                 "Paramètre invalide",
-                ex.getMessage() != null && !ex.getMessage().isBlank()
-                        ? ex.getMessage()
-                        : "Un paramètre de la requête est invalide.",
+                "Un paramètre de la requête est invalide.",
                 request);
     }
 
     @ExceptionHandler(IllegalStateException.class)
     public ProblemDetail handleIllegalState(IllegalStateException ex, HttpServletRequest request) {
+        log.warn(
+                "État invalide sur {} {} (requestId={})",
+                request.getMethod(),
+                safeInstanceUri(request),
+                MDC.get("requestId"));
         return createProblem(
                 HttpStatus.CONFLICT,
                 "urn:ecole:problem:invalid-state",
                 "Opération impossible",
-                ex.getMessage() != null && !ex.getMessage().isBlank()
-                        ? ex.getMessage()
-                        : "L'état courant ne permet pas d'effectuer cette opération.",
+                "L'état courant ne permet pas d'effectuer cette opération.",
                 request);
     }
 
@@ -224,7 +237,7 @@ public class GlobalProblemHandler {
                 request);
     }
 
-    private static ProblemDetail createProblem(
+    private ProblemDetail createProblem(
             HttpStatus status,
             String type,
             String title,
@@ -233,13 +246,29 @@ public class GlobalProblemHandler {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, detail);
         problem.setType(URI.create(type));
         problem.setTitle(title);
-        problem.setInstance(URI.create(request.getRequestURI()));
-        problem.setProperty("timestamp", Instant.now().toString());
+        problem.setInstance(safeInstanceUri(request));
+        problem.setProperty("timestamp", clock.instant().toString());
         String requestId = MDC.get("requestId");
-        if (requestId != null && !requestId.isBlank()) {
-            problem.setProperty("requestId", requestId);
+        if (requestId == null || requestId.isBlank()) {
+            requestId = UUID.randomUUID().toString();
         }
+        problem.setProperty("requestId", requestId);
         return problem;
+    }
+
+    static URI safeInstanceUri(HttpServletRequest request) {
+        if (request == null) {
+            return URI.create("/");
+        }
+        String rawUri = request.getRequestURI();
+        if (rawUri == null || rawUri.isBlank()) {
+            return URI.create("/");
+        }
+        try {
+            return URI.create(rawUri);
+        } catch (IllegalArgumentException ex) {
+            return URI.create("/");
+        }
     }
 
     private static HttpStatus mapStatus(ErrorCategory category) {

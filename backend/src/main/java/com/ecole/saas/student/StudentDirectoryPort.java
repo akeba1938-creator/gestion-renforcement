@@ -36,6 +36,8 @@ public interface StudentDirectoryPort {
 
     Optional<StudentEnrollmentSummary> findCurrentEnrollmentForStudent(UUID studentId);
 
+    List<StudentEnrollmentSummary> findEnrollmentsByStudent(UUID studentId);
+
     List<StudentEnrollmentSummary> findActiveEnrollmentsByClassRoom(UUID classRoomId);
 
     List<StudentEnrollmentSummary> findActiveEnrollmentsByClassRooms(Collection<UUID> classRoomIds);

@@ -56,7 +56,8 @@ class SchoolDocsSubscriptionGuard {
         long projectedBytes = Math.addExact(currentBytes, Math.max(0L, additionalBytes));
         long projectedMiB = DocumentSecurityPolicy.bytesToCeilingMiB(projectedBytes);
         long additionalMiB = Math.max(0L, projectedMiB - currentMiB);
-        subscriptionAccessPort.assertQuotaAvailable(QuotaResource.STORAGE_MB, currentMiB, additionalMiB);
+        long totalCurrentMiB = subscriptionAccessPort.currentUsage(QuotaResource.STORAGE_MB);
+        subscriptionAccessPort.assertQuotaAvailable(QuotaResource.STORAGE_MB, totalCurrentMiB, additionalMiB);
     }
 
     SchoolProfileSnapshot requireSchoolProfile() {

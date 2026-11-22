@@ -210,7 +210,7 @@ public class PlatformSubscriptionService {
     public Page<SubscriptionEvent> listEvents(UUID schoolId, UUID subscriptionId, Pageable pageable) {
         SchoolSummary school = requireExistingSchool(schoolId);
         return executeInSchoolTenant(school.id(), true, () -> {
-            requireSubscription(subscriptionId);
+            requireSubscriptionReadOnly(subscriptionId);
             return eventRepository.findBySubscriptionIdOrderBySequenceNoDesc(subscriptionId, pageable);
         });
     }
@@ -609,6 +609,11 @@ public class PlatformSubscriptionService {
     }
 
     private Subscription requireSubscription(UUID subscriptionId) {
+        return subscriptionRepository.findByIdForUpdate(subscriptionId)
+                .orElseThrow(() -> new SubscriptionNotFoundException("Abonnement introuvable."));
+    }
+
+    private Subscription requireSubscriptionReadOnly(UUID subscriptionId) {
         return subscriptionRepository.findById(subscriptionId)
                 .orElseThrow(() -> new SubscriptionNotFoundException("Abonnement introuvable."));
     }

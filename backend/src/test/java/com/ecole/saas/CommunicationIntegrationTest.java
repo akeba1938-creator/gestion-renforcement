@@ -1175,29 +1175,31 @@ class CommunicationIntegrationTest {
 
     private School createSchool(String prefix, SchoolType type) {
         String code = prefix + "-" + UUID.randomUUID().toString().substring(0, 6).toUpperCase();
-        return schoolService.createSchool(
-                code, "École " + code, type, "+221770000000", "contact@" + code.toLowerCase() + ".sn", "Dakar");
+        return TestSecuritySupport.runAsAdminSaas(() -> schoolService.createSchool(
+                code, "École " + code, type, "+221770000000", "contact@" + code.toLowerCase() + ".sn", "Dakar"));
     }
 
     private void createSubscription(School school, SubscriptionStatus status, Instant endsAt) {
-        SubscriptionPlan plan = subscriptionService.createPlan(
-                "PLAN-" + UUID.randomUUID().toString().substring(0, 6).toUpperCase(),
-                "Forfait Communication",
-                20_000L,
-                200_000L,
-                200,
-                50,
-                5_000);
-        Instant startsAt = endsAt.minus(60, ChronoUnit.DAYS);
-        TenantContext.runWithTenant(TenantId.of(school.getId()), () -> subscriptionService.createSubscription(
-                plan.getId(), status, BillingCycle.MONTHLY, startsAt, endsAt));
+        TestSecuritySupport.runAsAdminSaas(() -> {
+            SubscriptionPlan plan = subscriptionService.createPlan(
+                    "PLAN-" + UUID.randomUUID().toString().substring(0, 6).toUpperCase(),
+                    "Forfait Communication",
+                    20_000L,
+                    200_000L,
+                    200,
+                    50,
+                    5_000);
+            Instant startsAt = endsAt.minus(60, ChronoUnit.DAYS);
+            TenantContext.runWithTenant(TenantId.of(school.getId()), () -> subscriptionService.createSubscription(
+                    plan.getId(), status, BillingCycle.MONTHLY, startsAt, endsAt));
+        });
     }
 
     private User createTenantUser(UUID schoolId, String email, String firstName, String lastName, RoleCode role) {
-        return TenantContext.executeWithTenant(
+        return TestSecuritySupport.runAsDirector(() -> TenantContext.executeWithTenant(
                 TenantId.of(schoolId),
                 () -> userAccountService.createUserWithRole(
-                        email, "+221770000001", firstName, lastName, "argon2-test-hash", role));
+                        email, "+221770000001", firstName, lastName, "argon2-test-hash", role)));
     }
 
     private void linkUserToGuardian(UUID schoolId, UUID guardianId, UUID userId) {

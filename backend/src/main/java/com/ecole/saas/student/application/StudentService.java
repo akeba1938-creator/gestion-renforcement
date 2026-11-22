@@ -7,6 +7,7 @@ import com.ecole.saas.audit.AuditOutcome;
 import com.ecole.saas.audit.AuditRecordCommand;
 import com.ecole.saas.school.SchoolDirectory;
 import com.ecole.saas.school.SchoolProfileSnapshot;
+import com.ecole.saas.shared.application.SqlLikePatterns;
 import com.ecole.saas.shared.domain.TenantContext;
 import com.ecole.saas.shared.domain.TenantId;
 import com.ecole.saas.student.domain.MatriculeFormatter;
@@ -24,7 +25,6 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -101,12 +101,12 @@ public class StudentService {
             if (gender != null) {
                 predicates.add(cb.equal(root.get("gender"), gender));
             }
-            if (search != null && !search.isBlank()) {
-                String pattern = "%" + search.trim().toLowerCase(Locale.ROOT) + "%";
+            String pattern = SqlLikePatterns.containsLower(search);
+            if (pattern != null) {
                 predicates.add(cb.or(
-                        cb.like(cb.lower(root.get("matricule")), pattern),
-                        cb.like(cb.lower(root.get("firstName")), pattern),
-                        cb.like(cb.lower(root.get("lastName")), pattern)));
+                        cb.like(cb.lower(root.get("matricule")), pattern, SqlLikePatterns.ESCAPE_CHAR),
+                        cb.like(cb.lower(root.get("firstName")), pattern, SqlLikePatterns.ESCAPE_CHAR),
+                        cb.like(cb.lower(root.get("lastName")), pattern, SqlLikePatterns.ESCAPE_CHAR)));
             }
             return cb.and(predicates.toArray(Predicate[]::new));
         };

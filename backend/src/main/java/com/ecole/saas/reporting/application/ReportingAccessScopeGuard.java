@@ -1,5 +1,6 @@
 package com.ecole.saas.reporting.application;
 
+import com.ecole.saas.center.CenterDirectoryPort;
 import com.ecole.saas.family.FamilyDirectoryPort;
 import com.ecole.saas.family.GuardianContactSummary;
 import com.ecole.saas.reporting.ReportType;
@@ -8,7 +9,9 @@ import com.ecole.saas.reporting.domain.ReportingForbiddenException;
 import com.ecole.saas.student.StudentContactSummary;
 import com.ecole.saas.student.StudentDirectoryPort;
 import com.ecole.saas.teacher.TeacherDirectoryPort;
+import com.ecole.saas.teacher.TeacherSummary;
 import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -45,14 +48,17 @@ class ReportingAccessScopeGuard {
             "ROLE_STUDENT");
 
     private final TeacherDirectoryPort teacherDirectoryPort;
+    private final CenterDirectoryPort centerDirectoryPort;
     private final StudentDirectoryPort studentDirectoryPort;
     private final FamilyDirectoryPort familyDirectoryPort;
 
     ReportingAccessScopeGuard(
             TeacherDirectoryPort teacherDirectoryPort,
+            CenterDirectoryPort centerDirectoryPort,
             StudentDirectoryPort studentDirectoryPort,
             FamilyDirectoryPort familyDirectoryPort) {
         this.teacherDirectoryPort = teacherDirectoryPort;
+        this.centerDirectoryPort = centerDirectoryPort;
         this.studentDirectoryPort = studentDirectoryPort;
         this.familyDirectoryPort = familyDirectoryPort;
     }
@@ -99,9 +105,19 @@ class ReportingAccessScopeGuard {
 
         if (authorities.contains("ROLE_TEACHER") || authorities.contains("ROLE_TUTOR")) {
             Set<UUID> assignedClassRoomIds = teacherDirectoryPort.findAssignedClassRoomIdsByUserId(actorUserId);
-            Set<UUID> enrolledStudentIds = assignedClassRoomIds.isEmpty()
-                    ? Set.of()
-                    : studentDirectoryPort.findActiveStudentIdsByClassRooms(assignedClassRoomIds);
+            Set<UUID> enrolledStudentIds = new HashSet<>();
+            if (!assignedClassRoomIds.isEmpty()) {
+                enrolledStudentIds.addAll(studentDirectoryPort.findActiveStudentIdsByClassRooms(assignedClassRoomIds));
+            }
+            if (authorities.contains("ROLE_TUTOR")) {
+                Optional<TeacherSummary> teacherOpt = teacherDirectoryPort.findTeacherByUserId(actorUserId);
+                if (teacherOpt.isPresent()) {
+                    Set<UUID> groupIds = centerDirectoryPort.findAssignedGroupIdsByTeacherId(teacherOpt.get().id());
+                    if (!groupIds.isEmpty()) {
+                        enrolledStudentIds.addAll(centerDirectoryPort.findActiveStudentIdsByGroupIds(groupIds));
+                    }
+                }
+            }
             return new CallerReportingScope(
                     ScopeMode.TEACHER_CLASSES,
                     EnumSet.of(ReportType.ACADEMIC, ReportType.ATTENDANCE, ReportType.STUDENT_OVERVIEW),

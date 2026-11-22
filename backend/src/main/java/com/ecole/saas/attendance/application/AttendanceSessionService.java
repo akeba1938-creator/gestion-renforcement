@@ -296,7 +296,7 @@ public class AttendanceSessionService {
             throw new AttendanceValidationException("Au moins un pointage élève doit être fourni.");
         }
 
-        AttendanceSession session = requireSession(sessionId);
+        AttendanceSession session = requireSessionForUpdate(sessionId);
         teacherScopeGuard.assertCanAccessSessionScope(session.getClassRoomId(), session.getSubjectId());
         session.assertRollCallEditable();
         if (session.getStatus() == AttendanceSessionStatus.SUBMITTED && teacherScopeGuard.isRestrictedTeacher()) {
@@ -362,7 +362,7 @@ public class AttendanceSessionService {
         TenantContext.requireCurrent();
         subscriptionGuard.requireWriteAccess();
 
-        AttendanceSession session = requireSession(sessionId);
+        AttendanceSession session = requireSessionForUpdate(sessionId);
         teacherScopeGuard.assertCanAccessSessionScope(session.getClassRoomId(), session.getSubjectId());
         assertPeriodNotLocked(session.getEvaluationPeriodId());
 
@@ -385,7 +385,7 @@ public class AttendanceSessionService {
         TenantContext.requireCurrent();
         subscriptionGuard.requireWriteAccess();
 
-        AttendanceSession session = requireSession(sessionId);
+        AttendanceSession session = requireSessionForUpdate(sessionId);
         session.lock(actorId, clock.instant());
         AttendanceSession saved = sessionRepository.save(session);
         auditLogPort.recordTenantEvent(AuditRecordCommand.critical(
@@ -406,7 +406,7 @@ public class AttendanceSessionService {
         TenantContext.requireCurrent();
         subscriptionGuard.requireWriteAccess();
 
-        AttendanceSession session = requireSession(sessionId);
+        AttendanceSession session = requireSessionForUpdate(sessionId);
         session.cancel(reason);
         AttendanceSession saved = sessionRepository.save(session);
         auditLogPort.recordTenantEvent(AuditRecordCommand.warning(
@@ -437,7 +437,7 @@ public class AttendanceSessionService {
                         "Pointage introuvable",
                         "L'enregistrement d'assiduité demandé est introuvable."));
 
-        AttendanceSession session = requireSession(record.getSessionId());
+        AttendanceSession session = requireSessionForUpdate(record.getSessionId());
         session.assertJustifiable();
         assertPeriodNotLocked(session.getEvaluationPeriodId());
 
@@ -473,9 +473,9 @@ public class AttendanceSessionService {
 
         if (teacherScopeGuard.isRestrictedTeacher()) {
             Set<UUID> allowedClasses = teacherScopeGuard.currentTeacherClassRoomIds();
-            boolean studentInAllowedClass = allowedClasses.stream()
-                    .flatMap(cid -> studentDirectoryPort.findActiveEnrollmentsByClassRoom(cid).stream())
-                    .anyMatch(e -> studentId.equals(e.studentId()));
+            boolean studentInAllowedClass = !allowedClasses.isEmpty()
+                    && studentDirectoryPort.findEnrollmentsByStudent(studentId).stream()
+                            .anyMatch(e -> "ACTIVE".equals(e.status()) && allowedClasses.contains(e.classRoomId()));
             if (!studentInAllowedClass) {
                 throw new AttendanceForbiddenException(
                         "Vous ne pouvez consulter l'assiduité que des élèves inscrits dans vos classes affectées.");
@@ -513,7 +513,6 @@ public class AttendanceSessionService {
             throw new AttendanceValidationException("La date de fin doit être postérieure ou égale à la date de début.");
         }
 
-        List<AttendanceSession> sessions;
         UUID effectiveYearId = academicYearId;
         if (evaluationPeriodId != null) {
             EvaluationPeriodSummary period = academicStructurePort.findEvaluationPeriodById(evaluationPeriodId)
@@ -522,26 +521,10 @@ public class AttendanceSessionService {
                             "Période d'évaluation introuvable",
                             "La période d'évaluation demandée est introuvable."));
             effectiveYearId = period.academicYearId();
-            sessions = sessionRepository.findByEvaluationPeriodIdAndStatusNot(
-                    evaluationPeriodId, AttendanceSessionStatus.CANCELLED);
-        } else if (academicYearId != null) {
-            sessions = sessionRepository.findByAcademicYearIdAndStatusNot(
-                    academicYearId, AttendanceSessionStatus.CANCELLED);
-        } else {
-            sessions = sessionRepository.findAll().stream()
-                    .filter(s -> s.getStatus() != AttendanceSessionStatus.CANCELLED)
-                    .toList();
         }
 
-        List<UUID> sessionIds = sessions.stream()
-                .filter(s -> fromDate == null || !s.getSessionDate().isBefore(fromDate))
-                .filter(s -> toDate == null || !s.getSessionDate().isAfter(toDate))
-                .map(AttendanceSession::getId)
-                .toList();
-
-        List<AttendanceRecord> records = sessionIds.isEmpty()
-                ? List.of()
-                : recordRepository.findByStudentIdAndSessionIdIn(studentId, sessionIds);
+        List<AttendanceRecord> records = recordRepository.findNonCancelledByStudentAndFilters(
+                studentId, effectiveYearId, evaluationPeriodId, fromDate, toDate);
 
         AttendanceSummaryCalculator.AttendanceMetrics metrics = AttendanceSummaryCalculator.compute(records);
         return new StudentAttendanceSummary(
@@ -578,10 +561,8 @@ public class AttendanceSessionService {
             sessions = sessionRepository.findByClassRoomIdAndSessionDateBetweenAndStatusNot(
                     classRoom.id(), fromDate, toDate, AttendanceSessionStatus.CANCELLED);
         } else {
-            sessions = sessionRepository.findByAcademicYearIdAndStatusNot(
-                    classRoom.academicYearId(), AttendanceSessionStatus.CANCELLED).stream()
-                    .filter(s -> classRoom.id().equals(s.getClassRoomId()))
-                    .toList();
+            sessions = sessionRepository.findByClassRoomIdAndAcademicYearIdAndStatusNot(
+                    classRoom.id(), classRoom.academicYearId(), AttendanceSessionStatus.CANCELLED);
         }
 
         List<UUID> sessionIds = sessions.stream()
@@ -700,6 +681,14 @@ public class AttendanceSessionService {
 
     private AttendanceSession requireSession(UUID sessionId) {
         return sessionRepository.findById(sessionId)
+                .orElseThrow(() -> new AttendanceNotFoundException(
+                        "attendance-session-not-found",
+                        "Séance d'appel introuvable",
+                        "La feuille d'appel demandée est introuvable."));
+    }
+
+    private AttendanceSession requireSessionForUpdate(UUID sessionId) {
+        return sessionRepository.findByIdForUpdate(sessionId)
                 .orElseThrow(() -> new AttendanceNotFoundException(
                         "attendance-session-not-found",
                         "Séance d'appel introuvable",

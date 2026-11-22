@@ -105,6 +105,7 @@ class InvoiceAndScheduleDomainTest {
         boolean wasIssued = invoice.cancel("Élève désinscrit avant rentrée", now, actorId);
         assertThat(wasIssued).isTrue();
         assertThat(invoice.getStatus()).isEqualTo(InvoiceStatus.CANCELLED);
+        assertThat(invoice.getBalanceXof()).isZero();
     }
 
     @Test

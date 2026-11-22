@@ -130,7 +130,7 @@ public class PaymentReversalService {
         TenantContext.requireCurrent();
         subscriptionGuard.requireWriteAccess();
 
-        Payment payment = paymentRepository.findById(paymentId)
+        Payment payment = paymentRepository.findByIdForUpdate(paymentId)
                 .orElseThrow(() -> new FinanceNotFoundException(
                         "payment-not-found", "Encaissement introuvable", "L'encaissement demandé est introuvable."));
 
@@ -176,8 +176,8 @@ public class PaymentReversalService {
         TenantContext.requireCurrent();
         subscriptionGuard.requireWriteAccess();
 
-        PaymentReversalRequest request = requireRequest(requestId);
-        Payment payment = paymentRepository.findById(request.getPaymentId())
+        PaymentReversalRequest request = requireRequestForUpdate(requestId);
+        Payment payment = paymentRepository.findByIdForUpdate(request.getPaymentId())
                 .orElseThrow(() -> new FinanceNotFoundException(
                         "payment-not-found", "Encaissement introuvable", "L'encaissement associé est introuvable."));
         if (reversalRepository.existsByOriginalPaymentId(payment.getId())) {
@@ -262,7 +262,7 @@ public class PaymentReversalService {
         TenantContext.requireCurrent();
         subscriptionGuard.requireWriteAccess();
 
-        PaymentReversalRequest request = requireRequest(requestId);
+        PaymentReversalRequest request = requireRequestForUpdate(requestId);
         request.reject(actorId, clock.instant(), decisionNote);
         PaymentReversalRequest saved = requestRepository.save(request);
         auditLogPort.recordTenantEvent(AuditRecordCommand.success(
@@ -277,6 +277,14 @@ public class PaymentReversalService {
 
     private PaymentReversalRequest requireRequest(UUID requestId) {
         return requestRepository.findById(requestId)
+                .orElseThrow(() -> new FinanceNotFoundException(
+                        "reversal-request-not-found",
+                        "Demande de contre-passation introuvable",
+                        "La demande de contre-passation est introuvable."));
+    }
+
+    private PaymentReversalRequest requireRequestForUpdate(UUID requestId) {
+        return requestRepository.findByIdForUpdate(requestId)
                 .orElseThrow(() -> new FinanceNotFoundException(
                         "reversal-request-not-found",
                         "Demande de contre-passation introuvable",

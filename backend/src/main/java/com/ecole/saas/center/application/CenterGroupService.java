@@ -233,6 +233,7 @@ public class CenterGroupService {
             LocalDate endDate) {
         subscriptionGuard.requireWriteAccess();
         schoolGuard.requireActiveSchoolForWrite();
+        centerLockRepository.lockGroupCapacity(groupId);
         CenterGroup group = requireGroup(groupId);
         validateMutableAcademicYear(group.getAcademicYearId());
         validateOptionalGradeLevelAndSubject(gradeLevelId, subjectId);
@@ -449,6 +450,7 @@ public class CenterGroupService {
             String notes) {
         subscriptionGuard.requireWriteAccess();
         SchoolProfileSnapshot school = schoolGuard.requireActiveSchoolForWrite();
+        centerLockRepository.lockGroupCapacity(groupId);
         CenterGroup group = requireGroup(groupId);
         if (!group.isOperationalForEnrollmentsAndPlanning()) {
             throw new CenterConflictException(
@@ -465,7 +467,6 @@ public class CenterGroupService {
                     "Élève inactif",
                     "Seul un élève au statut ACTIVE peut être inscrit à une cohorte.");
         }
-        centerLockRepository.lockGroupCapacity(groupId);
         if (enrollmentRepository.existsByGroupIdAndStudentIdAndStatus(
                 groupId, studentId, CenterGroupEnrollmentStatus.ACTIVE)) {
             throw new CenterConflictException(

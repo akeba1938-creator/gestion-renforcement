@@ -131,7 +131,7 @@ public class AuthService {
         LoginTxOutcome result = TenantContext.executeWithTenant(
                 TenantId.of(school.id()),
                 () -> transactionTemplate.execute(status -> {
-                    Optional<User> userOpt = userRepository.findByEmail(normalizedEmail);
+                    Optional<User> userOpt = userRepository.findByEmailForUpdate(normalizedEmail);
                     if (userOpt.isEmpty()) {
                         return LoginTxOutcome.needsDummyCheck();
                     }
@@ -179,9 +179,6 @@ public class AuthService {
                         return LoginTxOutcome.invalidCredentials();
                     }
 
-                    user.getSecurity().registerSuccess();
-                    userRepository.save(user);
-
                     AccountRef account = AccountRef.user(user.getId(), school.id());
                     if (MfaPolicy.isRequiredForTenantUser(roleCodes, user.getSecurity().isMfaEnabled())) {
                         IssuedToken mfaToken = tokenIssuer.issueMfaPendingToken(account);
@@ -197,6 +194,9 @@ public class AuthService {
                                 mfaToken.value(),
                                 mfaToken.expiresInSeconds()));
                     }
+
+                    user.getSecurity().registerSuccess();
+                    userRepository.save(user);
 
                     AuthOutcome authOutcome = issueTenantSession(user, school, roleCodes, UUID.randomUUID(), now);
                     auditTenantAuth(
@@ -217,7 +217,7 @@ public class AuthService {
         Instant now = clock.instant();
 
         LoginTxOutcome result = transactionTemplate.execute(status -> {
-            Optional<PlatformAdmin> adminOpt = platformAdminRepository.findByEmail(normalizedEmail);
+            Optional<PlatformAdmin> adminOpt = platformAdminRepository.findByEmailForUpdate(normalizedEmail);
             if (adminOpt.isEmpty()) {
                 return LoginTxOutcome.needsDummyCheck();
             }
@@ -260,9 +260,6 @@ public class AuthService {
                 return LoginTxOutcome.invalidCredentials();
             }
 
-            admin.getSecurity().registerSuccess();
-            platformAdminRepository.save(admin);
-
             AccountRef account = AccountRef.platformAdmin(admin.getId());
             if (MfaPolicy.isRequiredForPlatformAdmin()) {
                 IssuedToken mfaToken = tokenIssuer.issueMfaPendingToken(account);
@@ -278,6 +275,9 @@ public class AuthService {
                         mfaToken.value(),
                         mfaToken.expiresInSeconds()));
             }
+
+            admin.getSecurity().registerSuccess();
+            platformAdminRepository.save(admin);
 
             AuthOutcome authOutcome = issuePlatformSession(admin, UUID.randomUUID(), now);
             auditPlatformAuth(
@@ -304,7 +304,7 @@ public class AuthService {
 
             String accountEmail;
             if (account.type() == SubjectType.USER) {
-                User user = userRepository.findById(account.accountId())
+                User user = userRepository.findByIdForUpdate(account.accountId())
                         .orElseThrow(() -> new AuthenticationFailedException("Compte introuvable."));
                 ensureCanAuthenticateForMfa(user.isActive(), user.getSecurity(), now);
                 user.getSecurity().startMfaEnrollment(encryptedSecret);
@@ -318,7 +318,7 @@ public class AuthService {
                         "Enrôlement MFA TOTP initié pour un utilisateur d'établissement.",
                         Map.of("algorithm", "TOTP_SHA1"));
             } else {
-                PlatformAdmin admin = platformAdminRepository.findById(account.accountId())
+                PlatformAdmin admin = platformAdminRepository.findByIdForUpdate(account.accountId())
                         .orElseThrow(() -> new AuthenticationFailedException("Compte introuvable."));
                 ensureCanAuthenticateForMfa(admin.isActive(), admin.getSecurity(), now);
                 admin.getSecurity().startMfaEnrollment(encryptedSecret);
@@ -352,7 +352,7 @@ public class AuthService {
                 if (schoolOpt.isEmpty() || !schoolOpt.get().active()) {
                     return MfaTxOutcome.invalidAccount();
                 }
-                Optional<User> userOpt = userRepository.findById(account.accountId());
+                Optional<User> userOpt = userRepository.findByIdForUpdate(account.accountId());
                 if (userOpt.isEmpty()) {
                     return MfaTxOutcome.invalidAccount();
                 }
@@ -414,7 +414,7 @@ public class AuthService {
                         Map.of("mfaEnabled", true));
                 return MfaTxOutcome.success(authOutcome);
             } else {
-                Optional<PlatformAdmin> adminOpt = platformAdminRepository.findById(account.accountId());
+                Optional<PlatformAdmin> adminOpt = platformAdminRepository.findByIdForUpdate(account.accountId());
                 if (adminOpt.isEmpty()) {
                     return MfaTxOutcome.invalidAccount();
                 }

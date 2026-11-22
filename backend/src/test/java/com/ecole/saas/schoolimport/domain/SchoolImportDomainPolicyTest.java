@@ -62,6 +62,16 @@ class SchoolImportDomainPolicyTest {
                 .isEqualTo("'+221771234567");
         assertThat(ImportFileSecurityPolicy.neutralizeCsvFormula("-100")).isEqualTo("'-100");
         assertThat(ImportFileSecurityPolicy.neutralizeCsvFormula("@SUM(A1:A2)")).isEqualTo("'@SUM(A1:A2)");
+        assertThat(ImportFileSecurityPolicy.neutralizeCsvFormula(" =CMD|' /C calc'!A0"))
+                .isEqualTo("' =CMD|' /C calc'!A0");
+        assertThat(ImportFileSecurityPolicy.neutralizeCsvFormula("\n=SUM(A1:A2)"))
+                .isEqualTo("'\n=SUM(A1:A2)");
+        assertThat(ImportFileSecurityPolicy.neutralizeCsvFormula("  +1+1"))
+                .isEqualTo("'  +1+1");
+        assertThat(ImportFileSecurityPolicy.neutralizeCsvFormula("\t@EVIL"))
+                .isEqualTo("'\t@EVIL");
+        assertThat(ImportFileSecurityPolicy.neutralizeCsvFormula("\0=EVIL"))
+                .isEqualTo("'=EVIL");
         assertThat(ImportFileSecurityPolicy.neutralizeCsvFormula("Awa Ndiaye")).isEqualTo("Awa Ndiaye");
 
         assertThat(ImportFileSecurityPolicy.sanitizeFileName("../../evil<script>.csv", ImportSourceFormat.CSV))

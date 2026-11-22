@@ -8,6 +8,8 @@ import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 public interface StudentGuardianLinkRepository extends JpaRepository<StudentGuardianLink, UUID> {
 
@@ -43,4 +45,46 @@ public interface StudentGuardianLinkRepository extends JpaRepository<StudentGuar
 
     List<StudentGuardianLink> findByStudentIdInAndActiveTrueOrderByPrimaryContactDescCreatedAtAsc(
             Collection<UUID> studentIds);
+
+    @Query(
+            value = """
+                    SELECT DISTINCT l.studentId
+                    FROM StudentGuardianLink l
+                    JOIN Guardian g ON g.id = l.guardianId
+                    WHERE g.familyId = :familyId
+                      AND l.active = true
+                    ORDER BY l.studentId ASC
+                    """,
+            countQuery = """
+                    SELECT COUNT(DISTINCT l.studentId)
+                    FROM StudentGuardianLink l
+                    JOIN Guardian g ON g.id = l.guardianId
+                    WHERE g.familyId = :familyId
+                      AND l.active = true
+                    """)
+    Page<UUID> findDistinctActiveStudentIdsByFamilyId(
+            @Param("familyId") UUID familyId, Pageable pageable);
+
+    @Query(
+            value = """
+                    SELECT DISTINCT l.studentId
+                    FROM StudentGuardianLink l
+                    JOIN Guardian g ON g.id = l.guardianId
+                    WHERE g.familyId = :familyId
+                      AND l.active = true
+                      AND l.studentId IN :visibleStudentIds
+                    ORDER BY l.studentId ASC
+                    """,
+            countQuery = """
+                    SELECT COUNT(DISTINCT l.studentId)
+                    FROM StudentGuardianLink l
+                    JOIN Guardian g ON g.id = l.guardianId
+                    WHERE g.familyId = :familyId
+                      AND l.active = true
+                      AND l.studentId IN :visibleStudentIds
+                    """)
+    Page<UUID> findDistinctActiveStudentIdsByFamilyIdAndStudentIdIn(
+            @Param("familyId") UUID familyId,
+            @Param("visibleStudentIds") Collection<UUID> visibleStudentIds,
+            Pageable pageable);
 }

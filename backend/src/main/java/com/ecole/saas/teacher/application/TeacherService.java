@@ -9,6 +9,7 @@ import com.ecole.saas.audit.AuditOutcome;
 import com.ecole.saas.audit.AuditRecordCommand;
 import com.ecole.saas.identity.UserDirectoryPort;
 import com.ecole.saas.identity.UserSummary;
+import com.ecole.saas.shared.application.SqlLikePatterns;
 import com.ecole.saas.shared.domain.TenantContext;
 import com.ecole.saas.teacher.domain.Teacher;
 import com.ecole.saas.teacher.domain.TeacherConflictException;
@@ -25,9 +26,11 @@ import java.time.Clock;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -83,12 +86,12 @@ public class TeacherService {
             if (teacherType != null) {
                 predicates.add(cb.equal(root.get("teacherType"), teacherType));
             }
-            if (search != null && !search.isBlank()) {
-                String pattern = "%" + search.trim().toLowerCase(Locale.ROOT) + "%";
+            String pattern = SqlLikePatterns.containsLower(search);
+            if (pattern != null) {
                 predicates.add(cb.or(
-                        cb.like(cb.lower(root.get("employeeCode")), pattern),
-                        cb.like(cb.lower(root.get("firstName")), pattern),
-                        cb.like(cb.lower(root.get("lastName")), pattern)));
+                        cb.like(cb.lower(root.get("employeeCode")), pattern, SqlLikePatterns.ESCAPE_CHAR),
+                        cb.like(cb.lower(root.get("firstName")), pattern, SqlLikePatterns.ESCAPE_CHAR),
+                        cb.like(cb.lower(root.get("lastName")), pattern, SqlLikePatterns.ESCAPE_CHAR)));
             }
             return cb.and(predicates.toArray(Predicate[]::new));
         };
@@ -305,8 +308,24 @@ public class TeacherService {
         TenantContext.requireCurrent();
         subscriptionGuard.requireReadAccess();
         requireTeacher(teacherId);
-        return specialtyRepository.findByTeacherIdOrderByPrimarySpecialtyDescCreatedAtAsc(teacherId).stream()
-                .map(this::toSpecialtyView)
+        List<TeacherSpecialty> specialties =
+                specialtyRepository.findByTeacherIdOrderByPrimarySpecialtyDescCreatedAtAsc(teacherId);
+        if (specialties.isEmpty()) {
+            return List.of();
+        }
+        Set<UUID> subjectIds = specialties.stream()
+                .map(TeacherSpecialty::getSubjectId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Map<UUID, SubjectSummary> subjectsById = academicStructurePort.findSubjectsByIds(subjectIds);
+        return specialties.stream()
+                .map(specialty -> {
+                    SubjectSummary subject = subjectsById.get(specialty.getSubjectId());
+                    return new SpecialtyView(
+                            specialty,
+                            subject != null ? subject.code() : null,
+                            subject != null ? subject.name() : null);
+                })
                 .toList();
     }
 
@@ -384,18 +403,16 @@ public class TeacherService {
         if (!user.active()) {
             throw new TeacherValidationException("Le compte utilisateur associé doit être actif.");
         }
+        boolean hasTeachingRole = user.roles() != null
+                && (user.roles().contains("TEACHER") || user.roles().contains("TUTOR"));
+        if (!hasTeachingRole) {
+            throw new TeacherValidationException(
+                    "Le compte utilisateur associé doit disposer du rôle TEACHER ou TUTOR.");
+        }
     }
 
     private Teacher requireTeacher(UUID teacherId) {
         return teacherRepository.findById(teacherId)
                 .orElseThrow(() -> new TeacherNotFoundException("Dossier enseignant introuvable."));
-    }
-
-    private SpecialtyView toSpecialtyView(TeacherSpecialty specialty) {
-        SubjectSummary subject = academicStructurePort.findSubjectById(specialty.getSubjectId()).orElse(null);
-        return new SpecialtyView(
-                specialty,
-                subject != null ? subject.code() : null,
-                subject != null ? subject.name() : null);
     }
 }

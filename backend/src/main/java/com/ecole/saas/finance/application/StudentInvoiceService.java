@@ -12,6 +12,8 @@ import com.ecole.saas.family.FamilyDirectoryPort;
 import com.ecole.saas.family.FamilySummary;
 import com.ecole.saas.family.GuardianSummary;
 import com.ecole.saas.family.StudentGuardianSummary;
+import com.ecole.saas.finance.domain.ApprovalStatus;
+import com.ecole.saas.finance.domain.FeeAdjustment;
 import com.ecole.saas.finance.domain.FeeItem;
 import com.ecole.saas.finance.domain.FinanceCodeFormatter;
 import com.ecole.saas.finance.domain.FinanceConflictException;
@@ -26,6 +28,7 @@ import com.ecole.saas.finance.domain.MoneyMath;
 import com.ecole.saas.finance.domain.PaymentSchedule;
 import com.ecole.saas.finance.domain.StudentInvoice;
 import com.ecole.saas.finance.domain.StudentInvoiceLine;
+import com.ecole.saas.finance.infrastructure.FeeAdjustmentRepository;
 import com.ecole.saas.finance.infrastructure.FeeItemRepository;
 import com.ecole.saas.finance.infrastructure.FinanceSequenceRepository;
 import com.ecole.saas.finance.infrastructure.LedgerEntryRepository;
@@ -79,6 +82,7 @@ public class StudentInvoiceService {
     private final StudentInvoiceRepository invoiceRepository;
     private final StudentInvoiceLineRepository lineRepository;
     private final PaymentScheduleRepository scheduleRepository;
+    private final FeeAdjustmentRepository feeAdjustmentRepository;
     private final FeeItemRepository feeItemRepository;
     private final FinanceSequenceRepository sequenceRepository;
     private final LedgerEntryRepository ledgerEntryRepository;
@@ -95,6 +99,7 @@ public class StudentInvoiceService {
             StudentInvoiceRepository invoiceRepository,
             StudentInvoiceLineRepository lineRepository,
             PaymentScheduleRepository scheduleRepository,
+            FeeAdjustmentRepository feeAdjustmentRepository,
             FeeItemRepository feeItemRepository,
             FinanceSequenceRepository sequenceRepository,
             LedgerEntryRepository ledgerEntryRepository,
@@ -109,6 +114,7 @@ public class StudentInvoiceService {
         this.invoiceRepository = invoiceRepository;
         this.lineRepository = lineRepository;
         this.scheduleRepository = scheduleRepository;
+        this.feeAdjustmentRepository = feeAdjustmentRepository;
         this.feeItemRepository = feeItemRepository;
         this.sequenceRepository = sequenceRepository;
         this.ledgerEntryRepository = ledgerEntryRepository;
@@ -436,6 +442,17 @@ public class StudentInvoiceService {
             schedule.cancel();
         }
         schedules = scheduleRepository.saveAll(schedules);
+
+        List<FeeAdjustment> pendingAdjustments =
+                feeAdjustmentRepository.findByInvoiceIdAndStatus(invoice.getId(), ApprovalStatus.PENDING_APPROVAL);
+        if (!pendingAdjustments.isEmpty()) {
+            String autoRejectNote = "Rejet automatique suite à l'annulation de la facture "
+                    + invoice.getInvoiceNumber() + ".";
+            for (FeeAdjustment pending : pendingAdjustments) {
+                pending.reject(actorId, now, autoRejectNote);
+            }
+            feeAdjustmentRepository.saveAll(pendingAdjustments);
+        }
 
         if (wasIssued && netBeforeCancel > 0L) {
             UUID chargeEntryId = ledgerEntryRepository

@@ -380,9 +380,10 @@ class SubscriptionIntegrationTest {
         // 3. Abonnement expiré -> lecture seule autorisée, écriture refusée
         Instant pastStart = Instant.now().minus(60, ChronoUnit.DAYS);
         Instant pastEnd = Instant.now().minus(5, ChronoUnit.DAYS);
-        TenantContext.runWithTenant(TenantId.of(schoolExpired.getId()), () ->
-                subscriptionService.createSubscription(
-                        planId, SubscriptionStatus.ACTIVE, BillingCycle.MONTHLY, pastStart, pastEnd));
+        TestSecuritySupport.runAsAdminSaas(() -> TenantContext.runWithTenant(
+                TenantId.of(schoolExpired.getId()),
+                () -> subscriptionService.createSubscription(
+                        planId, SubscriptionStatus.ACTIVE, BillingCycle.MONTHLY, pastStart, pastEnd)));
 
         TenantContext.runWithTenant(TenantId.of(schoolExpired.getId()), () -> {
             SubscriptionSnapshot expiredSnapshot = subscriptionAccessPort.findCurrentForCurrentTenant().orElseThrow();
@@ -641,13 +642,13 @@ class SubscriptionIntegrationTest {
 
     private School createSchool(String prefix, SchoolType type) {
         String code = uniqueCode(prefix);
-        return schoolService.createSchool(
+        return TestSecuritySupport.runAsAdminSaas(() -> schoolService.createSchool(
                 code,
                 "Établissement " + code,
                 type,
                 "+221770000000",
                 "contact@" + code.toLowerCase() + ".sn",
-                "Dakar");
+                "Dakar"));
     }
 
     private String platformAdminToken() {

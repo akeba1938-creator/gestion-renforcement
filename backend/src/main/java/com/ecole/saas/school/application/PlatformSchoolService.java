@@ -13,11 +13,11 @@ import com.ecole.saas.school.domain.SchoolNotFoundException;
 import com.ecole.saas.school.domain.SchoolStatus;
 import com.ecole.saas.school.domain.SchoolType;
 import com.ecole.saas.school.infrastructure.SchoolRepository;
+import com.ecole.saas.shared.application.SqlLikePatterns;
 import jakarta.persistence.criteria.Predicate;
 import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -65,11 +65,11 @@ public class PlatformSchoolService {
             if (schoolType != null) {
                 predicates.add(cb.equal(root.get("schoolType"), schoolType));
             }
-            if (search != null && !search.isBlank()) {
-                String pattern = "%" + search.trim().toLowerCase(Locale.ROOT) + "%";
+            String pattern = SqlLikePatterns.containsLower(search);
+            if (pattern != null) {
                 predicates.add(cb.or(
-                        cb.like(cb.lower(root.get("code")), pattern),
-                        cb.like(cb.lower(root.get("name")), pattern)));
+                        cb.like(cb.lower(root.get("code")), pattern, SqlLikePatterns.ESCAPE_CHAR),
+                        cb.like(cb.lower(root.get("name")), pattern, SqlLikePatterns.ESCAPE_CHAR)));
             }
             return cb.and(predicates.toArray(Predicate[]::new));
         };

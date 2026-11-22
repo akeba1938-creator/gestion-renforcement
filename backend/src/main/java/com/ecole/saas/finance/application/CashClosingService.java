@@ -11,6 +11,7 @@ import com.ecole.saas.finance.domain.FinanceConflictException;
 import com.ecole.saas.finance.domain.FinanceNotFoundException;
 import com.ecole.saas.finance.domain.PaymentMethod;
 import com.ecole.saas.finance.infrastructure.CashClosingRepository;
+import com.ecole.saas.finance.infrastructure.FinanceLockRepository;
 import com.ecole.saas.finance.infrastructure.PaymentRepository;
 import com.ecole.saas.finance.infrastructure.PaymentReversalRepository;
 import com.ecole.saas.school.SchoolProfileSnapshot;
@@ -41,6 +42,7 @@ public class CashClosingService {
     private final CashClosingRepository cashClosingRepository;
     private final PaymentRepository paymentRepository;
     private final PaymentReversalRepository reversalRepository;
+    private final FinanceLockRepository financeLockRepository;
     private final FinanceSchoolContext schoolContext;
     private final FinanceSubscriptionGuard subscriptionGuard;
     private final AuditLogPort auditLogPort;
@@ -50,6 +52,7 @@ public class CashClosingService {
             CashClosingRepository cashClosingRepository,
             PaymentRepository paymentRepository,
             PaymentReversalRepository reversalRepository,
+            FinanceLockRepository financeLockRepository,
             FinanceSchoolContext schoolContext,
             FinanceSubscriptionGuard subscriptionGuard,
             AuditLogPort auditLogPort,
@@ -57,6 +60,7 @@ public class CashClosingService {
         this.cashClosingRepository = cashClosingRepository;
         this.paymentRepository = paymentRepository;
         this.reversalRepository = reversalRepository;
+        this.financeLockRepository = financeLockRepository;
         this.schoolContext = schoolContext;
         this.subscriptionGuard = subscriptionGuard;
         this.auditLogPort = auditLogPort;
@@ -102,6 +106,7 @@ public class CashClosingService {
         subscriptionGuard.requireWriteAccess();
 
         Objects.requireNonNull(closingDate, "La date de clôture est obligatoire.");
+        financeLockRepository.lockCashClosingDate(closingDate);
         if (cashClosingRepository.existsByClosingDate(closingDate)) {
             throw new FinanceConflictException(
                     "cash-closing-already-exists",
@@ -165,7 +170,7 @@ public class CashClosingService {
         TenantContext.requireCurrent();
         subscriptionGuard.requireWriteAccess();
 
-        CashClosing closing = requireClosing(closingId);
+        CashClosing closing = requireClosingForUpdate(closingId);
         closing.validate(actorId, clock.instant(), validationNote);
         CashClosing saved = cashClosingRepository.save(closing);
         Map<String, Object> meta = Map.of(
@@ -194,6 +199,14 @@ public class CashClosingService {
 
     private CashClosing requireClosing(UUID closingId) {
         return cashClosingRepository.findById(closingId)
+                .orElseThrow(() -> new FinanceNotFoundException(
+                        "cash-closing-not-found",
+                        "Clôture de caisse introuvable",
+                        "La clôture de caisse demandée est introuvable."));
+    }
+
+    private CashClosing requireClosingForUpdate(UUID closingId) {
+        return cashClosingRepository.findByIdForUpdate(closingId)
                 .orElseThrow(() -> new FinanceNotFoundException(
                         "cash-closing-not-found",
                         "Clôture de caisse introuvable",

@@ -11,6 +11,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
@@ -77,6 +78,10 @@ public class Subscription extends TenantScopedEntity {
 
     @Column(name = "status_reason", length = 255)
     private String statusReason;
+
+    @Version
+    @Column(name = "version", nullable = false)
+    private long version;
 
     protected Subscription() {
     }
@@ -452,5 +457,9 @@ public class Subscription extends TenantScopedEntity {
 
     public String getStatusReason() {
         return statusReason;
+    }
+
+    public long getVersion() {
+        return version;
     }
 }

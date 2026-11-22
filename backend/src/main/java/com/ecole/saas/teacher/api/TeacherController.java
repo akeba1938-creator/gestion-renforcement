@@ -8,12 +8,16 @@ import com.ecole.saas.teacher.domain.TeacherType;
 import jakarta.validation.Valid;
 import java.net.URI;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -31,6 +35,16 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/teachers")
 public class TeacherController {
+
+    private static final Set<String> NATIONAL_ID_VIEW_AUTHORITIES = Set.of(
+            "ROLE_DIRECTOR",
+            "ROLE_CENTER_MANAGER",
+            "ROLE_SECRETARY");
+
+    private static final Set<String> HOURLY_RATE_VIEW_AUTHORITIES = Set.of(
+            "ROLE_PROMOTER",
+            "ROLE_DIRECTOR",
+            "ROLE_CENTER_MANAGER");
 
     private final TeacherService teacherService;
     private final TeacherAssignmentService assignmentService;
@@ -53,7 +67,7 @@ public class TeacherController {
                 page, size, sortBy, direction, TeacherPagination.TEACHER_SORT_FIELDS, "lastName", Sort.Direction.ASC);
         Page<TeacherResponse> teachers = teacherService
                 .listTeachers(status, teacherType, search, pageable)
-                .map(TeacherResponse::from);
+                .map(TeacherController::toMaskedResponse);
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
                 .body(PageResponse.from(teachers));
@@ -64,7 +78,7 @@ public class TeacherController {
         UUID userId = TeacherApiSupport.extractActorId(authentication);
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
-                .body(TeacherResponse.from(teacherService.getOwnTeacherProfile(userId)));
+                .body(TeacherResponse.from(teacherService.getOwnTeacherProfile(userId), true, true));
     }
 
     @GetMapping("/me/assignments")
@@ -86,7 +100,7 @@ public class TeacherController {
     public ResponseEntity<TeacherResponse> getTeacher(@PathVariable UUID teacherId) {
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
-                .body(TeacherResponse.from(teacherService.getTeacher(teacherId)));
+                .body(toMaskedResponse(teacherService.getTeacher(teacherId)));
     }
 
     @PostMapping
@@ -108,7 +122,7 @@ public class TeacherController {
                 request.notes());
         return ResponseEntity.created(URI.create("/api/v1/teachers/" + created.getId()))
                 .cacheControl(CacheControl.noStore())
-                .body(TeacherResponse.from(created));
+                .body(toMaskedResponse(created));
     }
 
     @PutMapping("/{teacherId}")
@@ -131,7 +145,7 @@ public class TeacherController {
                 request.notes());
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
-                .body(TeacherResponse.from(updated));
+                .body(toMaskedResponse(updated));
     }
 
     @PutMapping("/{teacherId}/user-link")
@@ -141,7 +155,7 @@ public class TeacherController {
         Teacher updated = teacherService.linkUserAccount(teacherId, request != null ? request.userId() : null);
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
-                .body(TeacherResponse.from(updated));
+                .body(toMaskedResponse(updated));
     }
 
     @PostMapping("/{teacherId}/suspend")
@@ -150,14 +164,14 @@ public class TeacherController {
             @Valid @RequestBody TeacherStatusActionRequest request) {
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
-                .body(TeacherResponse.from(teacherService.suspendTeacher(teacherId, request.reason())));
+                .body(toMaskedResponse(teacherService.suspendTeacher(teacherId, request.reason())));
     }
 
     @PostMapping("/{teacherId}/reactivate")
     public ResponseEntity<TeacherResponse> reactivateTeacher(@PathVariable UUID teacherId) {
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
-                .body(TeacherResponse.from(teacherService.reactivateTeacher(teacherId)));
+                .body(toMaskedResponse(teacherService.reactivateTeacher(teacherId)));
     }
 
     @PostMapping("/{teacherId}/archive")
@@ -166,7 +180,38 @@ public class TeacherController {
             @Valid @RequestBody TeacherStatusActionRequest request) {
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
-                .body(TeacherResponse.from(teacherService.archiveTeacher(teacherId, request.reason())));
+                .body(toMaskedResponse(teacherService.archiveTeacher(teacherId, request.reason())));
+    }
+
+    private static TeacherResponse toMaskedResponse(Teacher teacher) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        boolean isSelf = isSelf(teacher, auth);
+        boolean includeNationalId = isSelf || hasAnyAuthority(auth, NATIONAL_ID_VIEW_AUTHORITIES);
+        boolean includeHourlyRate = isSelf || hasAnyAuthority(auth, HOURLY_RATE_VIEW_AUTHORITIES);
+        return TeacherResponse.from(teacher, includeNationalId, includeHourlyRate);
+    }
+
+    private static boolean isSelf(Teacher teacher, Authentication auth) {
+        if (teacher.getUserId() == null || auth == null || !auth.isAuthenticated() || auth.getName() == null) {
+            return false;
+        }
+        try {
+            return teacher.getUserId().equals(UUID.fromString(auth.getName()));
+        } catch (IllegalArgumentException ex) {
+            return false;
+        }
+    }
+
+    private static boolean hasAnyAuthority(Authentication auth, Set<String> expected) {
+        if (auth == null || !auth.isAuthenticated() || auth.getAuthorities() == null) {
+            return false;
+        }
+        for (GrantedAuthority authority : auth.getAuthorities()) {
+            if (expected.contains(authority.getAuthority())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @GetMapping("/{teacherId}/specialties")

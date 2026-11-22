@@ -9,6 +9,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Objects;
@@ -96,6 +97,10 @@ public class PeriodReportCard extends TenantScopedEntity {
 
     @Column(name = "locked_at")
     private Instant lockedAt;
+
+    @Version
+    @Column(name = "version", nullable = false)
+    private long version;
 
     protected PeriodReportCard() {
     }
@@ -305,6 +310,10 @@ public class PeriodReportCard extends TenantScopedEntity {
 
     public Instant getLockedAt() {
         return lockedAt;
+    }
+
+    public long getVersion() {
+        return version;
     }
 
     private static String normalizeAppreciation(String text) {

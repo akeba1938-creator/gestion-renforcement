@@ -36,7 +36,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Workflow encadré de demande et approbation de remises et bourses sur factures émises.
+ * Workflow encadré de demande et approbation de remises et bourses sur factures
+ * émises.
  */
 @Service
 public class FeeAdjustmentService {
@@ -117,7 +118,7 @@ public class FeeAdjustmentService {
         TenantContext.requireCurrent();
         subscriptionGuard.requireWriteAccess();
 
-        StudentInvoice invoice = invoiceRepository.findById(invoiceId)
+        StudentInvoice invoice = invoiceRepository.findByIdForUpdate(invoiceId)
                 .orElseThrow(() -> new FinanceNotFoundException(
                         "invoice-not-found", "Facture introuvable", "La facture demandée est introuvable."));
         if (invoice.getStatus() != InvoiceStatus.ISSUED && invoice.getStatus() != InvoiceStatus.PARTIALLY_PAID) {
@@ -161,12 +162,17 @@ public class FeeAdjustmentService {
                     "Le mode de calcul de la remise ou bourse est obligatoire.");
         }
 
-        if (adjustment.getResolvedAmountXof() > invoice.getBalanceXof()) {
+        long pendingAdjustmentsXof = adjustmentRepository.sumResolvedAmountByInvoiceIdAndStatus(
+                invoice.getId(), ApprovalStatus.PENDING_APPROVAL);
+        long availableBalanceXof = Math.max(0L, invoice.getBalanceXof() - pendingAdjustmentsXof);
+        if (adjustment.getResolvedAmountXof() > availableBalanceXof) {
             throw new FinanceConflictException(
                     "adjustment-exceeds-balance",
                     "Remise supérieure au solde",
                     "Le montant de la remise ou bourse (" + adjustment.getResolvedAmountXof()
-                            + " FCFA) dépasse le solde restant dû (" + invoice.getBalanceXof() + " FCFA).");
+                            + " FCFA) dépasse le solde disponible (" + availableBalanceXof
+                            + " FCFA, compte tenu de " + pendingAdjustmentsXof
+                            + " FCFA de demandes déjà en attente).");
         }
 
         FeeAdjustment saved = adjustmentRepository.save(adjustment);
@@ -189,7 +195,7 @@ public class FeeAdjustmentService {
         TenantContext.requireCurrent();
         subscriptionGuard.requireWriteAccess();
 
-        FeeAdjustment adjustment = requireAdjustment(adjustmentId);
+        FeeAdjustment adjustment = requireAdjustmentForUpdate(adjustmentId);
         StudentInvoice invoice = invoiceRepository.findByIdForUpdate(adjustment.getInvoiceId())
                 .orElseThrow(() -> new FinanceNotFoundException(
                         "invoice-not-found", "Facture introuvable", "La facture associée est introuvable."));
@@ -238,7 +244,7 @@ public class FeeAdjustmentService {
         TenantContext.requireCurrent();
         subscriptionGuard.requireWriteAccess();
 
-        FeeAdjustment adjustment = requireAdjustment(adjustmentId);
+        FeeAdjustment adjustment = requireAdjustmentForUpdate(adjustmentId);
         adjustment.reject(actorId, clock.instant(), decisionNote);
         FeeAdjustment saved = adjustmentRepository.save(adjustment);
         auditLogPort.recordTenantEvent(AuditRecordCommand.success(
@@ -255,6 +261,14 @@ public class FeeAdjustmentService {
 
     private FeeAdjustment requireAdjustment(UUID adjustmentId) {
         return adjustmentRepository.findById(adjustmentId)
+                .orElseThrow(() -> new FinanceNotFoundException(
+                        "adjustment-not-found",
+                        "Demande d'ajustement introuvable",
+                        "La demande de remise ou bourse est introuvable."));
+    }
+
+    private FeeAdjustment requireAdjustmentForUpdate(UUID adjustmentId) {
+        return adjustmentRepository.findByIdForUpdate(adjustmentId)
                 .orElseThrow(() -> new FinanceNotFoundException(
                         "adjustment-not-found",
                         "Demande d'ajustement introuvable",

@@ -30,4 +30,70 @@ public interface StudentInvoiceRepository
     List<StudentInvoice> findByStudentIdInAndAcademicYearId(Collection<UUID> studentIds, UUID academicYearId);
 
     List<StudentInvoice> findByAcademicYearId(UUID academicYearId);
+
+    @Query("""
+            SELECT i.status,
+                   COUNT(i),
+                   COALESCE(SUM(i.grossAmountXof), 0L),
+                   COALESCE(SUM(i.discountAmountXof), 0L),
+                   COALESCE(SUM(i.netAmountXof), 0L),
+                   COALESCE(SUM(i.paidAmountXof), 0L),
+                   COALESCE(SUM(i.balanceXof), 0L)
+            FROM StudentInvoice i
+            GROUP BY i.status
+            """)
+    List<Object[]> aggregateByStatusAll();
+
+    @Query("""
+            SELECT i.status,
+                   COUNT(i),
+                   COALESCE(SUM(i.grossAmountXof), 0L),
+                   COALESCE(SUM(i.discountAmountXof), 0L),
+                   COALESCE(SUM(i.netAmountXof), 0L),
+                   COALESCE(SUM(i.paidAmountXof), 0L),
+                   COALESCE(SUM(i.balanceXof), 0L)
+            FROM StudentInvoice i
+            WHERE i.academicYearId = :academicYearId
+            GROUP BY i.status
+            """)
+    List<Object[]> aggregateByStatusForYear(@Param("academicYearId") UUID academicYearId);
+
+    @Query("""
+            SELECT i.studentId,
+                   COUNT(i),
+                   COALESCE(SUM(i.grossAmountXof), 0L),
+                   COALESCE(SUM(i.discountAmountXof), 0L),
+                   COALESCE(SUM(i.netAmountXof), 0L),
+                   COALESCE(SUM(i.paidAmountXof), 0L),
+                   COALESCE(SUM(i.balanceXof), 0L)
+            FROM StudentInvoice i
+            WHERE i.studentId IN :studentIds
+              AND i.status IN (
+                    com.ecole.saas.finance.domain.InvoiceStatus.ISSUED,
+                    com.ecole.saas.finance.domain.InvoiceStatus.PARTIALLY_PAID,
+                    com.ecole.saas.finance.domain.InvoiceStatus.PAID)
+            GROUP BY i.studentId
+            """)
+    List<Object[]> aggregateActiveByStudentIds(@Param("studentIds") Collection<UUID> studentIds);
+
+    @Query("""
+            SELECT i.studentId,
+                   COUNT(i),
+                   COALESCE(SUM(i.grossAmountXof), 0L),
+                   COALESCE(SUM(i.discountAmountXof), 0L),
+                   COALESCE(SUM(i.netAmountXof), 0L),
+                   COALESCE(SUM(i.paidAmountXof), 0L),
+                   COALESCE(SUM(i.balanceXof), 0L)
+            FROM StudentInvoice i
+            WHERE i.studentId IN :studentIds
+              AND i.academicYearId = :academicYearId
+              AND i.status IN (
+                    com.ecole.saas.finance.domain.InvoiceStatus.ISSUED,
+                    com.ecole.saas.finance.domain.InvoiceStatus.PARTIALLY_PAID,
+                    com.ecole.saas.finance.domain.InvoiceStatus.PAID)
+            GROUP BY i.studentId
+            """)
+    List<Object[]> aggregateActiveByStudentIdsAndYear(
+            @Param("studentIds") Collection<UUID> studentIds,
+            @Param("academicYearId") UUID academicYearId);
 }

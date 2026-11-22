@@ -7,12 +7,16 @@ import com.ecole.saas.student.domain.StudentGender;
 import com.ecole.saas.student.domain.StudentStatus;
 import jakarta.validation.Valid;
 import java.net.URI;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -28,6 +32,11 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/students")
 public class StudentController {
+
+    private static final Set<String> MEDICAL_NOTES_VIEW_AUTHORITIES = Set.of(
+            "ROLE_DIRECTOR",
+            "ROLE_CENTER_MANAGER",
+            "ROLE_SECRETARY");
 
     private final StudentService studentService;
     private final StudentEnrollmentService enrollmentService;
@@ -48,9 +57,10 @@ public class StudentController {
             @RequestParam(defaultValue = "ASC") String direction) {
         Pageable pageable = StudentPagination.of(
                 page, size, sortBy, direction, StudentPagination.STUDENT_SORT_FIELDS, "lastName", Sort.Direction.ASC);
+        boolean includeMedicalNotes = canViewMedicalNotes();
         Page<StudentResponse> students = studentService
                 .listStudents(status, gender, search, pageable)
-                .map(StudentResponse::from);
+                .map(student -> StudentResponse.from(student, includeMedicalNotes));
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
                 .body(PageResponse.from(students));
@@ -60,14 +70,14 @@ public class StudentController {
     public ResponseEntity<StudentResponse> getStudent(@PathVariable UUID studentId) {
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
-                .body(StudentResponse.from(studentService.getStudent(studentId)));
+                .body(StudentResponse.from(studentService.getStudent(studentId), canViewMedicalNotes()));
     }
 
     @GetMapping("/by-matricule/{matricule}")
     public ResponseEntity<StudentResponse> getStudentByMatricule(@PathVariable String matricule) {
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
-                .body(StudentResponse.from(studentService.getStudentByMatricule(matricule)));
+                .body(StudentResponse.from(studentService.getStudentByMatricule(matricule), canViewMedicalNotes()));
     }
 
     @PostMapping
@@ -86,7 +96,7 @@ public class StudentController {
                 request.admissionDate());
         return ResponseEntity.created(URI.create("/api/v1/students/" + created.getId()))
                 .cacheControl(CacheControl.noStore())
-                .body(StudentResponse.from(created));
+                .body(StudentResponse.from(created, canViewMedicalNotes()));
     }
 
     @PutMapping("/{studentId}")
@@ -108,7 +118,7 @@ public class StudentController {
                 request.admissionDate());
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
-                .body(StudentResponse.from(updated));
+                .body(StudentResponse.from(updated, canViewMedicalNotes()));
     }
 
     @PostMapping("/{studentId}/transfer")
@@ -117,7 +127,8 @@ public class StudentController {
             @Valid @RequestBody StudentStatusReasonRequest request) {
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
-                .body(StudentResponse.from(studentService.transferStudent(studentId, request.reason())));
+                .body(StudentResponse.from(
+                        studentService.transferStudent(studentId, request.reason()), canViewMedicalNotes()));
     }
 
     @PostMapping("/{studentId}/graduate")
@@ -127,7 +138,8 @@ public class StudentController {
         String reason = request != null ? request.reason() : null;
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
-                .body(StudentResponse.from(studentService.graduateStudent(studentId, reason)));
+                .body(StudentResponse.from(
+                        studentService.graduateStudent(studentId, reason), canViewMedicalNotes()));
     }
 
     @PostMapping("/{studentId}/withdraw")
@@ -136,7 +148,8 @@ public class StudentController {
             @Valid @RequestBody StudentStatusReasonRequest request) {
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
-                .body(StudentResponse.from(studentService.withdrawStudent(studentId, request.reason())));
+                .body(StudentResponse.from(
+                        studentService.withdrawStudent(studentId, request.reason()), canViewMedicalNotes()));
     }
 
     @PostMapping("/{studentId}/archive")
@@ -145,14 +158,28 @@ public class StudentController {
             @Valid @RequestBody StudentStatusReasonRequest request) {
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
-                .body(StudentResponse.from(studentService.archiveStudent(studentId, request.reason())));
+                .body(StudentResponse.from(
+                        studentService.archiveStudent(studentId, request.reason()), canViewMedicalNotes()));
     }
 
     @PostMapping("/{studentId}/reactivate")
     public ResponseEntity<StudentResponse> reactivateStudent(@PathVariable UUID studentId) {
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
-                .body(StudentResponse.from(studentService.reactivateStudent(studentId)));
+                .body(StudentResponse.from(studentService.reactivateStudent(studentId), canViewMedicalNotes()));
+    }
+
+    private static boolean canViewMedicalNotes() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated() || auth.getAuthorities() == null) {
+            return false;
+        }
+        for (GrantedAuthority authority : auth.getAuthorities()) {
+            if (MEDICAL_NOTES_VIEW_AUTHORITIES.contains(authority.getAuthority())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @GetMapping("/{studentId}/enrollments")
