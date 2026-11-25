@@ -161,7 +161,7 @@ public final class GradingCalculator {
             count++;
         }
 
-        if (count == 0) {
+        if (count == 0 || min == null || max == null) {
             return new ClassAverageStats(null, null, null, 0);
         }
 

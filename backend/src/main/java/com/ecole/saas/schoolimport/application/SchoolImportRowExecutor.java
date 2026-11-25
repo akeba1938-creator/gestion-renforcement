@@ -26,7 +26,6 @@ import com.ecole.saas.shared.domain.BusinessException;
 import com.ecole.saas.shared.domain.TenantContext;
 import com.ecole.saas.shared.domain.TenantId;
 import com.ecole.saas.student.ImportEnrollmentCommand;
-import com.ecole.saas.student.ImportStudentCommand;
 import com.ecole.saas.student.StudentEnrollmentSummary;
 import com.ecole.saas.student.StudentImportPort;
 import com.ecole.saas.student.StudentSummary;

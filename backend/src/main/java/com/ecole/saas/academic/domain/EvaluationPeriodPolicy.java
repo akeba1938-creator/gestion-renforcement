@@ -112,10 +112,10 @@ public final class EvaluationPeriodPolicy {
         }
 
         List<EvaluationPeriod> periods = new ArrayList<>(count);
-        LocalDate previousEnd = null;
+        LocalDate nextStart = year.getStartDate();
         for (int i = 0; i < count; i++) {
             int order = i + 1;
-            LocalDate periodStart = (i == 0) ? year.getStartDate() : previousEnd.plusDays(1);
+            LocalDate periodStart = nextStart;
             LocalDate periodEnd = (i == count - 1)
                     ? year.getEndDate()
                     : year.getStartDate().plusDays((totalDays * order) / count - 1);
@@ -128,7 +128,7 @@ public final class EvaluationPeriodPolicy {
                     periodStart,
                     periodEnd,
                     EvaluationPeriod.DEFAULT_WEIGHT));
-            previousEnd = periodEnd;
+            nextStart = periodEnd.plusDays(1);
         }
         return periods;
     }

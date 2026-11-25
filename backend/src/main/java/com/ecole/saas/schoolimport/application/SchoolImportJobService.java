@@ -14,7 +14,6 @@ import com.ecole.saas.schoolimport.ImportRowStatus;
 import com.ecole.saas.schoolimport.ImportType;
 import com.ecole.saas.schoolimport.ImportValidationMode;
 import com.ecole.saas.schoolimport.application.SchoolImportRowAnalyzer.AnalysisResult;
-import com.ecole.saas.schoolimport.application.SchoolImportRowAnalyzer.AnalyzedRow;
 import com.ecole.saas.schoolimport.application.SchoolImportRowExecutor.BatchExecutionResult;
 import com.ecole.saas.schoolimport.application.SchoolImportRowExecutor.RowExecutionOutcome;
 import com.ecole.saas.schoolimport.domain.ImportColumnCatalog;

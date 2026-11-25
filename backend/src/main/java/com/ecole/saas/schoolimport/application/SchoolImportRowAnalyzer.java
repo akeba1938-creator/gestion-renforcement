@@ -317,7 +317,7 @@ class SchoolImportRowAnalyzer {
                             "La date de naissance doit être comprise entre 1900-01-01 et la date du jour.");
                 }
                 LocalDate admissionDate = ImportFieldParser.parseDate(row.get("admission_date"), "admission_date", false);
-                if (admissionDate != null && birthDate != null && admissionDate.isBefore(birthDate)) {
+                if (admissionDate != null && admissionDate.isBefore(birthDate)) {
                     throw new FieldParseException(
                             "admission_date",
                             "INVALID_ADMISSION_DATE",
@@ -331,7 +331,7 @@ class SchoolImportRowAnalyzer {
                 String medicalNotes = ImportFieldParser.optionalText(row.get("medical_notes"), "medical_notes", 500);
                 String classCode = ImportFieldParser.normalizeCode(row.get("class_code"), "class_code", false);
 
-                String identityKey = birthDate != null ? studentIdentityKey(firstName, lastName, birthDate) : null;
+                String identityKey = studentIdentityKey(firstName, lastName, birthDate);
                 String naturalKey = matricule != null ? matricule : (identityKey != null ? identityKey : firstName + "|" + lastName);
 
                 // Détection doublon intra-fichier

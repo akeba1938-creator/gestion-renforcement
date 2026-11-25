@@ -13,9 +13,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.ecole.saas.audit.AuditAction;
 import com.ecole.saas.audit.AuditCategory;
 import com.ecole.saas.audit.AuditLogPort;
-import com.ecole.saas.audit.AuditOutcome;
 import com.ecole.saas.audit.AuditRecordCommand;
-import com.ecole.saas.audit.AuditSeverity;
 import com.ecole.saas.audit.PlatformAuditRecordCommand;
 import com.ecole.saas.identity.application.UserAccountService;
 import com.ecole.saas.identity.domain.AccountRef;

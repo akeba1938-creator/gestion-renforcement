@@ -726,7 +726,9 @@ public class IssuedDocumentService {
 
         Instant now = clock.instant();
         List<Object[]> rows = documentRepository.aggregateSummaryTotals(now);
-        Object[] totals = rows.isEmpty() ? new Object[] {0L, 0L, 0L, 0L, 0L, 0L, 0L} : rows.get(0);
+        Object[] totals = (rows.isEmpty() || rows.getFirst() == null)
+                ? new Object[] {0L, 0L, 0L, 0L, 0L, 0L, 0L}
+                : rows.getFirst();
 
         long totalDocuments = asLong(totals[0]);
         long issuedCount = asLong(totals[1]);
