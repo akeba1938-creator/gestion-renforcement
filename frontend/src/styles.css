@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+@theme {
+  --font-display: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
 @plugin "daisyui" {
   themes: light --default, dark --prefersdark;
 }
@@ -26,6 +31,19 @@
   --color-base-200: oklch(95% 0.006 247.858);
   --color-base-300: oklch(91% 0.010 247.858);
   --color-base-content: oklch(28.2% 0.091 267.935);
+
+  /* Semantic tokens calibrated for WCAG 2.1 AA (>= 4.5:1 against both base-100 and *-content) */
+  --color-info: oklch(48% 0.165 250);
+  --color-info-content: oklch(98.4% 0.003 247.858);
+
+  --color-success: oklch(44% 0.135 152);
+  --color-success-content: oklch(98.4% 0.003 247.858);
+
+  --color-warning: oklch(50% 0.14 60);
+  --color-warning-content: oklch(98.4% 0.003 247.858);
+
+  --color-error: oklch(49% 0.20 25);
+  --color-error-content: oklch(98.4% 0.003 247.858);
 }
 
 @plugin "daisyui/theme" {
@@ -50,11 +68,67 @@
   --color-base-200: oklch(14% 0.035 267.935);
   --color-base-300: oklch(10% 0.030 267.935);
   --color-base-content: oklch(98.4% 0.003 247.858);
+
+  /* Semantic tokens calibrated for WCAG 2.1 AA (>= 4.5:1 against both base-100 and *-content) */
+  --color-info: oklch(74% 0.14 240);
+  --color-info-content: oklch(15% 0.040 267.935);
+
+  --color-success: oklch(74% 0.15 152);
+  --color-success-content: oklch(15% 0.040 267.935);
+
+  --color-warning: oklch(80% 0.155 75);
+  --color-warning-content: oklch(15% 0.040 267.935);
+
+  --color-error: oklch(72% 0.18 22);
+  --color-error-content: oklch(15% 0.040 267.935);
 }
 
 @layer base {
+  body {
+    font-family: var(--font-sans);
+  }
+
   :where(a, button, input, select, textarea, [tabindex]):focus-visible {
     outline: 2px solid var(--color-primary);
     outline-offset: 2px;
+  }
+}
+
+@utility tabular-nums {
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+@layer components {
+  .skip-to-content {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+  }
+
+  .skip-to-content:focus,
+  .skip-to-content:focus-visible {
+    position: fixed;
+    top: 0.75rem;
+    left: 0.75rem;
+    z-index: 100;
+    width: auto;
+    height: auto;
+    padding: 0.5rem 1rem;
+    margin: 0;
+    overflow: visible;
+    clip: auto;
+    white-space: normal;
+    border-radius: 0.5rem;
+    background-color: var(--color-primary);
+    color: var(--color-primary-content);
+    font-size: 0.875rem;
+    font-weight: 600;
+    text-decoration: none;
   }
 }

@@ -1,10 +1,11 @@
-import { Component, computed, input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
 
 export type BadgeTone = 'success' | 'warning' | 'error' | 'info' | 'neutral';
 
 @Component({
   selector: 'app-status-badge',
   standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <span [class]="badgeClasses()">{{ label() }}</span>
   `,

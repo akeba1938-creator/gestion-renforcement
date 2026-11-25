@@ -1,11 +1,11 @@
-import { Component, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
-import { inject } from '@angular/core';
 
 @Component({
   selector: 'app-login-page',
   standalone: true,
   imports: [ReactiveFormsModule],
+  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="flex min-h-screen items-center justify-center bg-base-200 p-4">
       <div class="card w-full max-w-md border border-base-300 bg-base-100 shadow-sm">

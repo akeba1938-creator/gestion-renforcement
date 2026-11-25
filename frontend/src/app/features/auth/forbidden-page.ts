@@ -1,21 +1,13 @@
-import { Component, computed, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
 import { AuthService } from '../../core/auth/auth.service';
-import { UserRole } from '../../core/models/user.model';
-
-const ADMIN_HOME_ROLES: readonly UserRole[] = [
-  'SAAS_ADMIN',
-  'PROMOTER',
-  'DIRECTOR',
-  'SECRETARY',
-  'CASHIER',
-  'CENSOR',
-];
+import { ADMIN_ROLES } from '../../core/config/role-access.config';
 
 @Component({
   selector: 'app-forbidden-page',
   standalone: true,
   imports: [RouterLink],
+  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="flex min-h-screen items-center justify-center bg-base-200 p-4">
       <div class="card w-full max-w-md border border-base-300 bg-base-100 shadow-sm">
@@ -53,7 +45,7 @@ export class ForbiddenPageComponent {
     if (!role) {
       return null;
     }
-    if (ADMIN_HOME_ROLES.includes(role)) {
+    if (ADMIN_ROLES.includes(role)) {
       return '/dashboard';
     }
     return null;

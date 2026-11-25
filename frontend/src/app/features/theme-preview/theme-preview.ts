@@ -1,4 +1,15 @@
-import { Component, ElementRef, OnInit, computed, inject, signal, viewChildren } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  DestroyRef,
+  ElementRef,
+  OnInit,
+  computed,
+  inject,
+  signal,
+  viewChildren,
+} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import {
   LucideCircleAlert,
@@ -42,6 +53,7 @@ interface StudentPreviewRow {
 @Component({
   selector: 'app-theme-preview',
   standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     ReactiveFormsModule,
     StatCardComponent,
@@ -66,6 +78,7 @@ export class ThemePreviewComponent implements OnInit {
   private readonly studentApi = inject(STUDENT_API);
   private readonly financeApi = inject(FINANCE_API);
   private readonly formBuilder = inject(FormBuilder);
+  private readonly destroyRef = inject(DestroyRef);
 
   private readonly tabButtons = viewChildren<ElementRef<HTMLButtonElement>>('tabBtn');
 
@@ -181,23 +194,32 @@ export class ThemePreviewComponent implements OnInit {
     this.studentsLoading.set(true);
     this.studentsError.set(null);
 
-    this.studentApi.list({ page: 0, size: 5, sortBy: 'lastName', sortDir: 'asc' }).subscribe({
-      next: (page) => {
-        this.students.set(page.items);
-        this.studentsLoading.set(false);
-      },
-      error: (err: Error) => {
-        this.studentsError.set(err.message);
-        this.studentsLoading.set(false);
-      },
-    });
+    this.studentApi
+      .list({ page: 0, size: 5, sortBy: 'lastName', sortDir: 'asc' })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (page) => {
+          this.students.set(page.items);
+          this.studentsLoading.set(false);
+        },
+        error: (err: Error) => {
+          this.studentsError.set(err.message);
+          this.studentsLoading.set(false);
+        },
+      });
 
-    this.financeApi.getStudentBalances().subscribe({
-      next: (balances) => this.balances.set(balances),
-    });
+    this.financeApi
+      .getStudentBalances()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (balances) => this.balances.set(balances),
+      });
 
-    this.financeApi.getSummary().subscribe({
-      next: (summary) => this.financeSummary.set(summary),
-    });
+    this.financeApi
+      .getSummary()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (summary) => this.financeSummary.set(summary),
+      });
   }
 }

@@ -1,4 +1,4 @@
-import { Component } from '@angular/core';
+import { ChangeDetectionStrategy, Component } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 
 /**
@@ -8,6 +8,7 @@ import { RouterOutlet } from '@angular/router';
   selector: 'app-parent-layout',
   standalone: true,
   imports: [RouterOutlet],
+  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="min-h-screen bg-base-200 text-base-content">
       <main class="mx-auto max-w-3xl p-4">
