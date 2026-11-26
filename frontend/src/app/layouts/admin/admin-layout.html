@@ -1,6 +1,6 @@
 <a href="#main-content" class="skip-to-content">Aller au contenu principal</a>
 
-<div class="drawer lg:drawer-open min-h-screen bg-base-200">
+<div class="drawer lg:drawer-open min-h-screen max-w-full overflow-x-clip bg-base-200">
   <input
     id="admin-nav-drawer"
     type="checkbox"
@@ -9,66 +9,84 @@
     (change)="toggleDrawer()"
   />
 
-  <div class="drawer-content flex min-w-0 flex-col">
-    <header class="navbar sticky top-0 z-20 border-b border-base-300 bg-base-100 px-3 sm:px-6">
-      <div class="flex flex-1 items-center gap-2 min-w-0">
+  <div class="drawer-content flex w-full min-w-0 flex-col">
+    <header class="navbar sticky top-0 z-20 w-full min-w-0 gap-1.5 border-b border-base-300 bg-base-100 px-2 sm:gap-3 sm:px-6">
+      <div class="flex min-w-0 flex-1 items-center gap-1.5 sm:gap-3">
         <button
           #menuToggleBtn
           type="button"
-          class="btn btn-ghost btn-square min-h-11 min-w-11 rounded-lg lg:hidden"
+          class="btn btn-ghost btn-square min-h-11 min-w-11 shrink-0 rounded-lg lg:hidden"
           aria-label="Ouvrir le menu de navigation"
           aria-controls="admin-sidebar"
           [attr.aria-expanded]="drawerOpen()"
           (click)="toggleDrawer()"
         >
-          <svg lucideMenu class="h-5 w-5" aria-hidden="true"></svg>
+          <svg lucideMenu [strokeWidth]="1.75" class="h-5 w-5 shrink-0" aria-hidden="true"></svg>
         </button>
-        <span
-          class="truncate font-display text-base font-semibold tracking-tight text-base-content"
-          [title]="authService.user()?.tenantName ?? 'École SaaS'"
-        >
-          {{ authService.user()?.tenantName ?? 'École SaaS' }}
-        </span>
+
+        <div class="flex min-w-0 items-center gap-2">
+          <span class="hidden h-2 w-2 shrink-0 rounded-full bg-secondary sm:inline-block" aria-hidden="true"></span>
+          <span
+            class="truncate font-display text-sm font-semibold tracking-tight text-base-content sm:text-base"
+            [title]="authService.user()?.tenantName ?? 'École SaaS'"
+          >
+            {{ authService.user()?.tenantName ?? 'École SaaS' }}
+          </span>
+        </div>
       </div>
 
-      <div class="flex items-center gap-2">
+      <div class="flex shrink-0 items-center gap-1 sm:gap-2">
+        <span
+          role="status"
+          aria-live="polite"
+          class="inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-xs font-medium sm:px-2.5"
+          [class.border-success/30]="networkStatus.isOnline()"
+          [class.bg-success/10]="networkStatus.isOnline()"
+          [class.text-success]="networkStatus.isOnline()"
+          [class.border-error/30]="!networkStatus.isOnline()"
+          [class.bg-error/10]="!networkStatus.isOnline()"
+          [class.text-error]="!networkStatus.isOnline()"
+          data-testid="network-status-pill"
+        >
+          @if (networkStatus.isOnline()) {
+            <svg lucideWifi [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0" aria-hidden="true"></svg>
+            <span class="hidden sm:inline">En ligne</span>
+            <span class="sr-only sm:hidden">En ligne</span>
+          } @else {
+            <svg lucideWifiOff [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0" aria-hidden="true"></svg>
+            <span>Hors-ligne</span>
+          }
+        </span>
+
         <button
           type="button"
-          class="btn btn-ghost btn-sm gap-2 rounded-lg"
+          class="btn btn-ghost btn-sm min-h-11 min-w-11 gap-2 rounded-lg sm:min-h-8 sm:min-w-0"
+          [attr.aria-label]="themeService.isDark() ? 'Activer le mode clair' : 'Activer le mode sombre'"
           [attr.aria-pressed]="themeService.isDark()"
           (click)="themeService.toggleTheme()"
         >
           @if (themeService.isDark()) {
-            <svg lucideSun class="h-4 w-4" aria-hidden="true"></svg>
-            <span class="hidden sm:inline">Mode clair</span>
+            <svg lucideSun [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+            <span class="hidden md:inline">Mode clair</span>
           } @else {
-            <svg lucideMoon class="h-4 w-4" aria-hidden="true"></svg>
-            <span class="hidden sm:inline">Mode sombre</span>
+            <svg lucideMoon [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+            <span class="hidden md:inline">Mode sombre</span>
           }
         </button>
 
-        @if (authService.user(); as user) {
-          <span
-            class="badge badge-outline hidden max-w-44 truncate rounded-lg md:inline-flex"
-            [title]="user.fullName"
-          >
-            {{ user.fullName }}
-          </span>
-        }
-
         <button
           type="button"
-          class="btn btn-ghost btn-sm gap-1 rounded-lg"
+          class="btn btn-ghost btn-sm min-h-11 min-w-11 gap-1.5 rounded-lg sm:min-h-8 sm:min-w-0"
           aria-label="Se déconnecter"
           (click)="logout()"
         >
-          <svg lucideLogOut class="h-4 w-4" aria-hidden="true"></svg>
+          <svg lucideLogOut [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
           <span class="hidden sm:inline">Déconnexion</span>
         </button>
       </div>
     </header>
 
-    <main id="main-content" tabindex="-1" class="flex-1 p-4 focus:outline-none sm:p-6">
+    <main id="main-content" tabindex="-1" class="min-w-0 w-full flex-1 p-4 focus:outline-none sm:p-6">
       <router-outlet />
     </main>
   </div>
@@ -86,55 +104,157 @@
       aria-label="Navigation principale"
       [cdkTrapFocus]="drawerOpen()"
       [cdkTrapFocusAutoCapture]="drawerOpen()"
-      class="flex min-h-full w-64 flex-col border-r border-base-300 bg-base-100 text-base-content"
+      class="flex min-h-full w-64 flex-col border-r border-neutral-content/10 bg-neutral text-neutral-content"
     >
-      <div class="flex items-center justify-between border-b border-base-300 px-4 py-4">
-        <span class="font-display text-lg font-bold tracking-tight text-primary">École SaaS</span>
+      <!-- Brand header -->
+      <div class="flex items-center justify-between gap-3 px-4 py-4">
+        <div class="flex min-w-0 items-center gap-3">
+          <span
+            class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary font-display text-base font-bold text-primary-content"
+            aria-hidden="true"
+          >
+            E
+          </span>
+          <div class="min-w-0">
+            <p class="truncate font-display text-base font-bold tracking-tight text-neutral-content">
+              École SaaS
+            </p>
+            <p class="truncate text-xs text-neutral-content/70">Direction Générale</p>
+          </div>
+        </div>
+
         <button
           type="button"
-          class="btn btn-ghost btn-sm btn-square min-h-11 min-w-11 rounded-lg lg:hidden"
+          class="btn btn-ghost btn-sm btn-square min-h-11 min-w-11 rounded-lg text-neutral-content hover:bg-neutral-content/10 lg:hidden"
           aria-label="Fermer le menu de navigation"
           (click)="closeDrawer(true)"
         >
-          <svg lucideX class="h-4 w-4" aria-hidden="true"></svg>
+          <svg lucideX [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
         </button>
       </div>
 
-      <nav class="menu flex-1 gap-1 p-3" aria-label="Menu d'administration">
-        @for (item of visibleNavItems(); track item.route) {
-          <a
-            [routerLink]="item.route"
-            routerLinkActive="menu-active"
-            class="rounded-lg transition-colors duration-150 ease-out motion-reduce:transition-none"
-            (click)="closeDrawer(false)"
+      <!-- Academic year selector -->
+      <div class="px-3 pb-3">
+        <div class="flex items-center justify-between gap-2 rounded-xl border border-neutral-content/15 bg-neutral-content/5 px-3 py-2">
+          <label
+            for="admin-academic-year"
+            class="flex items-center gap-2 text-xs font-medium text-neutral-content/80"
           >
-            @switch (item.icon) {
-              @case ('dashboard') {
-                <svg lucideLayoutDashboard class="h-4 w-4" aria-hidden="true"></svg>
-              }
-              @case ('students') {
-                <svg lucideUsers class="h-4 w-4" aria-hidden="true"></svg>
-              }
-              @case ('grades') {
-                <svg lucideGraduationCap class="h-4 w-4" aria-hidden="true"></svg>
-              }
-              @case ('attendance') {
-                <svg lucideCalendarCheck class="h-4 w-4" aria-hidden="true"></svg>
-              }
-              @case ('finance') {
-                <svg lucideWallet class="h-4 w-4" aria-hidden="true"></svg>
-              }
-              @case ('import') {
-                <svg lucideUpload class="h-4 w-4" aria-hidden="true"></svg>
-              }
-              @case ('settings') {
-                <svg lucideSettings class="h-4 w-4" aria-hidden="true"></svg>
-              }
+            <svg lucideCalendar [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0 text-neutral-content/70" aria-hidden="true"></svg>
+            <span>Année</span>
+          </label>
+          <select
+            id="admin-academic-year"
+            aria-label="Année scolaire"
+            class="rounded-lg bg-neutral px-2 py-0.5 text-xs font-semibold tabular-nums text-neutral-content focus:outline-none"
+            [value]="selectedAcademicYear()"
+            (change)="onAcademicYearChange($event)"
+          >
+            @for (year of academicYears; track year) {
+              <option [value]="year">{{ year }}</option>
             }
-            {{ item.label }}
-          </a>
+          </select>
+        </div>
+      </div>
+
+      <!-- Grouped role-filtered navigation -->
+      <nav class="flex-1 space-y-4 overflow-y-auto px-3 py-2" aria-label="Menu d'administration">
+        @if (primaryNavItems().length > 0) {
+          <div class="space-y-1">
+            <p class="px-3 pb-1 text-[11px] font-semibold tracking-wider text-neutral-content/55 uppercase">
+              Pilotage
+            </p>
+            @for (item of primaryNavItems(); track item.route) {
+              <a
+                [routerLink]="item.route"
+                routerLinkActive="bg-primary text-primary-content font-semibold"
+                #rla="routerLinkActive"
+                class="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-neutral-content/85 transition-colors duration-150 ease-out hover:bg-neutral-content/10 hover:text-neutral-content motion-reduce:transition-none"
+                (click)="closeDrawer(false)"
+              >
+                @switch (item.icon) {
+                  @case ('dashboard') {
+                    <svg lucideLayoutDashboard [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+                  }
+                  @case ('students') {
+                    <svg lucideUsers [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+                  }
+                  @case ('grades') {
+                    <svg lucideGraduationCap [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+                  }
+                  @case ('attendance') {
+                    <svg lucideCalendarCheck [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+                  }
+                  @case ('finance') {
+                    <svg lucideWallet [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+                  }
+                }
+                <span class="min-w-0 flex-1 truncate">{{ item.label }}</span>
+                @if (item.badge && !rla.isActive) {
+                  <span class="rounded-lg bg-neutral-content/15 px-1.5 py-0.5 text-[10px] font-medium text-neutral-content/90">
+                    {{ item.badge }}
+                  </span>
+                }
+                @if (rla.isActive) {
+                  <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-primary-content" aria-hidden="true"></span>
+                }
+              </a>
+            }
+          </div>
+        }
+
+        @if (adminNavItems().length > 0) {
+          <div class="space-y-1 border-t border-neutral-content/10 pt-3">
+            <p class="px-3 pb-1 text-[11px] font-semibold tracking-wider text-neutral-content/55 uppercase">
+              Administration
+            </p>
+            @for (item of adminNavItems(); track item.route) {
+              <a
+                [routerLink]="item.route"
+                routerLinkActive="bg-primary text-primary-content font-semibold"
+                #rlaAdmin="routerLinkActive"
+                class="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-neutral-content/85 transition-colors duration-150 ease-out hover:bg-neutral-content/10 hover:text-neutral-content motion-reduce:transition-none"
+                (click)="closeDrawer(false)"
+              >
+                @switch (item.icon) {
+                  @case ('import') {
+                    <svg lucideUpload [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+                  }
+                  @case ('settings') {
+                    <svg lucideSettings [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+                  }
+                }
+                <span class="min-w-0 flex-1 truncate">{{ item.label }}</span>
+                @if (rlaAdmin.isActive) {
+                  <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-primary-content" aria-hidden="true"></span>
+                }
+              </a>
+            }
+          </div>
         }
       </nav>
+
+      <!-- Bottom user profile card -->
+      @if (authService.user(); as user) {
+        <div class="border-t border-neutral-content/10 p-3">
+          <div class="flex items-center gap-3 rounded-xl bg-neutral-content/5 px-3 py-2.5">
+            <span
+              class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/25 font-display text-xs font-bold text-neutral-content"
+              aria-hidden="true"
+            >
+              {{ userInitials() }}
+            </span>
+            <div class="min-w-0 flex-1">
+              <p class="truncate text-sm font-semibold text-neutral-content" [title]="user.fullName">
+                {{ user.fullName }}
+              </p>
+              <p class="truncate text-xs text-neutral-content/70" [title]="userRoleLabel()">
+                {{ userRoleLabel() }}
+              </p>
+            </div>
+          </div>
+        </div>
+      }
     </aside>
   </div>
 </div>

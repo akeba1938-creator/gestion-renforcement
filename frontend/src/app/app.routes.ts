@@ -3,7 +3,6 @@ import { devRoutes } from './app.dev-routes';
 import { ADMIN_ROLES, ROUTE_ROLES } from './core/config/role-access.config';
 import { authGuard } from './core/guards/auth.guard';
 import { roleGuard } from './core/guards/role.guard';
-import { AdminLayoutComponent } from './layouts/admin/admin-layout';
 
 export const routes: Routes = [
   ...devRoutes,
@@ -21,7 +20,8 @@ export const routes: Routes = [
   },
   {
     path: '',
-    component: AdminLayoutComponent,
+    loadComponent: () =>
+      import('./layouts/admin/admin-layout').then((m) => m.AdminLayoutComponent),
     canActivate: [authGuard, roleGuard],
     data: { roles: ADMIN_ROLES },
     children: [

@@ -1,2 +1,4 @@
 <router-outlet />
-<app-toast-container />
+@defer (when toastService.toasts().length > 0) {
+  <app-toast-container />
+}

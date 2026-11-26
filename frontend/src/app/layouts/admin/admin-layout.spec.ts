@@ -7,7 +7,7 @@ import { AdminLayoutComponent } from './admin-layout';
 function setUserRole(authService: AuthService, role: UserRole): void {
   authService.setSession('memory-jwt', {
     id: `usr-${role.toLowerCase()}`,
-    fullName: `Utilisateur ${role}`,
+    fullName: `Moussa Diop`,
     email: `${role.toLowerCase()}@ecole-demo.invalid`,
     role,
     tenantId: 'tenant-demo-1',
@@ -82,6 +82,41 @@ describe('AdminLayoutComponent', () => {
       (a) => a.getAttribute('href')
     );
     expect(saasAdminLinks).toEqual(['/dashboard', '/finance', '/settings']);
+  });
+
+  it('renders the contrasted navy sidebar with academic year selector 2026–2027 and user profile', () => {
+    setUserRole(authService, 'DIRECTOR');
+    const fixture = TestBed.createComponent(AdminLayoutComponent);
+    fixture.detectChanges();
+
+    const el = fixture.nativeElement as HTMLElement;
+    const sidebar = el.querySelector('#admin-sidebar');
+    expect(sidebar?.classList.contains('bg-neutral')).toBe(true);
+    expect(sidebar?.classList.contains('text-neutral-content')).toBe(true);
+
+    const yearSelect = el.querySelector<HTMLSelectElement>('#admin-academic-year');
+    expect(yearSelect?.value).toBe('2026–2027');
+
+    expect(sidebar?.textContent).toContain('Moussa Diop');
+    expect(sidebar?.textContent).toContain('Directeur');
+  });
+
+  it('displays network status pill and updates reactively on offline/online events', () => {
+    setUserRole(authService, 'DIRECTOR');
+    const fixture = TestBed.createComponent(AdminLayoutComponent);
+    fixture.detectChanges();
+
+    const el = fixture.nativeElement as HTMLElement;
+    const pill = el.querySelector('[data-testid="network-status-pill"]');
+    expect(pill?.textContent).toContain('En ligne');
+
+    window.dispatchEvent(new Event('offline'));
+    fixture.detectChanges();
+    expect(pill?.textContent).toContain('Hors-ligne');
+
+    window.dispatchEvent(new Event('online'));
+    fixture.detectChanges();
+    expect(pill?.textContent).toContain('En ligne');
   });
 
   it('closes mobile navigation drawer on Escape and restores focus to the menu button', () => {

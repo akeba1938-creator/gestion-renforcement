@@ -1,0 +1,602 @@
+<div class="space-y-6">
+  <!-- En-tête de page avec 1 seul btn-primary -->
+  <app-page-header title="Tableau de bord" [subtitle]="headerSubtitle()">
+    <div pageHeaderActions class="flex flex-wrap items-center gap-2">
+      <div
+        role="group"
+        aria-label="Période du tableau de bord"
+        class="inline-flex rounded-lg border border-base-300 bg-base-100 p-0.5"
+      >
+        @for (option of periodOptions; track option.id) {
+          <button
+            type="button"
+            class="btn btn-xs rounded-lg border-0 px-3 transition-colors duration-150 ease-out motion-reduce:transition-none"
+            [class.bg-base-200]="selectedPeriod() === option.id"
+            [class.font-semibold]="selectedPeriod() === option.id"
+            [class.text-base-content]="selectedPeriod() === option.id"
+            [class.btn-ghost]="selectedPeriod() !== option.id"
+            [attr.aria-pressed]="selectedPeriod() === option.id"
+            (click)="selectPeriod(option.id)"
+          >
+            {{ option.label }}
+          </button>
+        }
+      </div>
+
+      <button
+        type="button"
+        class="btn btn-outline btn-sm gap-1.5 rounded-lg"
+        [disabled]="exporting() || loading()"
+        [attr.aria-busy]="exporting()"
+        (click)="exportReport()"
+      >
+        <svg lucideDownload [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+        Exporter
+      </button>
+
+      <button
+        type="button"
+        class="btn btn-primary btn-sm gap-1.5 rounded-lg"
+        (click)="openNewStudentDrawer()"
+      >
+        <svg lucidePlus [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+        Nouvel élève
+      </button>
+    </div>
+  </app-page-header>
+
+  <!-- État 6 : Bannière discrète hors-ligne PWA -->
+  @if (!networkStatus.isOnline()) {
+    <div
+      role="status"
+      aria-live="polite"
+      class="flex items-center gap-3 rounded-xl border border-warning/40 bg-base-100 px-4 py-3 text-sm text-base-content"
+    >
+      <svg lucideWifiOff [strokeWidth]="1.75" class="h-4 w-4 shrink-0 text-warning" aria-hidden="true"></svg>
+      <span>
+        Mode hors-ligne détecté : les indicateurs affichés correspondent aux dernières données
+        disponibles.
+      </span>
+    </div>
+  }
+
+  <!-- État 1 : Chargement (Skeletons dimensionnés zéro CLS) -->
+  @if (loading()) {
+    <div class="space-y-6">
+      <app-skeleton-loader variant="kpi" [count]="4" ariaLabel="Chargement des indicateurs clés…" />
+      <app-skeleton-loader variant="card" [count]="2" ariaLabel="Chargement des graphiques et alertes…" />
+      <app-skeleton-loader
+        variant="table"
+        [count]="5"
+        [columns]="6"
+        ariaLabel="Chargement des derniers paiements…"
+      />
+    </div>
+  } @else if (errorProblem(); as problem) {
+    <!-- État 4 : Erreur RFC 9457 avec requestId copiable et bouton Réessayer -->
+    <app-error-state [problem]="problem" [retrying]="loading()" (retry)="reload()" />
+  } @else if (isEmptySnapshot()) {
+    <!-- État 2 : Vide initial -->
+    <app-empty-state
+      variant="empty"
+      icon="users"
+      title="Aucune donnée enregistrée pour cette période"
+      description="Inscrivez vos premiers élèves ou importez vos listes pour activer le suivi financier et pédagogique."
+      actionLabel="Inscrire un élève"
+      (action)="openNewStudentDrawer()"
+    />
+  } @else if (snapshot(); as data) {
+    <!-- 4 cartes KPI (max 4 par ligne desktop, montants sur 1 seule ligne) -->
+    <section aria-label="Indicateurs clés de l'établissement">
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <app-stat-card
+          label="Élèves inscrits"
+          [value]="enrolledStudentsValue()"
+          [trend]="data.kpis.enrolledDeltaLabel"
+          trendTone="success"
+          [description]="data.kpis.enrolledComparisonLabel"
+          tone="neutral"
+          icon="users"
+        />
+        <app-stat-card
+          [label]="collectedKpiLabel()"
+          [value]="data.kpis.collectedFcfa | fcfa"
+          [trend]="data.kpis.collectedTrendLabel"
+          trendTone="success"
+          [description]="data.kpis.collectedComparisonLabel"
+          tone="secondary"
+          icon="wallet"
+        />
+        <app-stat-card
+          label="Impayés en retard"
+          [value]="data.kpis.overdueFcfa | fcfa"
+          [trend]="overdueFamiliesTrend()"
+          trendTone="warning"
+          [description]="data.kpis.overdueSubLabel"
+          tone="warning"
+          icon="alert"
+        />
+        <app-stat-card
+          label="Taux de présence"
+          [value]="attendanceRateValue()"
+          [trend]="data.kpis.attendanceTrendLabel"
+          trendTone="info"
+          [description]="absencesDescription()"
+          tone="primary"
+          icon="attendance"
+        />
+      </div>
+    </section>
+
+    <!-- Zone centrale : 2/3 graphique encaissements + 1/3 actions prioritaires -->
+    <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
+      <div class="lg:col-span-2">
+        <app-collection-chart
+          [points]="data.monthlyEvolution"
+          [totalCumulativeFcfa]="data.totalCumulativeFcfa"
+          [note]="data.evolutionNote"
+        />
+      </div>
+
+      <section
+        aria-labelledby="priority-actions-title"
+        class="flex flex-col justify-between rounded-xl border border-base-300/80 bg-base-100 p-4 shadow-xs sm:p-6"
+      >
+        <div>
+          <div class="flex items-center justify-between gap-2">
+            <div class="flex items-center gap-2">
+              <h2
+                id="priority-actions-title"
+                class="font-display text-base font-semibold tracking-tight text-base-content"
+              >
+                Actions prioritaires
+              </h2>
+              <span
+                class="inline-flex items-center rounded-lg border border-error/20 bg-error/10 px-2 py-0.5 text-xs font-semibold whitespace-nowrap tabular-nums text-error"
+              >
+                {{ data.priorityAlerts.length }}
+              </span>
+            </div>
+          </div>
+
+          <ul class="mt-4 space-y-3">
+            @for (alert of data.priorityAlerts; track alert.id) {
+              <li
+                class="flex items-center gap-3 rounded-xl border border-base-300/80 bg-base-200/35 p-3 transition-colors duration-150 ease-out hover:border-base-300 hover:bg-base-200/65 motion-reduce:transition-none"
+              >
+                <span [class]="alertIconClasses(alert.tone)" aria-hidden="true">
+                  @switch (alert.tone) {
+                    @case ('warning') {
+                      <svg lucideBell [strokeWidth]="1.75" class="h-4 w-4 shrink-0"></svg>
+                    }
+                    @case ('info') {
+                      <svg lucideCalendarCheck [strokeWidth]="1.75" class="h-4 w-4 shrink-0"></svg>
+                    }
+                    @default {
+                      <svg lucideCircleCheck [strokeWidth]="1.75" class="h-4 w-4 shrink-0"></svg>
+                    }
+                  }
+                </span>
+
+                <div class="min-w-0 flex-1">
+                  <p class="truncate text-sm font-semibold text-base-content" [title]="alert.title">
+                    {{ alert.title }}
+                  </p>
+                  <p class="truncate text-xs text-base-content/60" [title]="alert.subtitle">
+                    {{ alert.subtitle }}
+                  </p>
+                </div>
+
+                <a
+                  [routerLink]="alert.route"
+                  class="btn btn-ghost btn-xs shrink-0 rounded-lg text-primary"
+                >
+                  {{ alert.actionLabel }}
+                </a>
+              </li>
+            }
+          </ul>
+        </div>
+
+        <!-- Relance groupée : bouton secondaire btn-outline (jamais btn-primary) -->
+        <div
+          class="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-base-300/80 bg-base-200/50 p-3.5"
+        >
+          <div class="flex min-w-0 items-center gap-2.5">
+            <svg lucideMegaphone [strokeWidth]="1.75" class="h-4 w-4 shrink-0 text-primary" aria-hidden="true"></svg>
+            <span class="truncate text-xs font-medium text-base-content">
+              Relance groupée WhatsApp / SMS
+            </span>
+          </div>
+          <button
+            type="button"
+            class="btn btn-outline btn-sm rounded-lg"
+            [disabled]="sendingReminders() || data.kpis.overdueFamiliesCount === 0"
+            (click)="openReminderDialog()"
+          >
+            Lancer la relance
+          </button>
+        </div>
+      </section>
+    </div>
+
+    <!-- Zone inférieure pleine largeur : Derniers paiements enregistrés -->
+    <section
+      aria-labelledby="recent-payments-title"
+      class="rounded-xl border border-base-300/80 bg-base-100 shadow-xs"
+    >
+      <div
+        class="flex flex-col gap-3 border-b border-base-300/80 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-6"
+      >
+        <div class="min-w-0">
+          <h2
+            id="recent-payments-title"
+            class="font-display text-base font-semibold tracking-tight text-base-content"
+          >
+            Derniers paiements enregistrés
+          </h2>
+          <p class="mt-0.5 text-xs text-base-content/60">
+            Flux en temps réel de la caisse et des passerelles mobiles (Wave &amp; Orange Money)
+          </p>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2">
+          <div
+            role="group"
+            aria-label="Filtrer par moyen de paiement"
+            class="inline-flex flex-wrap gap-1 rounded-lg border border-base-300/80 bg-base-200/50 p-0.5"
+          >
+            @for (filter of paymentFilterOptions; track filter.id) {
+              <button
+                type="button"
+                class="btn btn-xs rounded-lg border-0 transition-colors duration-150 ease-out motion-reduce:transition-none"
+                [class.bg-base-100]="paymentMethodFilter() === filter.id"
+                [class.font-semibold]="paymentMethodFilter() === filter.id"
+                [class.shadow-xs]="paymentMethodFilter() === filter.id"
+                [class.btn-ghost]="paymentMethodFilter() !== filter.id"
+                [attr.aria-pressed]="paymentMethodFilter() === filter.id"
+                (click)="selectPaymentFilter(filter.id)"
+              >
+                {{ filter.label }}
+              </button>
+            }
+          </div>
+
+          <a routerLink="/finance" class="btn btn-outline btn-xs gap-1 rounded-lg">
+            Tout afficher
+            <svg lucideArrowRight [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0" aria-hidden="true"></svg>
+          </a>
+        </div>
+      </div>
+
+      @if (filteredPayments().length === 0) {
+        <!-- État 3 : Vide après filtre -->
+        <div class="p-4 sm:p-6">
+          <app-empty-state
+            variant="filtered"
+            title="Aucun paiement ne correspond à ce filtre"
+            description="Aucun encaissement n'a été trouvé pour le moyen de paiement sélectionné sur cette période."
+            (action)="resetPaymentFilter()"
+          />
+        </div>
+      } @else {
+        <!-- Tableau haute densité Desktop (>= 768px, contenu confortablement sans débordement) -->
+        <div class="hidden overflow-x-auto md:block">
+          <table class="w-full table-auto border-collapse text-left">
+            <thead>
+              <tr
+                class="border-b border-base-300/80 text-xs font-semibold uppercase tracking-wider text-base-content/50"
+              >
+                <th scope="col" class="py-3 pl-4 pr-2 text-left font-semibold min-[1400px]:px-3 min-[1400px]:pl-5">Élève</th>
+                <th scope="col" class="px-2 py-3 text-left font-semibold whitespace-nowrap min-[1400px]:px-3">Classe</th>
+                <th scope="col" class="px-2 py-3 text-left font-semibold whitespace-nowrap min-[1400px]:px-3">
+                  Date &amp; heure
+                </th>
+                <th scope="col" class="px-2 py-3 text-left font-semibold whitespace-nowrap min-[1400px]:px-3">Moyen</th>
+                <th scope="col" class="px-2 py-3 text-left font-semibold whitespace-nowrap min-[1400px]:px-3">Statut</th>
+                <th scope="col" class="px-2 py-3 text-right font-semibold whitespace-nowrap min-[1400px]:px-3">
+                  Montant
+                </th>
+                <th scope="col" class="py-3 pl-2 pr-4 text-right font-semibold whitespace-nowrap min-[1400px]:px-3 min-[1400px]:pr-5">
+                  Action
+                </th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-base-300/70">
+              @for (payment of filteredPayments(); track payment.id) {
+                <tr
+                  class="transition-colors duration-150 ease-out hover:bg-base-200/50 motion-reduce:transition-none"
+                >
+                  <td class="py-3 pl-4 pr-2 min-[1400px]:px-3 min-[1400px]:pl-5">
+                    <div class="flex items-center gap-2.5">
+                      <span
+                        class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-primary/20 bg-primary/10 font-display text-xs font-semibold text-primary"
+                        aria-hidden="true"
+                      >
+                        {{ payment.studentInitials }}
+                      </span>
+                      <div class="min-w-0">
+                        <p
+                          class="max-w-32 truncate text-sm font-semibold text-base-content min-[1400px]:max-w-48"
+                          [title]="payment.studentName"
+                        >
+                          {{ payment.studentName }}
+                        </p>
+                        <p class="font-mono text-xs text-base-content/60">
+                          {{ payment.matricule }}
+                        </p>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="px-2 py-3 whitespace-nowrap min-[1400px]:px-3">
+                    <span
+                      class="inline-flex items-center rounded-lg border border-base-300/80 bg-base-200/60 px-2 py-0.5 text-xs font-medium whitespace-nowrap text-base-content/80"
+                    >
+                      {{ payment.className }}
+                    </span>
+                  </td>
+                  <td class="px-2 py-3 text-xs whitespace-nowrap tabular-nums text-base-content/65 min-[1400px]:px-3">
+                    {{ payment.recordedAtUtc | dakarDate: 'datetime' }}
+                  </td>
+                  <td class="px-2 py-3 whitespace-nowrap min-[1400px]:px-3">
+                    <span [class]="paymentMethodClasses(payment.method)">
+                      @if (payment.method === 'CASH') {
+                        <svg lucideBanknote [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0" aria-hidden="true"></svg>
+                      } @else {
+                        <svg lucideSmartphone [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0" aria-hidden="true"></svg>
+                      }
+                      {{ paymentMethodLabel(payment.method) }}
+                    </span>
+                  </td>
+                  <td class="px-2 py-3 whitespace-nowrap min-[1400px]:px-3">
+                    <app-status-badge
+                      [label]="paymentStatusLabel(payment.status)"
+                      [tone]="paymentStatusTone(payment.status)"
+                    />
+                  </td>
+                  <td
+                    class="px-2 py-3 text-right font-display text-sm font-semibold tracking-tight whitespace-nowrap tabular-nums text-base-content min-[1400px]:px-3"
+                  >
+                    {{ payment.amountFcfa | fcfa }}
+                  </td>
+                  <td class="py-3 pl-2 pr-4 text-right whitespace-nowrap min-[1400px]:px-3 min-[1400px]:pr-5">
+                    <button
+                      type="button"
+                      class="inline-flex h-7 items-center justify-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium whitespace-nowrap transition-colors duration-150 ease-out motion-reduce:transition-none disabled:pointer-events-none disabled:opacity-50"
+                      [class]="
+                        payment.status === 'PENDING'
+                          ? 'border-base-300 bg-base-100 text-base-content hover:bg-base-200/70'
+                          : 'border-transparent bg-transparent text-base-content/75 hover:border-base-300/80 hover:bg-base-200/60 hover:text-base-content'
+                      "
+                      [disabled]="busyPaymentId() === payment.id"
+                      (click)="handlePaymentAction(payment)"
+                    >
+                      @if (payment.status === 'PENDING') {
+                        <svg lucideRefreshCw [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0" aria-hidden="true"></svg>
+                        Vérifier
+                      } @else {
+                        <svg lucideReceipt [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0" aria-hidden="true"></svg>
+                        Reçu
+                      }
+                    </button>
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Cartes empilées Mobile (< 768px, zones tactiles >= 44px) -->
+        <div class="space-y-3 p-4 md:hidden">
+          @for (payment of filteredPayments(); track payment.id) {
+            <article
+              class="space-y-3 rounded-xl border border-base-300/80 bg-base-100 p-4 shadow-xs transition-colors duration-150 ease-out hover:border-base-300 motion-reduce:transition-none"
+            >
+              <div class="flex items-start justify-between gap-3">
+                <div class="flex min-w-0 items-center gap-3">
+                  <span
+                    class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-primary/20 bg-primary/10 font-display text-xs font-semibold text-primary"
+                    aria-hidden="true"
+                  >
+                    {{ payment.studentInitials }}
+                  </span>
+                  <div class="min-w-0">
+                    <p
+                      class="truncate text-sm font-semibold text-base-content"
+                      [title]="payment.studentName"
+                    >
+                      {{ payment.studentName }}
+                    </p>
+                    <p class="truncate font-mono text-xs text-base-content/60">
+                      {{ payment.matricule }} • {{ payment.className }}
+                    </p>
+                  </div>
+                </div>
+                <app-status-badge
+                  [label]="paymentStatusLabel(payment.status)"
+                  [tone]="paymentStatusTone(payment.status)"
+                />
+              </div>
+
+              <div class="flex flex-wrap items-center justify-between gap-2 text-xs">
+                <span [class]="paymentMethodClasses(payment.method)">
+                  @if (payment.method === 'CASH') {
+                    <svg lucideBanknote [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0" aria-hidden="true"></svg>
+                  } @else {
+                    <svg lucideSmartphone [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0" aria-hidden="true"></svg>
+                  }
+                  {{ paymentMethodLabel(payment.method) }}
+                </span>
+                <span class="tabular-nums text-base-content/60">
+                  {{ payment.recordedAtUtc | dakarDate: 'datetime' }}
+                </span>
+              </div>
+
+              <div
+                class="flex items-center justify-between gap-3 border-t border-base-300/70 pt-3"
+              >
+                <p
+                  class="font-display text-base font-bold tracking-tight whitespace-nowrap tabular-nums text-base-content"
+                >
+                  {{ payment.amountFcfa | fcfa }}
+                </p>
+                <button
+                  type="button"
+                  class="btn btn-outline min-h-11 gap-1.5 rounded-lg px-4"
+                  [disabled]="busyPaymentId() === payment.id"
+                  (click)="handlePaymentAction(payment)"
+                >
+                  @if (payment.status === 'PENDING') {
+                    <svg lucideRefreshCw [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+                    Vérifier
+                  } @else {
+                    <svg lucideReceipt [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+                    Reçu
+                  }
+                </button>
+              </div>
+            </article>
+          }
+        </div>
+
+        <div
+          class="flex flex-wrap items-center justify-between gap-2 border-t border-base-300/80 px-4 py-3 text-xs text-base-content/60 sm:px-6"
+        >
+          <span class="tabular-nums">
+            Affichage de <strong class="text-base-content">{{ filteredPayments().length }}</strong>
+            transactions sur
+            <strong class="text-base-content">{{ data.totalTransactionsCount }}</strong> enregistrées
+          </span>
+          <a routerLink="/finance" class="font-medium text-primary hover:underline">
+            Voir le journal complet
+          </a>
+        </div>
+      }
+    </section>
+  }
+</div>
+
+<!-- Drawer d'inscription rapide (+ Nouvel élève) -->
+<app-drawer
+  [open]="drawerOpen()"
+  title="Nouvel élève"
+  subtitle="Pré-inscription rapide dans l'année scolaire active"
+  [closeDisabled]="submittingStudent()"
+  (closed)="closeNewStudentDrawer()"
+>
+  <form
+    id="quick-student-form"
+    [formGroup]="studentForm"
+    (ngSubmit)="submitQuickStudent()"
+    class="space-y-4"
+    novalidate
+  >
+    <div class="space-y-1.5">
+      <label for="quick-student-firstname" class="block text-sm font-medium text-base-content">
+        Prénom
+      </label>
+      <input
+        id="quick-student-firstname"
+        type="text"
+        formControlName="firstName"
+        class="input input-bordered w-full rounded-lg"
+        [attr.aria-invalid]="studentForm.controls.firstName.invalid && studentForm.controls.firstName.touched"
+        aria-describedby="quick-student-firstname-error"
+      />
+      @if (studentForm.controls.firstName.invalid && studentForm.controls.firstName.touched) {
+        <p id="quick-student-firstname-error" class="text-xs text-error">
+          Veuillez saisir un prénom d'au moins 2 caractères.
+        </p>
+      }
+    </div>
+
+    <div class="space-y-1.5">
+      <label for="quick-student-lastname" class="block text-sm font-medium text-base-content">
+        Nom
+      </label>
+      <input
+        id="quick-student-lastname"
+        type="text"
+        formControlName="lastName"
+        class="input input-bordered w-full rounded-lg"
+        [attr.aria-invalid]="studentForm.controls.lastName.invalid && studentForm.controls.lastName.touched"
+        aria-describedby="quick-student-lastname-error"
+      />
+      @if (studentForm.controls.lastName.invalid && studentForm.controls.lastName.touched) {
+        <p id="quick-student-lastname-error" class="text-xs text-error">
+          Veuillez saisir un nom d'au moins 2 caractères.
+        </p>
+      }
+    </div>
+
+    <div class="space-y-1.5">
+      <label for="quick-student-class" class="block text-sm font-medium text-base-content">
+        Classe d'affectation
+      </label>
+      <select
+        id="quick-student-class"
+        formControlName="className"
+        class="select select-bordered w-full rounded-lg"
+      >
+        @for (className of classOptions; track className) {
+          <option [value]="className">{{ className }}</option>
+        }
+      </select>
+    </div>
+
+    <div class="space-y-1.5">
+      <label for="quick-student-phone" class="block text-sm font-medium text-base-content">
+        Téléphone du tuteur (format +221)
+      </label>
+      <input
+        id="quick-student-phone"
+        type="tel"
+        formControlName="guardianPhone"
+        placeholder="+221770000000"
+        class="input input-bordered w-full rounded-lg font-mono tabular-nums"
+        [attr.aria-invalid]="
+          studentForm.controls.guardianPhone.invalid && studentForm.controls.guardianPhone.touched
+        "
+        aria-describedby="quick-student-phone-error"
+      />
+      @if (studentForm.controls.guardianPhone.invalid && studentForm.controls.guardianPhone.touched) {
+        <p id="quick-student-phone-error" class="text-xs text-error">
+          Format attendu : +221 suivi de 9 chiffres (ex. +221770000000).
+        </p>
+      }
+    </div>
+  </form>
+
+  <div drawerFooter class="flex justify-end gap-2">
+    <button
+      type="button"
+      class="btn btn-ghost rounded-lg"
+      [disabled]="submittingStudent()"
+      (click)="closeNewStudentDrawer()"
+    >
+      Annuler
+    </button>
+    <button
+      type="submit"
+      form="quick-student-form"
+      class="btn btn-primary rounded-lg"
+      [disabled]="submittingStudent()"
+      [attr.aria-busy]="submittingStudent()"
+    >
+      Enregistrer l'élève
+    </button>
+  </div>
+</app-drawer>
+
+<!-- Confirmation explicite de relance groupée -->
+<app-confirm-dialog
+  [open]="reminderDialogOpen()"
+  title="Confirmer la campagne de relance"
+  message="Les rappels d'impayés seront envoyés par SMS et WhatsApp aux familles concernées."
+  confirmLabel="Envoyer les relances"
+  cancelLabel="Annuler"
+  tone="primary"
+  [loading]="sendingReminders()"
+  (confirm)="confirmGroupReminders()"
+  (cancel)="closeReminderDialog()"
+/>

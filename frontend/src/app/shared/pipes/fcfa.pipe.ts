@@ -17,6 +17,7 @@ export class FcfaPipe implements PipeTransform {
       return '—';
     }
     const integerAmount = Math.trunc(value);
-    return `${FCFA_FORMATTER.format(integerAmount)} FCFA`;
+    const formatted = FCFA_FORMATTER.format(integerAmount).replace(/\u202F/g, '\u00A0');
+    return `${formatted} FCFA`;
   }
 }
