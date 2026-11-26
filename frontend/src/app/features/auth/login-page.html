@@ -1,0 +1,605 @@
+<a href="#login-main" class="skip-to-content">Aller au formulaire de connexion</a>
+
+<div class="grid min-h-screen w-full max-w-full overflow-x-clip bg-base-200 lg:grid-cols-2">
+  <!-- Panneau institutionnel gauche (desktop uniquement, cohérent avec AdminLayout Variante 3) -->
+  <aside
+    aria-label="Présentation institutionnelle École SaaS"
+    class="hidden border-r border-neutral-content/10 bg-neutral p-10 text-neutral-content lg:flex lg:flex-col lg:justify-between xl:p-14"
+  >
+    <div class="flex items-center gap-3">
+      <span
+        class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary font-display text-lg font-bold text-primary-content"
+        aria-hidden="true"
+      >
+        E
+      </span>
+      <div class="min-w-0">
+        <p class="truncate font-display text-lg font-bold tracking-tight text-neutral-content">
+          École SaaS
+        </p>
+        <p class="truncate text-xs text-neutral-content/70">
+          Gestion scolaire multi-établissements
+        </p>
+      </div>
+    </div>
+
+    <div class="my-auto max-w-lg space-y-8 py-10">
+      <div class="space-y-4">
+        <span
+          class="inline-flex items-center gap-2 rounded-lg border border-neutral-content/15 bg-neutral-content/5 px-3 py-1.5 text-xs font-medium whitespace-nowrap text-neutral-content/85"
+        >
+          <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-secondary" aria-hidden="true"></span>
+          <span>Portail institutionnel sécurisé</span>
+        </span>
+
+        <h2 class="font-display text-3xl leading-tight font-bold tracking-tight text-neutral-content xl:text-4xl">
+          Pilotez votre établissement en toute sérénité.
+        </h2>
+
+        <p class="text-sm leading-relaxed text-neutral-content/75">
+          Inscriptions, scolarité en FCFA, bulletins et suivi quotidien des présences réunis dans un
+          espace fiable conçu pour la direction, la caisse et les équipes pédagogiques.
+        </p>
+      </div>
+
+      <ul class="space-y-4" aria-label="Garanties de sécurité et de fiabilité">
+        @for (pillar of securityPillars; track pillar.id) {
+          <li class="flex items-start gap-3.5">
+            <span
+              class="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-neutral-content/15 bg-neutral-content/10 text-neutral-content"
+              aria-hidden="true"
+            >
+              @switch (pillar.icon) {
+                @case ('building') {
+                  <svg lucideBuilding2 [strokeWidth]="1.75" class="h-4 w-4 shrink-0"></svg>
+                }
+                @case ('shield') {
+                  <svg lucideShieldCheck [strokeWidth]="1.75" class="h-4 w-4 shrink-0"></svg>
+                }
+                @case ('lock') {
+                  <svg lucideLock [strokeWidth]="1.75" class="h-4 w-4 shrink-0"></svg>
+                }
+              }
+            </span>
+            <div class="min-w-0">
+              <p class="text-sm font-semibold text-neutral-content">{{ pillar.title }}</p>
+              <p class="mt-0.5 text-xs leading-relaxed text-neutral-content/70">
+                {{ pillar.description }}
+              </p>
+            </div>
+          </li>
+        }
+      </ul>
+    </div>
+
+    <div
+      class="flex items-center justify-between gap-4 border-t border-neutral-content/10 pt-6 text-xs text-neutral-content/60"
+    >
+      <span class="tabular-nums">Année scolaire 2026–2027</span>
+      <span>Fuseau horaire Africa/Dakar</span>
+    </div>
+  </aside>
+
+  <!-- Panneau droit : en-tête discret + carte de connexion centrée -->
+  <div class="flex min-h-screen min-w-0 flex-col bg-base-200">
+    <header class="flex items-center justify-between gap-3 px-4 py-4 sm:px-6 lg:justify-end">
+      <!-- En-tête mobile compact -->
+      <div class="flex min-w-0 items-center gap-2.5 lg:hidden">
+        <span
+          class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary font-display text-base font-bold text-primary-content"
+          aria-hidden="true"
+        >
+          E
+        </span>
+        <div class="min-w-0">
+          <p class="truncate font-display text-base font-bold tracking-tight text-base-content">
+            École SaaS
+          </p>
+          <p class="truncate text-xs text-base-content/60">Portail établissement</p>
+        </div>
+      </div>
+
+      <div class="flex shrink-0 items-center gap-2">
+        @if (!networkStatus.isOnline()) {
+          <span
+            role="status"
+            aria-live="polite"
+            data-testid="login-offline-badge"
+            class="inline-flex items-center gap-1.5 rounded-lg border border-warning/25 bg-warning/10 px-2.5 py-1 text-xs font-medium whitespace-nowrap text-warning"
+          >
+            <svg lucideWifiOff [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0" aria-hidden="true"></svg>
+            <span>Hors-ligne</span>
+          </span>
+        }
+
+        <button
+          type="button"
+          data-testid="login-theme-toggle"
+          class="btn btn-ghost btn-sm min-h-11 min-w-11 gap-2 rounded-lg text-base-content/80 transition-colors duration-150 ease-out hover:text-base-content motion-reduce:transition-none sm:min-h-9 sm:min-w-0"
+          [attr.aria-label]="themeService.isDark() ? 'Activer le mode clair' : 'Activer le mode sombre'"
+          [attr.aria-pressed]="themeService.isDark()"
+          (click)="themeService.toggleTheme()"
+        >
+          @if (themeService.isDark()) {
+            <svg lucideSun [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+            <span class="hidden sm:inline">Mode clair</span>
+          } @else {
+            <svg lucideMoon [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+            <span class="hidden sm:inline">Mode sombre</span>
+          }
+        </button>
+      </div>
+    </header>
+
+    <main
+      id="login-main"
+      tabindex="-1"
+      class="flex flex-1 items-center justify-center px-4 pt-2 pb-8 focus:outline-none sm:px-6 lg:py-10"
+    >
+      <div class="w-full max-w-md space-y-5">
+        <section
+          aria-labelledby="login-heading"
+          class="rounded-xl border border-base-300/80 bg-base-100 p-6 shadow-xs sm:p-8"
+        >
+          @if (step() === 'credentials') {
+            <div class="space-y-6">
+              <div>
+                <h1
+                  id="login-heading"
+                  class="font-display text-2xl font-bold tracking-tight text-base-content"
+                >
+                  Connexion
+                </h1>
+                <p class="mt-1.5 text-sm text-base-content/65">
+                  Connectez-vous à votre espace de gestion scolaire.
+                </p>
+              </div>
+
+              <!-- Sélecteur de contexte aligné sur /api/v1/auth/login et /api/v1/auth/platform/login -->
+              <div
+                role="tablist"
+                aria-label="Type d'espace de connexion"
+                class="grid grid-cols-2 gap-1 rounded-lg border border-base-300/80 bg-base-200/75 p-1"
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  data-testid="login-mode-tenant"
+                  [attr.aria-selected]="loginMode() === 'tenant'"
+                  (click)="setLoginMode('tenant')"
+                  class="min-h-11 rounded-md px-3 text-xs font-medium whitespace-nowrap transition-colors duration-150 ease-out motion-reduce:transition-none sm:min-h-9"
+                  [class.bg-base-100]="loginMode() === 'tenant'"
+                  [class.text-base-content]="loginMode() === 'tenant'"
+                  [class.shadow-xs]="loginMode() === 'tenant'"
+                  [class.text-base-content/65]="loginMode() !== 'tenant'"
+                >
+                  Établissement
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  data-testid="login-mode-platform"
+                  [attr.aria-selected]="loginMode() === 'platform'"
+                  (click)="setLoginMode('platform')"
+                  class="min-h-11 rounded-md px-3 text-xs font-medium whitespace-nowrap transition-colors duration-150 ease-out motion-reduce:transition-none sm:min-h-9"
+                  [class.bg-base-100]="loginMode() === 'platform'"
+                  [class.text-base-content]="loginMode() === 'platform'"
+                  [class.shadow-xs]="loginMode() === 'platform'"
+                  [class.text-base-content/65]="loginMode() !== 'platform'"
+                >
+                  Administration SaaS
+                </button>
+              </div>
+
+              @if (activeError(); as err) {
+                <div
+                  role="alert"
+                  data-testid="login-error-alert"
+                  class="rounded-xl border p-4 text-base-content"
+                  [class.border-warning/30]="isWarningStatus(err.status)"
+                  [class.bg-warning/10]="isWarningStatus(err.status)"
+                  [class.border-error/25]="!isWarningStatus(err.status)"
+                  [class.bg-error/10]="!isWarningStatus(err.status)"
+                >
+                  <div class="flex items-start gap-3">
+                    <span
+                      class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+                      [class.bg-warning/15]="isWarningStatus(err.status)"
+                      [class.text-warning]="isWarningStatus(err.status)"
+                      [class.bg-error/15]="!isWarningStatus(err.status)"
+                      [class.text-error]="!isWarningStatus(err.status)"
+                      aria-hidden="true"
+                    >
+                      @if (err.status === 0) {
+                        <svg lucideWifiOff [strokeWidth]="1.75" class="h-4 w-4 shrink-0"></svg>
+                      } @else if (err.status === 423) {
+                        <svg lucideLock [strokeWidth]="1.75" class="h-4 w-4 shrink-0"></svg>
+                      } @else {
+                        <svg lucideCircleAlert [strokeWidth]="1.75" class="h-4 w-4 shrink-0"></svg>
+                      }
+                    </span>
+
+                    <div class="min-w-0 flex-1 space-y-1.5">
+                      <p class="text-sm font-semibold text-base-content">{{ err.title }}</p>
+                      <p class="text-xs leading-relaxed text-base-content/80">{{ err.detail }}</p>
+
+                      @if (err.requestId; as reqId) {
+                        <div class="flex flex-wrap items-center gap-1.5 pt-1 text-xs text-base-content/70">
+                          <span>Référence :</span>
+                          <code
+                            data-testid="login-error-request-id"
+                            class="rounded-md border border-base-300/80 bg-base-100 px-1.5 py-0.5 font-mono text-[11px] tabular-nums text-base-content"
+                          >
+                            {{ reqId }}
+                          </code>
+                          <button
+                            type="button"
+                            class="btn btn-ghost btn-xs gap-1 rounded-lg"
+                            [attr.aria-label]="copiedRequestId() ? 'Référence copiée' : 'Copier la référence d\'incident'"
+                            (click)="copyRequestId(reqId)"
+                          >
+                            @if (copiedRequestId()) {
+                              <svg lucideCheck [strokeWidth]="1.75" class="h-3.5 w-3.5 text-success" aria-hidden="true"></svg>
+                              <span class="text-success">Copié</span>
+                            } @else {
+                              <svg lucideCopy [strokeWidth]="1.75" class="h-3.5 w-3.5" aria-hidden="true"></svg>
+                              <span>Copier</span>
+                            }
+                          </button>
+                          <span class="sr-only" aria-live="polite">
+                            @if (copiedRequestId()) {
+                              Référence d'incident copiée dans le presse-papiers.
+                            }
+                          </span>
+                        </div>
+                      }
+                    </div>
+                  </div>
+                </div>
+              }
+
+              <form
+                [formGroup]="credentialsForm"
+                (ngSubmit)="onSubmitCredentials()"
+                class="space-y-4"
+                novalidate
+              >
+                @if (loginMode() === 'tenant') {
+                  <div>
+                    <label
+                      for="login-school-code"
+                      class="mb-1.5 block text-sm font-medium text-base-content"
+                    >
+                      Code établissement
+                    </label>
+                    <input
+                      id="login-school-code"
+                      type="text"
+                      formControlName="schoolCode"
+                      autocomplete="organization"
+                      autocapitalize="characters"
+                      spellcheck="false"
+                      maxlength="32"
+                      placeholder="ex. GS-DAKAR-01"
+                      class="input input-bordered min-h-11 w-full rounded-lg bg-base-100 font-mono text-sm uppercase placeholder:font-sans placeholder:normal-case"
+                      [class.input-error]="!!schoolCodeError()"
+                      [attr.aria-invalid]="schoolCodeError() ? 'true' : null"
+                      [attr.aria-describedby]="schoolCodeError() ? 'login-school-code-error' : null"
+                    />
+                    @if (schoolCodeError(); as message) {
+                      <p id="login-school-code-error" class="mt-1.5 text-xs text-error">
+                        {{ message }}
+                      </p>
+                    }
+                  </div>
+                }
+
+                <div>
+                  <label
+                    for="login-email"
+                    class="mb-1.5 block text-sm font-medium text-base-content"
+                  >
+                    Adresse e-mail
+                  </label>
+                  <input
+                    id="login-email"
+                    type="email"
+                    formControlName="email"
+                    autocomplete="username"
+                    inputmode="email"
+                    maxlength="255"
+                    placeholder="direction@etablissement.sn"
+                    class="input input-bordered min-h-11 w-full rounded-lg bg-base-100 text-sm"
+                    [class.input-error]="!!emailError()"
+                    [attr.aria-invalid]="emailError() ? 'true' : null"
+                    [attr.aria-describedby]="emailError() ? 'login-email-error' : null"
+                  />
+                  @if (emailError(); as message) {
+                    <p id="login-email-error" class="mt-1.5 text-xs text-error">
+                      {{ message }}
+                    </p>
+                  }
+                </div>
+
+                <div>
+                  <label
+                    for="login-password"
+                    class="mb-1.5 block text-sm font-medium text-base-content"
+                  >
+                    Mot de passe
+                  </label>
+                  <div class="relative">
+                    <input
+                      id="login-password"
+                      [type]="showPassword() ? 'text' : 'password'"
+                      formControlName="password"
+                      autocomplete="current-password"
+                      maxlength="128"
+                      placeholder="Saisissez votre mot de passe"
+                      class="input input-bordered min-h-11 w-full rounded-lg bg-base-100 pr-12 text-sm"
+                      [class.input-error]="!!passwordError()"
+                      [attr.aria-invalid]="passwordError() ? 'true' : null"
+                      [attr.aria-describedby]="passwordError() ? 'login-password-error' : null"
+                    />
+                    <button
+                      type="button"
+                      data-testid="toggle-password-visibility"
+                      class="absolute inset-y-0 right-0 flex min-h-11 min-w-11 items-center justify-center rounded-r-lg text-base-content/60 transition-colors duration-150 ease-out hover:text-base-content motion-reduce:transition-none"
+                      [attr.aria-label]="showPassword() ? 'Masquer le mot de passe' : 'Afficher le mot de passe'"
+                      [attr.aria-pressed]="showPassword()"
+                      (click)="togglePasswordVisibility()"
+                    >
+                      @if (showPassword()) {
+                        <svg lucideEyeOff [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+                      } @else {
+                        <svg lucideEye [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+                      }
+                    </button>
+                  </div>
+                  @if (passwordError(); as message) {
+                    <p id="login-password-error" class="mt-1.5 text-xs text-error">
+                      {{ message }}
+                    </p>
+                  }
+                </div>
+
+                <div class="pt-1">
+                  <button
+                    type="submit"
+                    data-testid="login-submit-btn"
+                    class="btn btn-primary min-h-11 w-full rounded-lg font-medium"
+                    [disabled]="submitting()"
+                    [attr.aria-busy]="submitting()"
+                  >
+                    @if (submitting()) {
+                      <span class="loading loading-spinner loading-sm" aria-hidden="true"></span>
+                      <span>Connexion en cours…</span>
+                    } @else {
+                      <span>Se connecter</span>
+                    }
+                  </button>
+                </div>
+              </form>
+            </div>
+          } @else {
+            <!-- Étape 2 : Vérification MFA TOTP à 6 chiffres -->
+            <div class="space-y-6" data-testid="mfa-step">
+              <div class="flex items-start justify-between gap-3">
+                <span
+                  class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-primary/20 bg-primary/10 text-primary"
+                  aria-hidden="true"
+                >
+                  <svg lucideKeyRound [strokeWidth]="1.75" class="h-5 w-5 shrink-0"></svg>
+                </span>
+                <span
+                  class="inline-flex items-center rounded-lg border border-base-300/80 bg-base-200/80 px-2.5 py-1 text-xs font-medium whitespace-nowrap text-base-content/75 tabular-nums"
+                >
+                  Étape 2 / 2
+                </span>
+              </div>
+
+              <div>
+                <h1
+                  id="login-heading"
+                  class="font-display text-2xl font-bold tracking-tight text-base-content"
+                >
+                  @if (authService.mfaEnrollmentRequired()) {
+                    Activer la double authentification
+                  } @else {
+                    Vérification en deux étapes
+                  }
+                </h1>
+                <p class="mt-1.5 text-sm text-base-content/65">
+                  @if (authService.mfaEnrollmentRequired()) {
+                    Enregistrez la clé ci-dessous dans votre application d'authentification puis
+                    saisissez le code à 6 chiffres généré.
+                  } @else {
+                    Saisissez le code temporaire à 6 chiffres généré par votre application
+                    d'authentification.
+                  }
+                </p>
+              </div>
+
+              @if (authService.mfaEnrollmentRequired()) {
+                @if (enrollingMfa()) {
+                  <div
+                    class="space-y-2 rounded-lg border border-base-300/80 bg-base-200/60 p-4"
+                    aria-label="Préparation de la clé de configuration MFA"
+                  >
+                    <div class="h-3.5 w-32 animate-pulse rounded bg-base-300"></div>
+                    <div class="h-9 w-full animate-pulse rounded-lg bg-base-300"></div>
+                  </div>
+                } @else if (mfaEnrollment(); as enrollment) {
+                  <div
+                    data-testid="mfa-enrollment-box"
+                    class="space-y-2.5 rounded-lg border border-base-300/80 bg-base-200/60 p-4"
+                  >
+                    <div class="flex items-center justify-between gap-2">
+                      <span class="text-xs font-semibold text-base-content">
+                        Clé de configuration TOTP
+                      </span>
+                      <button
+                        type="button"
+                        class="btn btn-ghost btn-xs gap-1 rounded-lg"
+                        (click)="copyEnrollmentSecret(enrollment.secret)"
+                      >
+                        @if (copiedSecret()) {
+                          <svg lucideCheck [strokeWidth]="1.75" class="h-3.5 w-3.5 text-success" aria-hidden="true"></svg>
+                          <span class="text-success">Copiée</span>
+                        } @else {
+                          <svg lucideCopy [strokeWidth]="1.75" class="h-3.5 w-3.5" aria-hidden="true"></svg>
+                          <span>Copier la clé</span>
+                        }
+                      </button>
+                    </div>
+                    <code
+                      class="block rounded-lg border border-base-300/80 bg-base-100 px-3 py-2 font-mono text-xs font-semibold break-all tabular-nums text-base-content"
+                    >
+                      {{ enrollment.secret }}
+                    </code>
+                    <p class="text-[11px] text-base-content/60 tabular-nums">
+                      Code à {{ enrollment.digits }} chiffres renouvelé toutes les
+                      {{ enrollment.periodSeconds }} secondes.
+                    </p>
+                  </div>
+                }
+              }
+
+              @if (activeError(); as err) {
+                <div
+                  role="alert"
+                  data-testid="login-error-alert"
+                  class="rounded-xl border p-4 text-base-content"
+                  [class.border-warning/30]="isWarningStatus(err.status)"
+                  [class.bg-warning/10]="isWarningStatus(err.status)"
+                  [class.border-error/25]="!isWarningStatus(err.status)"
+                  [class.bg-error/10]="!isWarningStatus(err.status)"
+                >
+                  <div class="flex items-start gap-3">
+                    <span
+                      class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+                      [class.bg-warning/15]="isWarningStatus(err.status)"
+                      [class.text-warning]="isWarningStatus(err.status)"
+                      [class.bg-error/15]="!isWarningStatus(err.status)"
+                      [class.text-error]="!isWarningStatus(err.status)"
+                      aria-hidden="true"
+                    >
+                      @if (err.status === 0) {
+                        <svg lucideWifiOff [strokeWidth]="1.75" class="h-4 w-4 shrink-0"></svg>
+                      } @else if (err.status === 423) {
+                        <svg lucideLock [strokeWidth]="1.75" class="h-4 w-4 shrink-0"></svg>
+                      } @else {
+                        <svg lucideCircleAlert [strokeWidth]="1.75" class="h-4 w-4 shrink-0"></svg>
+                      }
+                    </span>
+
+                    <div class="min-w-0 flex-1 space-y-1.5">
+                      <p class="text-sm font-semibold text-base-content">{{ err.title }}</p>
+                      <p class="text-xs leading-relaxed text-base-content/80">{{ err.detail }}</p>
+
+                      @if (err.requestId; as reqId) {
+                        <div class="flex flex-wrap items-center gap-1.5 pt-1 text-xs text-base-content/70">
+                          <span>Référence :</span>
+                          <code
+                            data-testid="login-error-request-id"
+                            class="rounded-md border border-base-300/80 bg-base-100 px-1.5 py-0.5 font-mono text-[11px] tabular-nums text-base-content"
+                          >
+                            {{ reqId }}
+                          </code>
+                          <button
+                            type="button"
+                            class="btn btn-ghost btn-xs gap-1 rounded-lg"
+                            [attr.aria-label]="copiedRequestId() ? 'Référence copiée' : 'Copier la référence d\'incident'"
+                            (click)="copyRequestId(reqId)"
+                          >
+                            @if (copiedRequestId()) {
+                              <svg lucideCheck [strokeWidth]="1.75" class="h-3.5 w-3.5 text-success" aria-hidden="true"></svg>
+                              <span class="text-success">Copié</span>
+                            } @else {
+                              <svg lucideCopy [strokeWidth]="1.75" class="h-3.5 w-3.5" aria-hidden="true"></svg>
+                              <span>Copier</span>
+                            }
+                          </button>
+                        </div>
+                      }
+                    </div>
+                  </div>
+                </div>
+              }
+
+              <form
+                [formGroup]="mfaForm"
+                (ngSubmit)="onSubmitMfa()"
+                class="space-y-4"
+                novalidate
+              >
+                <div>
+                  <label for="mfa-code" class="mb-1.5 block text-sm font-medium text-base-content">
+                    Code de vérification (6 chiffres)
+                  </label>
+                  <input
+                    #mfaCodeInput
+                    id="mfa-code"
+                    type="text"
+                    inputmode="numeric"
+                    autocomplete="one-time-code"
+                    maxlength="6"
+                    pattern="[0-9]{6}"
+                    formControlName="code"
+                    placeholder="000000"
+                    (input)="onMfaCodeInput($event)"
+                    (paste)="onMfaCodePaste($event)"
+                    class="input input-bordered min-h-12 w-full rounded-lg bg-base-100 text-center font-mono text-2xl font-semibold tracking-[0.35em] tabular-nums"
+                    [class.input-error]="!!mfaCodeError()"
+                    [attr.aria-invalid]="mfaCodeError() ? 'true' : null"
+                    [attr.aria-describedby]="mfaCodeError() ? 'mfa-code-error' : 'mfa-code-hint'"
+                  />
+                  <p id="mfa-code-hint" class="mt-1.5 text-xs text-base-content/60">
+                    Vous pouvez saisir ou coller directement le code à 6 chiffres.
+                  </p>
+                  @if (mfaCodeError(); as message) {
+                    <p id="mfa-code-error" class="mt-1.5 text-xs text-error">
+                      {{ message }}
+                    </p>
+                  }
+                </div>
+
+                <div class="space-y-2 pt-1">
+                  <button
+                    type="submit"
+                    data-testid="mfa-submit-btn"
+                    class="btn btn-primary min-h-11 w-full rounded-lg font-medium"
+                    [disabled]="submitting()"
+                    [attr.aria-busy]="submitting()"
+                  >
+                    @if (submitting()) {
+                      <span class="loading loading-spinner loading-sm" aria-hidden="true"></span>
+                      <span>Vérification en cours…</span>
+                    } @else {
+                      <span>Vérifier</span>
+                    }
+                  </button>
+
+                  <button
+                    type="button"
+                    data-testid="mfa-back-btn"
+                    class="btn btn-ghost min-h-11 w-full gap-2 rounded-lg text-sm font-medium text-base-content/75"
+                    [disabled]="submitting()"
+                    (click)="backToCredentials()"
+                  >
+                    <svg lucideArrowLeft [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+                    <span>Retour à la connexion</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          }
+        </section>
+
+        <p class="text-center text-xs text-base-content/60">
+          Besoin d'accès ou mot de passe oublié ? Contactez la direction de votre établissement.
+        </p>
+      </div>
+    </main>
+  </div>
+</div>

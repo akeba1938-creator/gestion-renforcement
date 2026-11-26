@@ -1,18 +1,31 @@
-import { HttpClient, provideHttpClient, withInterceptors } from '@angular/common/http';
+import { DOCUMENT } from '@angular/common';
+import { HttpClient, HttpHeaders, provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
+import { Router, provideRouter } from '@angular/router';
+import { vi } from 'vitest';
 import { AuthService } from '../auth/auth.service';
 import { API_BASE_URL } from '../config/api.config';
+import { AuthResponse } from '../models/auth.model';
 import { authInterceptor } from './auth.interceptor';
+import { problemDetailInterceptor } from './problem-detail.interceptor';
 
-function setupTesting(apiBaseUrl: string, withToken = true) {
+function setupTesting(apiBaseUrl: string, withToken = true, withProblemInterceptor = false) {
+  const interceptors = withProblemInterceptor
+    ? [authInterceptor, problemDetailInterceptor]
+    : [authInterceptor];
+
   TestBed.configureTestingModule({
     providers: [
       { provide: API_BASE_URL, useValue: apiBaseUrl },
-      provideHttpClient(withInterceptors([authInterceptor])),
+      provideRouter([]),
+      provideHttpClient(withInterceptors(interceptors)),
       provideHttpClientTesting(),
     ],
   });
+
+  const doc = TestBed.inject(DOCUMENT);
+  doc.cookie = 'XSRF-TOKEN=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
 
   const authService = TestBed.inject(AuthService);
   if (withToken) {
@@ -29,8 +42,31 @@ function setupTesting(apiBaseUrl: string, withToken = true) {
   return {
     http: TestBed.inject(HttpClient),
     httpMock: TestBed.inject(HttpTestingController),
+    authService,
+    router: TestBed.inject(Router),
   };
 }
+
+const REFRESHED_AUTH_RESPONSE: AuthResponse = {
+  status: 'AUTHENTICATED',
+  accessToken: 'refreshed-memory-jwt',
+  mfaToken: null,
+  expiresInSeconds: 900,
+  mfaRequired: false,
+  mfaEnrollmentRequired: false,
+  user: {
+    id: 'usr-1',
+    subjectType: 'USER',
+    email: 'direction@ecole-demo.invalid',
+    firstName: 'Direction',
+    lastName: 'Démo',
+    roles: ['DIRECTOR'],
+    mfaEnabled: true,
+    tenantId: 'tenant-1',
+    schoolCode: 'ECOLE-01',
+    schoolName: 'École Démo',
+  },
+};
 
 describe('authInterceptor', () => {
   afterEach(() => {
@@ -117,5 +153,88 @@ describe('authInterceptor', () => {
     const req = httpMock.expectOne('/api/v1/students');
     expect(req.request.headers.has('Authorization')).toBe(false);
     req.flush({});
+  });
+
+  it('does NOT attach access token on /api/v1/auth/login and preserves explicit MFA Bearer header', () => {
+    const { http, httpMock } = setupTesting('/api/v1', true);
+
+    http.post('/api/v1/auth/login', {}).subscribe();
+    const loginReq = httpMock.expectOne('/api/v1/auth/login');
+    expect(loginReq.request.headers.has('Authorization')).toBe(false);
+    loginReq.flush({});
+
+    http
+      .post(
+        '/api/v1/auth/mfa/verify',
+        { code: '123456' },
+        { headers: new HttpHeaders({ Authorization: 'Bearer mfa-temp-token' }) }
+      )
+      .subscribe();
+    const mfaReq = httpMock.expectOne('/api/v1/auth/mfa/verify');
+    expect(mfaReq.request.headers.get('Authorization')).toBe('Bearer mfa-temp-token');
+    mfaReq.flush({});
+  });
+
+  it('refreshes once on concurrent 401 responses and retries protected requests with the new token', () => {
+    const { http, httpMock, authService } = setupTesting('/api/v1', true, true);
+    let studentsResult: unknown;
+    let financeResult: unknown;
+
+    http.get('/api/v1/students').subscribe((data) => {
+      studentsResult = data;
+    });
+    http.get('/api/v1/finance').subscribe((data) => {
+      financeResult = data;
+    });
+
+    const firstStudents = httpMock.expectOne('/api/v1/students');
+    const firstFinance = httpMock.expectOne('/api/v1/finance');
+    firstStudents.flush({ status: 401, detail: 'Expiré' }, { status: 401, statusText: 'Unauthorized' });
+    firstFinance.flush({ status: 401, detail: 'Expiré' }, { status: 401, statusText: 'Unauthorized' });
+
+    // Single-flight: only ONE csrf + refresh pair is issued
+    const csrfReq = httpMock.expectOne('/api/v1/auth/csrf');
+    csrfReq.flush({ headerName: 'X-XSRF-TOKEN', parameterName: '_csrf', token: 'xsrf-1' });
+
+    const refreshReq = httpMock.expectOne('/api/v1/auth/refresh');
+    expect(refreshReq.request.withCredentials).toBe(true);
+    refreshReq.flush(REFRESHED_AUTH_RESPONSE);
+
+    const retryStudents = httpMock.expectOne('/api/v1/students');
+    const retryFinance = httpMock.expectOne('/api/v1/finance');
+    expect(retryStudents.request.headers.get('Authorization')).toBe('Bearer refreshed-memory-jwt');
+    expect(retryFinance.request.headers.get('Authorization')).toBe('Bearer refreshed-memory-jwt');
+    retryStudents.flush({ items: ['a'] });
+    retryFinance.flush({ total: 1000 });
+
+    expect(studentsResult).toEqual({ items: ['a'] });
+    expect(financeResult).toEqual({ total: 1000 });
+    expect(authService.token()).toBe('refreshed-memory-jwt');
+  });
+
+  it('clears session and redirects to /login when refresh fails after a 401', () => {
+    const { http, httpMock, authService, router } = setupTesting('/api/v1', true, true);
+    const navSpy = vi.spyOn(router, 'navigate').mockResolvedValue(true);
+    let caughtError = false;
+
+    http.get('/api/v1/students').subscribe({
+      error: () => {
+        caughtError = true;
+      },
+    });
+
+    const initialReq = httpMock.expectOne('/api/v1/students');
+    initialReq.flush({ status: 401 }, { status: 401, statusText: 'Unauthorized' });
+
+    const csrfReq = httpMock.expectOne('/api/v1/auth/csrf');
+    csrfReq.flush({ headerName: 'X-XSRF-TOKEN', parameterName: '_csrf', token: 'xsrf-2' });
+
+    const refreshReq = httpMock.expectOne('/api/v1/auth/refresh');
+    refreshReq.flush({ status: 401 }, { status: 401, statusText: 'Unauthorized' });
+
+    expect(caughtError).toBe(true);
+    expect(authService.isAuthenticated()).toBe(false);
+    expect(authService.token()).toBeNull();
+    expect(navSpy).toHaveBeenCalledWith(['/login'], { queryParams: undefined });
   });
 });

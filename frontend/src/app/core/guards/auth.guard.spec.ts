@@ -29,6 +29,13 @@ describe('authGuard', () => {
     expect(router.serializeUrl(result as UrlTree)).toBe('/login');
   });
 
+  it('preserves a safe returnUrl when redirecting unauthenticated users from a protected route', () => {
+    const protectedState = { url: '/finance' } as RouterStateSnapshot;
+    const result = TestBed.runInInjectionContext(() => authGuard(dummyRoute, protectedState));
+    expect(result instanceof UrlTree).toBe(true);
+    expect(router.serializeUrl(result as UrlTree)).toBe('/login?returnUrl=%2Ffinance');
+  });
+
   it('allows authenticated users through', () => {
     authService.setSession('tok-memory', {
       id: 'usr-1',

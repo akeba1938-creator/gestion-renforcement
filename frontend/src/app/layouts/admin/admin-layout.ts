@@ -3,12 +3,14 @@ import { DOCUMENT } from '@angular/common';
 import {
   ChangeDetectionStrategy,
   Component,
+  DestroyRef,
   ElementRef,
   computed,
   inject,
   signal,
   viewChild,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import {
   LucideCalendar,
@@ -158,6 +160,7 @@ export class AdminLayoutComponent {
   protected readonly networkStatus = inject(NetworkStatusService);
   private readonly router = inject(Router);
   private readonly document = inject(DOCUMENT);
+  private readonly destroyRef = inject(DestroyRef);
 
   private readonly menuToggleButton = viewChild<ElementRef<HTMLButtonElement>>('menuToggleBtn');
   private triggerElement: HTMLElement | null = null;
@@ -251,7 +254,11 @@ export class AdminLayoutComponent {
   }
 
   protected logout(): void {
-    this.authService.clearSession();
-    void this.router.navigate(['/login']);
+    this.authService
+      .logout()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        void this.router.navigate(['/login']);
+      });
   }
 }

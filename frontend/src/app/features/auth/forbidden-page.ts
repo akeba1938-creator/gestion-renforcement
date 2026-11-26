@@ -1,4 +1,5 @@
-import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router, RouterLink } from '@angular/router';
 import { AuthService } from '../../core/auth/auth.service';
 import { ADMIN_ROLES } from '../../core/config/role-access.config';
@@ -35,6 +36,7 @@ import { ADMIN_ROLES } from '../../core/config/role-access.config';
 export class ForbiddenPageComponent {
   private readonly authService = inject(AuthService);
   private readonly router = inject(Router);
+  private readonly destroyRef = inject(DestroyRef);
 
   /**
    * Returns the home route for the authenticated user's role if an active space exists.
@@ -52,7 +54,11 @@ export class ForbiddenPageComponent {
   });
 
   protected logout(): void {
-    this.authService.clearSession();
-    void this.router.navigate(['/login']);
+    this.authService
+      .logout()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        void this.router.navigate(['/login']);
+      });
   }
 }
