@@ -88,7 +88,7 @@ export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
     roles: ROUTE_ROLES.attendance,
   },
   {
-    route: '/finance',
+    route: '/finances',
     label: 'Finances',
     icon: 'finance',
     group: 'main',

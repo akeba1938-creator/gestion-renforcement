@@ -19,8 +19,11 @@ import { AuthService } from '../../core/auth/auth.service';
           <p class="text-sm text-base-content/75">
             Ouvre une session simulée en mémoire pour explorer l'interface en développement local.
           </p>
-          <button type="button" class="btn btn-primary w-full" (click)="signInDemo()">
+          <button type="button" class="btn btn-primary w-full" (click)="signInDemo('DIRECTOR')">
             Accéder en mode démonstration (Directeur)
+          </button>
+          <button type="button" class="btn btn-outline w-full" (click)="signInDemo('CASHIER')">
+            Accéder en mode démonstration (Caissier)
           </button>
         </div>
       </div>
@@ -31,15 +34,16 @@ export class DevLoginPageComponent {
   private readonly authService = inject(AuthService);
   private readonly router = inject(Router);
 
-  protected signInDemo(): void {
+  protected signInDemo(role: 'DIRECTOR' | 'CASHIER' = 'DIRECTOR'): void {
+    const isCashier = role === 'CASHIER';
     this.authService.setSession('demo-memory-token', {
-      id: 'usr-demo-director',
-      fullName: 'Direction Démo',
-      email: 'direction@ecole-demo.invalid',
-      role: 'DIRECTOR',
+      id: isCashier ? 'usr-demo-cashier' : 'usr-demo-director',
+      fullName: isCashier ? 'Caisse Démo' : 'Direction Démo',
+      email: isCashier ? 'caisse@ecole-demo.invalid' : 'direction@ecole-demo.invalid',
+      role,
       tenantId: 'tenant-demo-01',
       tenantName: 'Groupe Scolaire Démo',
     });
-    void this.router.navigate(['/dashboard']);
+    void this.router.navigate([isCashier ? '/finances' : '/dashboard']);
   }
 }

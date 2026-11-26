@@ -60,12 +60,17 @@ export const routes: Routes = [
           import('./features/attendance/attendance-page').then((m) => m.AttendancePageComponent),
       },
       {
-        path: 'finance',
-        title: 'Finances — École SaaS',
+        path: 'finances',
+        title: 'Finances & Caisse — École SaaS',
         canActivate: [roleGuard],
         data: { roles: ROUTE_ROLES.finance },
         loadComponent: () =>
-          import('./features/finance/finance-page').then((m) => m.FinancePageComponent),
+          import('./features/finances/finances-page').then((m) => m.FinancesPageComponent),
+      },
+      {
+        path: 'finance',
+        redirectTo: 'finances',
+        pathMatch: 'full',
       },
       {
         path: 'import',

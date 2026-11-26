@@ -2,6 +2,8 @@ import { ChangeDetectionStrategy, Component, computed, input } from '@angular/co
 import {
   LucideCalendarCheck,
   LucideCircleAlert,
+  LucideClock,
+  LucideTrendingUp,
   LucideUsers,
   LucideWallet,
 } from '@lucide/angular';
@@ -16,12 +18,19 @@ export type StatCardTone =
   | 'error'
   | 'info';
 export type StatCardTrendTone = 'success' | 'warning' | 'error' | 'info' | 'neutral';
-export type StatCardIcon = 'users' | 'wallet' | 'alert' | 'attendance';
+export type StatCardIcon = 'users' | 'wallet' | 'alert' | 'attendance' | 'trending' | 'clock';
 
 @Component({
   selector: 'app-stat-card',
   standalone: true,
-  imports: [LucideCalendarCheck, LucideCircleAlert, LucideUsers, LucideWallet],
+  imports: [
+    LucideCalendarCheck,
+    LucideCircleAlert,
+    LucideClock,
+    LucideTrendingUp,
+    LucideUsers,
+    LucideWallet,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <article
@@ -45,6 +54,12 @@ export type StatCardIcon = 'users' | 'wallet' | 'alert' | 'attendance';
               }
               @case ('attendance') {
                 <svg lucideCalendarCheck [strokeWidth]="1.75" class="h-4 w-4 shrink-0"></svg>
+              }
+              @case ('trending') {
+                <svg lucideTrendingUp [strokeWidth]="1.75" class="h-4 w-4 shrink-0"></svg>
+              }
+              @case ('clock') {
+                <svg lucideClock [strokeWidth]="1.75" class="h-4 w-4 shrink-0"></svg>
               }
             }
           </span>

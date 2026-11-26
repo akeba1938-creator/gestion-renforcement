@@ -51,7 +51,7 @@ describe('AdminLayoutComponent', () => {
       a.getAttribute('href')
     );
 
-    expect(links).toEqual(['/dashboard', '/students', '/finance', '/import']);
+    expect(links).toEqual(['/dashboard', '/students', '/finances', '/import']);
     expect(links).not.toContain('/grades');
     expect(links).not.toContain('/attendance');
     expect(links).not.toContain('/settings');
@@ -71,7 +71,7 @@ describe('AdminLayoutComponent', () => {
       '/students',
       '/grades',
       '/attendance',
-      '/finance',
+      '/finances',
       '/import',
       '/settings',
     ]);
@@ -81,7 +81,7 @@ describe('AdminLayoutComponent', () => {
     const saasAdminLinks = Array.from(el.querySelectorAll<HTMLAnchorElement>('aside nav a')).map(
       (a) => a.getAttribute('href')
     );
-    expect(saasAdminLinks).toEqual(['/dashboard', '/finance', '/settings']);
+    expect(saasAdminLinks).toEqual(['/dashboard', '/finances', '/settings']);
   });
 
   it('renders the contrasted navy sidebar with academic year selector 2026–2027 and user profile', () => {

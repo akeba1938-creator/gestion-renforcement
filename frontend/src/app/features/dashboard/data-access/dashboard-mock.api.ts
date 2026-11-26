@@ -32,7 +32,7 @@ const PRIORITY_ALERTS: readonly PriorityAlert[] = [
     title: '19 factures échues > 15j',
     subtitle: 'Relances automatiques SMS prêtes à être envoyées',
     tone: 'warning',
-    route: '/finance',
+    route: '/finances',
     actionLabel: 'Voir',
   },
   {

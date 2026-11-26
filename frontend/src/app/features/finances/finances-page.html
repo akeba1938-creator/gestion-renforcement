@@ -1,0 +1,871 @@
+<div class="space-y-6">
+  <!-- En-tête de page : bouton contour Exporter + unique btn-primary (+ Encaisser un paiement) -->
+  <app-page-header title="Finances & Caisse" [subtitle]="headerSubtitle()">
+    <div pageHeaderActions class="flex flex-wrap items-center gap-2">
+      <button
+        type="button"
+        class="btn btn-outline btn-sm min-h-11 gap-1.5 rounded-lg sm:min-h-8"
+        [disabled]="exporting() || loading() || transactions().length === 0"
+        [attr.aria-busy]="exporting()"
+        (click)="exportJournal()"
+      >
+        <svg lucideDownload [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+        Exporter
+      </button>
+
+      <button
+        type="button"
+        class="btn btn-primary btn-sm min-h-11 gap-1.5 rounded-lg sm:min-h-8"
+        (click)="openRecordDrawer()"
+      >
+        <svg lucidePlus [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+        Encaisser un paiement
+      </button>
+    </div>
+  </app-page-header>
+
+  <!-- État 6 : Indicateur discret hors-ligne PWA -->
+  @if (!networkStatus.isOnline()) {
+    <div
+      role="status"
+      aria-live="polite"
+      class="flex items-center gap-3 rounded-xl border border-warning/40 bg-base-100 px-4 py-3 text-sm text-base-content"
+    >
+      <svg lucideWifiOff [strokeWidth]="1.75" class="h-4 w-4 shrink-0 text-warning" aria-hidden="true"></svg>
+      <span>
+        Mode hors-ligne détecté : les encaissements et soldes affichés correspondent aux dernières
+        données synchronisées.
+      </span>
+    </div>
+  }
+
+  <!-- Synthèse KPI (4 StatCardComponent max par ligne desktop, encre neutre FCFA) -->
+  @if (loading() && !kpis()) {
+    <app-skeleton-loader variant="kpi" [count]="4" ariaLabel="Chargement des indicateurs financiers…" />
+  } @else if (kpis(); as summary) {
+    <section aria-label="Indicateurs financiers de la caisse">
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <app-stat-card
+          [label]="collectedKpiLabel()"
+          [value]="summary.collectedFcfa | fcfa"
+          [trend]="summary.collectedTrendLabel"
+          trendTone="success"
+          [description]="summary.collectedComparisonLabel"
+          tone="secondary"
+          icon="wallet"
+        />
+        <app-stat-card
+          label="Impayés en retard"
+          [value]="summary.overdueFcfa | fcfa"
+          [trend]="overdueTrendLabel()"
+          trendTone="warning"
+          [description]="summary.overdueSubLabel"
+          tone="warning"
+          icon="alert"
+        />
+        <app-stat-card
+          label="Taux de recouvrement"
+          [value]="collectionRateValue()"
+          [trend]="summary.collectionRateTrendLabel"
+          [trendTone]="collectionRateTrendTone()"
+          [description]="summary.collectionRateComparisonLabel"
+          tone="primary"
+          icon="trending"
+        />
+        <app-stat-card
+          label="Paiements en attente"
+          [value]="summary.pendingFcfa | fcfa"
+          [trend]="pendingTrendLabel()"
+          [trendTone]="summary.pendingCount > 0 ? 'info' : 'neutral'"
+          [description]="summary.pendingSubLabel"
+          tone="info"
+          icon="clock"
+        />
+      </div>
+    </section>
+  }
+
+  <!-- Barre de recherche & filtres synchronisés dans l'URL (queryParams) -->
+  <section
+    aria-label="Recherche et filtres du journal de caisse"
+    class="rounded-xl border border-base-300/80 bg-base-100 p-4 shadow-xs"
+  >
+    <div class="flex flex-col gap-4 lg:flex-row lg:flex-wrap lg:items-end">
+      <div class="min-w-0 flex-1 space-y-1.5 lg:min-w-60">
+        <label for="finances-search-input" class="block text-xs font-medium text-base-content/75">
+          Rechercher une transaction
+        </label>
+        <div class="relative">
+          <svg
+            lucideSearch
+            [strokeWidth]="1.75"
+            class="pointer-events-none absolute top-1/2 left-3 z-10 h-4 w-4 shrink-0 -translate-y-1/2 text-base-content/55"
+            aria-hidden="true"
+          ></svg>
+          <input
+            id="finances-search-input"
+            type="search"
+            [formControl]="searchControl"
+            placeholder="Élève, matricule ou reçu…"
+            class="input input-bordered min-h-11 w-full rounded-lg pl-9 pr-9 text-sm sm:min-h-10"
+          />
+          @if (searchControl.value.length > 0) {
+            <button
+              type="button"
+              class="btn btn-ghost btn-xs btn-square absolute top-1/2 right-1.5 z-10 -translate-y-1/2 rounded-lg"
+              aria-label="Effacer la recherche"
+              (click)="clearSearch()"
+            >
+              <svg lucideX [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0" aria-hidden="true"></svg>
+            </button>
+          }
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:flex lg:items-end">
+        <div class="w-full space-y-1.5 lg:w-44 lg:shrink-0">
+          <label for="finances-method-filter" class="block text-xs font-medium text-base-content/75">
+            Moyen de paiement
+          </label>
+          <select
+            id="finances-method-filter"
+            class="select select-bordered min-h-11 w-full rounded-lg text-sm sm:min-h-10"
+            [value]="selectedMethod()"
+            (change)="onMethodFilterChange($event)"
+          >
+            @for (option of methodFilterOptions; track option.value) {
+              <option [value]="option.value">{{ option.label }}</option>
+            }
+          </select>
+        </div>
+
+        <div class="w-full space-y-1.5 lg:w-40 lg:shrink-0">
+          <label for="finances-status-filter" class="block text-xs font-medium text-base-content/75">
+            Statut
+          </label>
+          <select
+            id="finances-status-filter"
+            class="select select-bordered min-h-11 w-full rounded-lg text-sm sm:min-h-10"
+            [value]="selectedStatus()"
+            (change)="onStatusFilterChange($event)"
+          >
+            @for (option of statusFilterOptions; track option.value) {
+              <option [value]="option.value">{{ option.label }}</option>
+            }
+          </select>
+        </div>
+      </div>
+
+      <div class="space-y-1.5 lg:shrink-0">
+        <span class="block text-xs font-medium text-base-content/75">Période</span>
+        <div
+          role="group"
+          aria-label="Période du journal de caisse"
+          class="grid grid-cols-3 rounded-lg border border-base-300/80 bg-base-200/50 p-0.5 sm:inline-flex"
+        >
+          @for (option of periodOptions; track option.value) {
+            <button
+              type="button"
+              class="btn min-h-11 rounded-lg border-0 px-3 text-xs whitespace-nowrap transition-colors duration-150 ease-out motion-reduce:transition-none sm:min-h-9 sm:btn-sm"
+              [class.bg-base-100]="selectedPeriod() === option.value"
+              [class.font-semibold]="selectedPeriod() === option.value"
+              [class.text-base-content]="selectedPeriod() === option.value"
+              [class.shadow-xs]="selectedPeriod() === option.value"
+              [class.btn-ghost]="selectedPeriod() !== option.value"
+              [attr.aria-pressed]="selectedPeriod() === option.value"
+              (click)="selectPeriod(option.value)"
+            >
+              {{ option.label }}
+            </button>
+          }
+        </div>
+      </div>
+
+      @if (hasActiveFilters()) {
+        <div class="w-full lg:w-auto lg:shrink-0">
+          <button
+            type="button"
+            class="btn btn-outline min-h-11 w-full gap-1.5 rounded-lg text-sm sm:min-h-10 lg:w-auto"
+            (click)="resetFilters()"
+          >
+            <svg lucideRotateCcw [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+            Réinitialiser
+          </button>
+        </div>
+      }
+    </div>
+  </section>
+
+  <!-- États 1, 2, 3, 4 et Journal des opérations -->
+  @if (loading()) {
+    <!-- État 1 : Chargement (Skeletons dimensionnés zéro CLS) -->
+    <div class="hidden md:block">
+      <app-skeleton-loader
+        variant="table"
+        [count]="6"
+        [columns]="7"
+        ariaLabel="Chargement du journal de caisse…"
+      />
+    </div>
+    <div class="md:hidden">
+      <app-skeleton-loader
+        variant="card"
+        [count]="4"
+        ariaLabel="Chargement des transactions…"
+      />
+    </div>
+  } @else if (errorProblem(); as problem) {
+    <!-- État 4 : Erreur RFC 9457 avec requestId copiable et bouton Réessayer -->
+    <app-error-state [problem]="problem" [retrying]="loading()" (retry)="reload()" />
+  } @else if (transactions().length === 0) {
+    @if (hasActiveFilters()) {
+      <!-- État 3 : Vide après filtre -->
+      <app-empty-state
+        variant="filtered"
+        title="Aucune transaction ne correspond à vos critères"
+        description="Modifiez la recherche, le moyen de paiement, le statut ou la période pour afficher d'autres mouvements de caisse."
+        (action)="resetFilters()"
+      />
+    } @else {
+      <!-- État 2 : Vide initial -->
+      <app-empty-state
+        variant="empty"
+        icon="wallet"
+        title="Aucun encaissement enregistré"
+        description="Enregistrez un premier paiement Wave, Orange Money ou Espèces pour alimenter le journal de caisse et générer des reçus."
+        actionLabel="Encaisser un paiement"
+        (action)="openRecordDrawer()"
+      />
+    }
+  } @else {
+    <section
+      aria-label="Journal des encaissements et factures"
+      class="rounded-xl border border-base-300/80 bg-base-100 shadow-xs"
+    >
+      <!-- Tableau haute densité Desktop (>= 768px, zéro débordement dès 1280px) -->
+      <div class="hidden overflow-x-auto md:block">
+        <table class="w-full table-auto border-collapse text-left">
+          <thead>
+            <tr
+              class="border-b border-base-300/80 text-xs font-semibold uppercase tracking-wider text-base-content/50"
+            >
+              <th scope="col" class="py-3 pl-4 pr-2 text-left font-semibold min-[1400px]:px-3 min-[1400px]:pl-5">
+                Élève
+              </th>
+              <th scope="col" class="px-2 py-3 text-left font-semibold whitespace-nowrap min-[1400px]:px-3">
+                Référence
+              </th>
+              <th scope="col" class="px-2 py-3 text-left font-semibold whitespace-nowrap min-[1400px]:px-3">
+                Date &amp; heure
+              </th>
+              <th scope="col" class="px-2 py-3 text-left font-semibold whitespace-nowrap min-[1400px]:px-3">
+                Moyen
+              </th>
+              <th scope="col" class="px-2 py-3 text-left font-semibold whitespace-nowrap min-[1400px]:px-3">
+                Statut
+              </th>
+              <th scope="col" class="px-2 py-3 text-right font-semibold whitespace-nowrap min-[1400px]:px-3">
+                Montant
+              </th>
+              <th scope="col" class="py-3 pl-2 pr-4 text-right font-semibold whitespace-nowrap min-[1400px]:px-3 min-[1400px]:pr-5">
+                Action
+              </th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-base-300/70">
+            @for (tx of transactions(); track tx.id) {
+              <tr
+                class="transition-colors duration-150 ease-out hover:bg-base-200/50 motion-reduce:transition-none"
+              >
+                <!-- Élève : avatar initiales + nom tronqué + matricule -->
+                <td class="py-3 pl-4 pr-2 min-[1400px]:px-3 min-[1400px]:pl-5">
+                  <div class="flex items-center gap-2.5">
+                    <span
+                      class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-primary/20 bg-primary/10 font-display text-xs font-semibold text-primary"
+                      aria-hidden="true"
+                    >
+                      {{ tx.studentInitials }}
+                    </span>
+                    <div class="min-w-0">
+                      <p
+                        class="max-w-32 truncate text-sm font-semibold text-base-content min-[1400px]:max-w-44"
+                        [title]="tx.studentName"
+                      >
+                        {{ tx.studentName }}
+                      </p>
+                      <p class="font-mono text-xs tabular-nums text-base-content/60">
+                        {{ tx.matricule }}
+                      </p>
+                    </div>
+                  </div>
+                </td>
+
+                <!-- Référence reçu / facture -->
+                <td class="px-2 py-3 whitespace-nowrap min-[1400px]:px-3">
+                  <p class="font-mono text-xs font-medium tabular-nums text-base-content">
+                    {{ tx.receiptNumber }}
+                  </p>
+                  @if (tx.externalReference) {
+                    <p
+                      class="max-w-28 truncate font-mono text-xs tabular-nums text-base-content/55"
+                      [title]="tx.externalReference"
+                    >
+                      {{ tx.externalReference }}
+                    </p>
+                  }
+                </td>
+
+                <!-- Date & heure (Africa/Dakar) -->
+                <td class="px-2 py-3 text-xs whitespace-nowrap tabular-nums text-base-content/65 min-[1400px]:px-3">
+                  {{ tx.recordedAtUtc | dakarDate: 'datetime' }}
+                </td>
+
+                <!-- Moyen (badge soft avec icône Lucide 1.75) -->
+                <td class="px-2 py-3 whitespace-nowrap min-[1400px]:px-3">
+                  <span [class]="paymentMethodClasses(tx.method)">
+                    @if (isMobileMoneyMethod(tx.method)) {
+                      <svg lucideSmartphone [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0" aria-hidden="true"></svg>
+                    } @else {
+                      <svg lucideBanknote [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0" aria-hidden="true"></svg>
+                    }
+                    {{ paymentMethodLabel(tx.method) }}
+                  </span>
+                </td>
+
+                <!-- Statut (StatusBadgeComponent soft/tinted) -->
+                <td class="px-2 py-3 whitespace-nowrap min-[1400px]:px-3">
+                  <app-status-badge [label]="statusLabel(tx.status)" [tone]="statusTone(tx.status)" />
+                </td>
+
+                <!-- Montant FCFA aligné à droite en encre neutre -->
+                <td
+                  class="px-2 py-3 text-right font-display text-sm font-semibold tracking-tight whitespace-nowrap tabular-nums text-base-content min-[1400px]:px-3"
+                >
+                  {{ tx.amountFcfa | fcfa }}
+                </td>
+
+                <!-- Action Reçu / Vérifier compacte sans débordement -->
+                <td class="py-3 pl-2 pr-4 text-right whitespace-nowrap min-[1400px]:px-3 min-[1400px]:pr-5">
+                  <button
+                    type="button"
+                    class="inline-flex h-7 items-center justify-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium whitespace-nowrap transition-colors duration-150 ease-out motion-reduce:transition-none"
+                    [class]="
+                      tx.status === 'PENDING'
+                        ? 'border-base-300 bg-base-100 text-base-content hover:bg-base-200/70'
+                        : 'border-transparent bg-transparent text-base-content/75 hover:border-base-300/80 hover:bg-base-200/60 hover:text-base-content'
+                    "
+                    [attr.aria-label]="
+                      (tx.status === 'PENDING' ? 'Vérifier la transaction ' : 'Voir le reçu ') +
+                      tx.receiptNumber
+                    "
+                    (click)="openReceiptDrawer(tx)"
+                  >
+                    @if (tx.status === 'PENDING') {
+                      <svg lucideRefreshCw [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0" aria-hidden="true"></svg>
+                      Vérifier
+                    } @else {
+                      <svg lucideReceipt [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0" aria-hidden="true"></svg>
+                      Reçu
+                    }
+                  </button>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Cartes empilées Mobile (< 768px, zones tactiles >= 44px) -->
+      <div class="space-y-3 p-4 md:hidden">
+        @for (tx of transactions(); track tx.id) {
+          <article
+            class="space-y-3 rounded-xl border border-base-300/80 bg-base-100 p-4 shadow-xs transition-colors duration-150 ease-out hover:border-base-300 motion-reduce:transition-none"
+          >
+            <div class="flex items-start justify-between gap-3">
+              <div class="flex min-w-0 items-center gap-3">
+                <span
+                  class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-primary/20 bg-primary/10 font-display text-xs font-semibold text-primary"
+                  aria-hidden="true"
+                >
+                  {{ tx.studentInitials }}
+                </span>
+                <div class="min-w-0">
+                  <p class="truncate text-sm font-semibold text-base-content" [title]="tx.studentName">
+                    {{ tx.studentName }}
+                  </p>
+                  <p class="truncate font-mono text-xs tabular-nums text-base-content/60">
+                    {{ tx.matricule }} • {{ tx.receiptNumber }}
+                  </p>
+                </div>
+              </div>
+              <app-status-badge [label]="statusLabel(tx.status)" [tone]="statusTone(tx.status)" />
+            </div>
+
+            <div class="flex flex-wrap items-center justify-between gap-2 text-xs">
+              <span [class]="paymentMethodClasses(tx.method)">
+                @if (isMobileMoneyMethod(tx.method)) {
+                  <svg lucideSmartphone [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0" aria-hidden="true"></svg>
+                } @else {
+                  <svg lucideBanknote [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0" aria-hidden="true"></svg>
+                }
+                {{ paymentMethodLabel(tx.method) }}
+              </span>
+              <span class="tabular-nums text-base-content/65">
+                {{ tx.recordedAtUtc | dakarDate: 'datetime' }}
+              </span>
+            </div>
+
+            <div class="flex items-center justify-between gap-3 border-t border-base-300/70 pt-3">
+              <p
+                class="font-display text-base font-bold tracking-tight whitespace-nowrap tabular-nums text-base-content"
+              >
+                {{ tx.amountFcfa | fcfa }}
+              </p>
+              <button
+                type="button"
+                class="btn btn-outline min-h-11 gap-1.5 rounded-lg px-4"
+                [attr.aria-label]="
+                  (tx.status === 'PENDING' ? 'Vérifier la transaction ' : 'Voir le reçu ') +
+                  tx.receiptNumber
+                "
+                (click)="openReceiptDrawer(tx)"
+              >
+                @if (tx.status === 'PENDING') {
+                  <svg lucideRefreshCw [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+                  Vérifier
+                } @else {
+                  <svg lucideReceipt [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+                  Reçu
+                }
+              </button>
+            </div>
+          </article>
+        }
+      </div>
+
+      <!-- Pagination serveur en pied de tableau -->
+      <nav
+        aria-label="Pagination du journal de caisse"
+        class="flex flex-col gap-3 border-t border-base-300/80 px-4 py-3 text-xs text-base-content/60 sm:flex-row sm:items-center sm:justify-between sm:px-6"
+      >
+        <p class="tabular-nums">
+          {{ paginationRangeLabel() }}
+        </p>
+
+        <div class="flex items-center justify-between gap-2 sm:justify-end">
+          <button
+            type="button"
+            class="btn btn-outline btn-sm min-h-11 gap-1 rounded-lg sm:min-h-8"
+            [disabled]="isFirstPage() || loading()"
+            (click)="goToPreviousPage()"
+          >
+            <svg lucideChevronLeft [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+            Précédent
+          </button>
+
+          <span class="px-2 font-medium whitespace-nowrap tabular-nums text-base-content">
+            Page {{ currentPageDisplay() }} / {{ totalPages() }}
+          </span>
+
+          <button
+            type="button"
+            class="btn btn-outline btn-sm min-h-11 gap-1 rounded-lg sm:min-h-8"
+            [disabled]="isLastPage() || loading()"
+            (click)="goToNextPage()"
+          >
+            Suivant
+            <svg lucideChevronRight [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+          </button>
+        </div>
+      </nav>
+    </section>
+  }
+</div>
+
+<!-- Drawer latéral : Mode Encaissement rapide & Mode Aperçu Reçu / Vérification -->
+<app-drawer
+  [open]="drawerOpen()"
+  [title]="drawerTitle()"
+  [subtitle]="drawerSubtitle()"
+  [closeDisabled]="submitting() || verifyingReceipt() || confirmingTransaction()"
+  (closed)="closeDrawer()"
+>
+  @if (drawerMode() === 'record') {
+    <div class="space-y-4">
+      @if (recordErrorProblem(); as problem) {
+        <app-error-state [problem]="problem" [retryable]="false" />
+      }
+
+      <form
+        id="record-payment-form"
+        [formGroup]="paymentForm"
+        (ngSubmit)="submitRecordPayment()"
+        class="space-y-4"
+        novalidate
+      >
+        <div class="space-y-1.5">
+          <label for="payment-invoice-select" class="block text-sm font-medium text-base-content">
+            Élève / Facture à encaisser
+          </label>
+          <select
+            id="payment-invoice-select"
+            formControlName="invoiceId"
+            class="select select-bordered min-h-11 w-full rounded-lg text-sm sm:min-h-10"
+            [attr.aria-invalid]="fieldErrorMessage('invoiceId') !== null"
+            aria-describedby="payment-invoice-error"
+            (change)="onInvoiceSelectChange($event)"
+          >
+            <option value="">Sélectionner une facture ouverte…</option>
+            @for (invoice of payableInvoices(); track invoice.id) {
+              <option [value]="invoice.id">{{ invoiceOptionLabel(invoice) }}</option>
+            }
+          </select>
+          @if (fieldErrorMessage('invoiceId'); as err) {
+            <p id="payment-invoice-error" class="text-xs text-error">{{ err }}</p>
+          }
+          @if (selectedInvoiceForForm(); as inv) {
+            <div
+              class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-base-300/80 bg-base-200/40 px-3 py-2 text-xs"
+            >
+              <span class="text-base-content/70">
+                {{ inv.className }} • Échéance {{ inv.dueDate | dakarDate: 'date' }}
+              </span>
+              <span class="font-semibold tabular-nums text-base-content">
+                Reste dû : {{ inv.balanceFcfa | fcfa }}
+              </span>
+            </div>
+          }
+        </div>
+
+        <div class="space-y-1.5">
+          <label for="payment-amount-input" class="block text-sm font-medium text-base-content">
+            Montant encaissé (FCFA)
+          </label>
+          <input
+            id="payment-amount-input"
+            type="text"
+            inputmode="numeric"
+            autocomplete="off"
+            formControlName="amountFcfa"
+            placeholder="Ex. 50000"
+            class="input input-bordered min-h-11 w-full rounded-lg font-mono tabular-nums sm:min-h-10"
+            [attr.aria-invalid]="fieldErrorMessage('amountFcfa') !== null"
+            aria-describedby="payment-amount-hint payment-amount-error"
+          />
+          <p id="payment-amount-hint" class="text-xs text-base-content/60">
+            Entier positif uniquement, sans décimales (monnaie XOF).
+          </p>
+          @if (fieldErrorMessage('amountFcfa'); as err) {
+            <p id="payment-amount-error" class="text-xs text-error">{{ err }}</p>
+          }
+        </div>
+
+        <div class="space-y-1.5">
+          <label for="payment-method-select" class="block text-sm font-medium text-base-content">
+            Moyen de paiement
+          </label>
+          <select
+            id="payment-method-select"
+            formControlName="paymentMethod"
+            class="select select-bordered min-h-11 w-full rounded-lg text-sm sm:min-h-10"
+          >
+            @for (option of primaryMethodOptions; track option.value) {
+              <option [value]="option.value">{{ option.label }}</option>
+            }
+          </select>
+        </div>
+
+        <div class="space-y-1.5">
+          <div class="flex items-center justify-between gap-2">
+            <label for="payment-reference-input" class="block text-sm font-medium text-base-content">
+              Référence transaction
+            </label>
+            <span
+              class="inline-flex items-center rounded-lg border px-2 py-0.5 text-xs font-medium whitespace-nowrap"
+              [class]="
+                isReferenceRequired()
+                  ? 'border-warning/20 bg-warning/10 text-warning'
+                  : 'border-base-300/80 bg-base-200/80 text-base-content/65'
+              "
+            >
+              {{ isReferenceRequired() ? 'Obligatoire' : 'Optionnelle' }}
+            </span>
+          </div>
+          <input
+            id="payment-reference-input"
+            type="text"
+            formControlName="externalReference"
+            [placeholder]="
+              selectedFormMethod() === 'MOBILE_MONEY_WAVE'
+                ? 'Ex. WV-2611-90412'
+                : selectedFormMethod() === 'MOBILE_MONEY_OM'
+                  ? 'Ex. OM-2611-44108'
+                  : 'Optionnel pour un règlement en espèces'
+            "
+            class="input input-bordered min-h-11 w-full rounded-lg font-mono text-sm sm:min-h-10"
+            [attr.aria-invalid]="fieldErrorMessage('externalReference') !== null"
+            aria-describedby="payment-reference-error"
+          />
+          @if (fieldErrorMessage('externalReference'); as err) {
+            <p id="payment-reference-error" class="text-xs text-error">{{ err }}</p>
+          }
+        </div>
+
+        <div class="space-y-1.5">
+          <label for="payment-notes-input" class="block text-sm font-medium text-base-content">
+            Note interne (optionnelle)
+          </label>
+          <textarea
+            id="payment-notes-input"
+            rows="3"
+            formControlName="notes"
+            placeholder="Ex. Mensualité novembre réglée par le tuteur…"
+            class="textarea textarea-bordered w-full rounded-lg text-sm"
+            [attr.aria-invalid]="fieldErrorMessage('notes') !== null"
+            aria-describedby="payment-notes-error"
+          ></textarea>
+          @if (fieldErrorMessage('notes'); as err) {
+            <p id="payment-notes-error" class="text-xs text-error">{{ err }}</p>
+          }
+        </div>
+      </form>
+    </div>
+  } @else if (drawerMode() === 'receipt' && selectedTransaction(); as tx) {
+    <div class="space-y-5">
+      @if (verificationErrorProblem(); as problem) {
+        <app-error-state [problem]="problem" [retryable]="false" />
+      }
+
+      <!-- En-tête du reçu avec numéro, statut et montant en encre neutre -->
+      <div class="space-y-4 rounded-xl border border-base-300/80 bg-base-200/35 p-4">
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <p class="text-xs font-medium uppercase tracking-wider text-base-content/55">
+              {{ tx.status === 'OVERDUE' ? 'Facture échue' : 'Reçu officiel' }}
+            </p>
+            <p class="mt-0.5 font-mono text-base font-semibold tabular-nums text-base-content">
+              {{ tx.receiptNumber }}
+            </p>
+          </div>
+          <app-status-badge [label]="statusLabel(tx.status)" [tone]="statusTone(tx.status)" />
+        </div>
+
+        <div class="border-t border-base-300/70 pt-3">
+          <p class="text-xs text-base-content/60">Montant</p>
+          <p class="mt-0.5 font-display text-2xl font-bold tracking-tight tabular-nums text-base-content">
+            {{ tx.amountFcfa | fcfa }}
+          </p>
+        </div>
+      </div>
+
+      <!-- Résultat de vérification d'authenticité (si déclenchée) -->
+      @if (verificationResult(); as verif) {
+        <div
+          role="status"
+          aria-live="polite"
+          class="flex items-start gap-3 rounded-xl border px-4 py-3 text-sm"
+          [class]="
+            verif.reversed
+              ? 'border-warning/30 bg-warning/10 text-warning'
+              : 'border-success/30 bg-success/10 text-success'
+          "
+        >
+          <svg lucideCircleCheck [strokeWidth]="1.75" class="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true"></svg>
+          <div class="min-w-0 text-xs">
+            <p class="font-semibold">
+              {{
+                verif.reversed
+                  ? 'Reçu authentique mais contre-passé (annulé)'
+                  : 'Authenticité du reçu confirmée par le registre'
+              }}
+            </p>
+            <p class="mt-0.5 font-mono tabular-nums">
+              {{ verif.receiptNumber }} • {{ verif.invoiceNumber }} • {{ verif.studentMatricule }}
+            </p>
+          </div>
+        </div>
+      }
+
+      <!-- Détails de l'élève et de la transaction -->
+      <section aria-labelledby="receipt-details-heading" class="space-y-3 rounded-xl border border-base-300/80 bg-base-100 p-4">
+        <div class="flex items-center gap-2">
+          <svg lucideFileText [strokeWidth]="1.75" class="h-4 w-4 shrink-0 text-primary" aria-hidden="true"></svg>
+          <h3 id="receipt-details-heading" class="font-display text-sm font-semibold text-base-content">
+            Détails de l'opération
+          </h3>
+        </div>
+
+        <dl class="space-y-2.5 text-sm">
+          <div class="flex items-center justify-between gap-3">
+            <dt class="text-xs text-base-content/60">Élève</dt>
+            <dd class="truncate font-medium text-base-content" [title]="tx.studentName">
+              {{ tx.studentName }}
+            </dd>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <dt class="text-xs text-base-content/60">Matricule</dt>
+            <dd class="font-mono text-xs font-medium tabular-nums text-base-content">
+              {{ tx.matricule }}
+            </dd>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <dt class="text-xs text-base-content/60">Classe</dt>
+            <dd>
+              <span
+                class="inline-flex items-center rounded-lg border border-base-300/80 bg-base-200/60 px-2 py-0.5 text-xs font-medium whitespace-nowrap text-base-content/85"
+              >
+                {{ tx.className }}
+              </span>
+            </dd>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <dt class="text-xs text-base-content/60">Facture associée</dt>
+            <dd class="font-mono text-xs font-medium tabular-nums text-base-content">
+              {{ tx.invoiceNumber }}
+            </dd>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <dt class="text-xs text-base-content/60">Date &amp; heure (Dakar)</dt>
+            <dd class="text-xs font-medium tabular-nums text-base-content">
+              {{ tx.recordedAtUtc | dakarDate: 'datetime' }}
+            </dd>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <dt class="text-xs text-base-content/60">Moyen de paiement</dt>
+            <dd>
+              <span [class]="paymentMethodClasses(tx.method)">
+                @if (isMobileMoneyMethod(tx.method)) {
+                  <svg lucideSmartphone [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0" aria-hidden="true"></svg>
+                } @else {
+                  <svg lucideBanknote [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0" aria-hidden="true"></svg>
+                }
+                {{ paymentMethodLabel(tx.method) }}
+              </span>
+            </dd>
+          </div>
+          @if (tx.externalReference) {
+            <div class="flex items-center justify-between gap-3">
+              <dt class="text-xs text-base-content/60">Référence opérateur</dt>
+              <dd class="font-mono text-xs font-medium tabular-nums text-base-content">
+                {{ tx.externalReference }}
+              </dd>
+            </div>
+          }
+          @if (tx.reversedAtUtc) {
+            <div class="flex items-center justify-between gap-3">
+              <dt class="text-xs text-base-content/60">Annulé le</dt>
+              <dd class="text-xs font-medium tabular-nums text-base-content">
+                {{ tx.reversedAtUtc | dakarDate: 'datetime' }}
+              </dd>
+            </div>
+          }
+        </dl>
+
+        @if (tx.notes) {
+          <div class="rounded-lg border border-base-300/80 bg-base-200/45 px-3 py-2 text-xs text-base-content/75">
+            <span class="font-medium text-base-content">Note :</span> {{ tx.notes }}
+          </div>
+        }
+      </section>
+    </div>
+  }
+
+  <div drawerFooter class="flex flex-wrap justify-end gap-2">
+    @if (drawerMode() === 'record') {
+      <button
+        type="button"
+        class="btn btn-ghost min-h-11 rounded-lg sm:min-h-10"
+        [disabled]="submitting()"
+        (click)="closeDrawer()"
+      >
+        Annuler
+      </button>
+      <button
+        type="submit"
+        form="record-payment-form"
+        class="btn btn-primary min-h-11 rounded-lg sm:min-h-10"
+        [disabled]="submitting()"
+        [attr.aria-busy]="submitting()"
+      >
+        @if (submitting()) {
+          <span class="loading loading-spinner loading-xs" aria-hidden="true"></span>
+        }
+        Valider l'encaissement
+      </button>
+    } @else if (selectedTransaction(); as tx) {
+      @if (tx.status === 'PENDING') {
+        <button
+          type="button"
+          class="btn btn-ghost min-h-11 rounded-lg sm:min-h-10"
+          [disabled]="confirmingTransaction()"
+          (click)="closeDrawer()"
+        >
+          Fermer
+        </button>
+        <button
+          type="button"
+          class="btn btn-primary min-h-11 gap-1.5 rounded-lg sm:min-h-10"
+          [disabled]="confirmingTransaction()"
+          [attr.aria-busy]="confirmingTransaction()"
+          (click)="confirmSelectedPendingTransaction()"
+        >
+          @if (confirmingTransaction()) {
+            <span class="loading loading-spinner loading-xs" aria-hidden="true"></span>
+          } @else {
+            <svg lucideShieldCheck [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+          }
+          Valider la transaction
+        </button>
+      } @else if (tx.status === 'OVERDUE') {
+        <button
+          type="button"
+          class="btn btn-ghost min-h-11 rounded-lg sm:min-h-10"
+          (click)="closeDrawer()"
+        >
+          Fermer
+        </button>
+        <button
+          type="button"
+          class="btn btn-primary min-h-11 gap-1.5 rounded-lg sm:min-h-10"
+          (click)="switchOverdueToRecord(tx)"
+        >
+          <svg lucideWallet [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+          Encaisser cette facture
+        </button>
+      } @else if (tx.status === 'VALIDATED') {
+        @if (tx.verificationToken) {
+          <button
+            type="button"
+            class="btn btn-outline min-h-11 gap-1.5 rounded-lg sm:min-h-10"
+            [disabled]="verifyingReceipt()"
+            [attr.aria-busy]="verifyingReceipt()"
+            (click)="verifySelectedReceipt()"
+          >
+            @if (verifyingReceipt()) {
+              <span class="loading loading-spinner loading-xs" aria-hidden="true"></span>
+            } @else {
+              <svg lucideShieldCheck [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+            }
+            Vérifier
+          </button>
+        }
+        <button
+          type="button"
+          class="btn btn-primary min-h-11 gap-1.5 rounded-lg sm:min-h-10"
+          (click)="downloadOrPrintReceipt()"
+        >
+          <svg lucidePrinter [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+          Imprimer / Télécharger
+        </button>
+      } @else {
+        <button
+          type="button"
+          class="btn btn-outline min-h-11 rounded-lg sm:min-h-10"
+          (click)="closeDrawer()"
+        >
+          Fermer
+        </button>
+      }
+    }
+  </div>
+</app-drawer>
