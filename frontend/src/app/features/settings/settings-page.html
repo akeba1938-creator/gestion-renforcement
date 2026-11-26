@@ -1,0 +1,1191 @@
+<section class="space-y-6">
+  <app-page-header
+    title="Paramètres"
+    [subtitle]="headerSubtitle()"
+    [breadcrumbs]="breadcrumbs"
+  >
+    <div pageHeaderActions class="flex flex-wrap items-center gap-2">
+      @if (hasUnsavedChanges() && !loading()) {
+        <app-status-badge label="Modifications non enregistrées" tone="warning" />
+      }
+      <button
+        type="button"
+        class="btn btn-primary min-h-11 gap-2 rounded-lg sm:min-h-10"
+        [disabled]="isSaveDisabled()"
+        [attr.aria-busy]="saving()"
+        (click)="saveActiveTab()"
+      >
+        @if (saving()) {
+          <span class="loading loading-spinner loading-xs" aria-hidden="true"></span>
+          <span>Enregistrement…</span>
+        } @else {
+          <svg lucideSave [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+          <span>Enregistrer les modifications</span>
+        }
+      </button>
+    </div>
+  </app-page-header>
+
+  @if (!networkStatus.isOnline()) {
+    <div
+      role="status"
+      aria-live="polite"
+      class="flex items-start gap-3 rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning"
+      data-testid="settings-offline-banner"
+    >
+      <svg lucideWifiOff [strokeWidth]="1.75" class="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true"></svg>
+      <p>
+        <span class="font-semibold">Mode hors-ligne détecté.</span>
+        Les paramètres restent consultables, mais une connexion réseau est requise pour enregistrer vos modifications.
+      </p>
+    </div>
+  }
+
+  @if (loading()) {
+    <div class="space-y-4">
+      <div class="rounded-xl border border-base-300/80 bg-base-100 p-2" aria-hidden="true">
+        <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div class="skeleton h-10 rounded-lg motion-reduce:animate-none"></div>
+          <div class="skeleton h-10 rounded-lg motion-reduce:animate-none"></div>
+          <div class="skeleton h-10 rounded-lg motion-reduce:animate-none"></div>
+          <div class="skeleton h-10 rounded-lg motion-reduce:animate-none"></div>
+        </div>
+      </div>
+      <app-skeleton-loader variant="card" [count]="2" ariaLabel="Chargement des paramètres de l'établissement…" />
+    </div>
+  } @else if (loadError(); as problem) {
+    <app-error-state
+      [problem]="problem"
+      [retrying]="loading()"
+      (retry)="reloadSettings()"
+    />
+  } @else if (!hasAnyData()) {
+    <app-empty-state
+      title="Aucun paramètre d'établissement disponible"
+      description="Impossible de retrouver la fiche de l'établissement ou les années scolaires associées à votre compte."
+      icon="file"
+      actionLabel="Actualiser les paramètres"
+      (action)="reloadSettings()"
+    />
+  } @else {
+    <!-- Synchronized URL tab navigation (?tab=school|academic|security|preferences) -->
+    <div class="rounded-xl border border-base-300/80 bg-base-100 p-1.5 shadow-xs">
+      <div
+        role="tablist"
+        aria-label="Sections des paramètres"
+        class="grid grid-cols-2 gap-1.5 sm:flex sm:flex-wrap sm:items-center"
+      >
+        @for (tab of tabs; track tab.id; let idx = $index) {
+          <button
+            type="button"
+            role="tab"
+            [id]="'settings-tab-' + tab.id"
+            [attr.aria-selected]="activeTab() === tab.id"
+            [attr.aria-controls]="'settings-panel-' + tab.id"
+            [attr.tabindex]="activeTab() === tab.id ? 0 : -1"
+            class="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors duration-150 ease-out motion-reduce:transition-none sm:min-h-10 sm:justify-start"
+            [class.border-primary/20]="activeTab() === tab.id"
+            [class.bg-primary/10]="activeTab() === tab.id"
+            [class.font-semibold]="activeTab() === tab.id"
+            [class.text-primary]="activeTab() === tab.id"
+            [class.border-transparent]="activeTab() !== tab.id"
+            [class.text-base-content/70]="activeTab() !== tab.id"
+            [class.hover:bg-base-200/70]="activeTab() !== tab.id"
+            [class.hover:text-base-content]="activeTab() !== tab.id"
+            (click)="selectTab(tab.id)"
+            (keydown)="onTabKeydown($event, idx)"
+          >
+            @switch (tab.id) {
+              @case ('school') {
+                <svg lucideBuilding [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+              }
+              @case ('academic') {
+                <svg lucideCalendar [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+              }
+              @case ('security') {
+                <svg lucideShieldCheck [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+              }
+              @case ('preferences') {
+                <svg lucideSlidersHorizontal [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+              }
+            }
+            <span class="whitespace-nowrap">{{ tab.label }}</span>
+          </button>
+        }
+      </div>
+    </div>
+
+    @if (saveError(); as mutationProblem) {
+      <app-error-state
+        [problem]="mutationProblem"
+        [retrying]="saving()"
+        (retry)="saveActiveTab()"
+      />
+    }
+
+    <!-- Tab 1: Établissement -->
+    @if (activeTab() === 'school') {
+      <div
+        id="settings-panel-school"
+        role="tabpanel"
+        aria-labelledby="settings-tab-school"
+        class="grid grid-cols-1 gap-6 lg:grid-cols-3"
+      >
+        @if (school(); as currentSchool) {
+          <form
+            id="settings-school-form"
+            [formGroup]="schoolForm"
+            (ngSubmit)="saveActiveTab()"
+            novalidate
+            class="space-y-6 rounded-xl border border-base-300/80 bg-base-100 p-6 shadow-xs lg:col-span-2"
+          >
+            <div class="flex items-start justify-between gap-4 border-b border-base-300/80 pb-4">
+              <div class="min-w-0">
+                <h2 class="font-display text-base font-semibold tracking-tight text-base-content">
+                  Identité et coordonnées
+                </h2>
+                <p class="mt-1 text-sm text-base-content/60">
+                  Informations affichées sur les bulletins, reçus FCFA et communications officielles.
+                </p>
+              </div>
+              <span
+                class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-primary/20 bg-primary/10 text-primary"
+                aria-hidden="true"
+              >
+                <svg lucideBuilding [strokeWidth]="1.75" class="h-4 w-4 shrink-0"></svg>
+              </span>
+            </div>
+
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <!-- Nom de l'établissement -->
+              <div class="space-y-1.5 sm:col-span-2">
+                <label
+                  for="school-name-input"
+                  class="block text-sm font-medium text-base-content"
+                >
+                  Nom de l'établissement <span class="text-error" aria-hidden="true">*</span>
+                </label>
+                <input
+                  id="school-name-input"
+                  type="text"
+                  formControlName="name"
+                  autocomplete="organization"
+                  class="input input-bordered min-h-11 w-full rounded-lg bg-base-100 text-sm text-base-content"
+                  [class.input-error]="getSchoolFieldError('name') !== null"
+                  [attr.aria-invalid]="getSchoolFieldError('name') !== null"
+                  [attr.aria-describedby]="getSchoolFieldError('name') ? 'school-name-error' : null"
+                />
+                @if (getSchoolFieldError('name'); as err) {
+                  <p id="school-name-error" class="text-xs text-error" role="alert">{{ err }}</p>
+                }
+              </div>
+
+              <!-- Code établissement (lecture seule) -->
+              <div class="space-y-1.5">
+                <label
+                  for="school-code-readonly"
+                  class="flex items-center gap-1.5 text-sm font-medium text-base-content"
+                >
+                  <span>Code établissement</span>
+                  <svg lucideLock [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0 text-base-content/50" aria-hidden="true"></svg>
+                </label>
+                <input
+                  id="school-code-readonly"
+                  type="text"
+                  [value]="currentSchool.code"
+                  readonly
+                  aria-readonly="true"
+                  class="input input-bordered min-h-11 w-full cursor-not-allowed rounded-lg bg-base-200/70 font-mono text-sm tabular-nums text-base-content/80"
+                />
+                <p class="text-xs text-base-content/60">
+                  Identifiant unique en lecture seule utilisé pour la connexion établissement.
+                </p>
+              </div>
+
+              <!-- Téléphone (+221 E.164) -->
+              <div class="space-y-1.5">
+                <label
+                  for="school-phone-input"
+                  class="flex items-center gap-1.5 text-sm font-medium text-base-content"
+                >
+                  <svg lucidePhone [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0 text-base-content/60" aria-hidden="true"></svg>
+                  <span>Téléphone (+221 E.164)</span>
+                </label>
+                <input
+                  id="school-phone-input"
+                  type="tel"
+                  formControlName="phone"
+                  inputmode="tel"
+                  placeholder="+221338214590"
+                  class="input input-bordered min-h-11 w-full rounded-lg bg-base-100 font-mono text-sm tabular-nums text-base-content"
+                  [class.input-error]="getSchoolFieldError('phone') !== null"
+                  [attr.aria-invalid]="getSchoolFieldError('phone') !== null"
+                  [attr.aria-describedby]="getSchoolFieldError('phone') ? 'school-phone-error' : 'school-phone-hint'"
+                />
+                @if (getSchoolFieldError('phone'); as err) {
+                  <p id="school-phone-error" class="text-xs text-error" role="alert">{{ err }}</p>
+                } @else {
+                  <p id="school-phone-hint" class="text-xs text-base-content/60">
+                    Format international Sénégal sans espaces (ex. +221770000001).
+                  </p>
+                }
+              </div>
+
+              <!-- Email officiel -->
+              <div class="space-y-1.5 sm:col-span-2">
+                <label
+                  for="school-email-input"
+                  class="flex items-center gap-1.5 text-sm font-medium text-base-content"
+                >
+                  <svg lucideMail [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0 text-base-content/60" aria-hidden="true"></svg>
+                  <span>E-mail officiel</span>
+                </label>
+                <input
+                  id="school-email-input"
+                  type="email"
+                  formControlName="email"
+                  autocomplete="email"
+                  placeholder="direction@etablissement.sn"
+                  class="input input-bordered min-h-11 w-full rounded-lg bg-base-100 text-sm text-base-content"
+                  [class.input-error]="getSchoolFieldError('email') !== null"
+                  [attr.aria-invalid]="getSchoolFieldError('email') !== null"
+                  [attr.aria-describedby]="getSchoolFieldError('email') ? 'school-email-error' : null"
+                />
+                @if (getSchoolFieldError('email'); as err) {
+                  <p id="school-email-error" class="text-xs text-error" role="alert">{{ err }}</p>
+                }
+              </div>
+
+              <!-- Adresse -->
+              <div class="space-y-1.5 sm:col-span-2">
+                <label
+                  for="school-address-input"
+                  class="flex items-center gap-1.5 text-sm font-medium text-base-content"
+                >
+                  <svg lucideMapPin [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0 text-base-content/60" aria-hidden="true"></svg>
+                  <span>Adresse</span>
+                </label>
+                <textarea
+                  id="school-address-input"
+                  rows="2"
+                  formControlName="address"
+                  class="textarea textarea-bordered w-full rounded-lg bg-base-100 text-sm text-base-content"
+                  [class.textarea-error]="getSchoolFieldError('address') !== null"
+                  [attr.aria-invalid]="getSchoolFieldError('address') !== null"
+                  [attr.aria-describedby]="getSchoolFieldError('address') ? 'school-address-error' : null"
+                ></textarea>
+                @if (getSchoolFieldError('address'); as err) {
+                  <p id="school-address-error" class="text-xs text-error" role="alert">{{ err }}</p>
+                }
+              </div>
+
+              <!-- Ville & Région -->
+              <div class="space-y-1.5">
+                <label for="school-city-input" class="block text-sm font-medium text-base-content">
+                  Ville
+                </label>
+                <input
+                  id="school-city-input"
+                  type="text"
+                  formControlName="city"
+                  class="input input-bordered min-h-11 w-full rounded-lg bg-base-100 text-sm text-base-content"
+                />
+              </div>
+
+              <div class="space-y-1.5">
+                <label for="school-region-input" class="block text-sm font-medium text-base-content">
+                  Région
+                </label>
+                <input
+                  id="school-region-input"
+                  type="text"
+                  formControlName="region"
+                  class="input input-bordered min-h-11 w-full rounded-lg bg-base-100 text-sm text-base-content"
+                />
+              </div>
+            </div>
+          </form>
+
+          <!-- Paramètres régionaux (lecture seule) -->
+          <aside class="space-y-6 rounded-xl border border-base-300/80 bg-base-100 p-6 shadow-xs">
+            <div class="flex items-start justify-between gap-4 border-b border-base-300/80 pb-4">
+              <div class="min-w-0">
+                <h2 class="font-display text-base font-semibold tracking-tight text-base-content">
+                  Paramètres régionaux
+                </h2>
+                <p class="mt-1 text-sm text-base-content/60">
+                  Verrouillés sur les conventions Sénégal.
+                </p>
+              </div>
+              <span
+                class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-secondary/20 bg-secondary/10 text-secondary"
+                aria-hidden="true"
+              >
+                <svg lucideGlobe [strokeWidth]="1.75" class="h-4 w-4 shrink-0"></svg>
+              </span>
+            </div>
+
+            <div class="space-y-4">
+              <div class="space-y-1.5">
+                <label
+                  for="school-currency-readonly"
+                  class="flex items-center gap-1.5 text-sm font-medium text-base-content"
+                >
+                  <span>Devise</span>
+                  <svg lucideLock [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0 text-base-content/50" aria-hidden="true"></svg>
+                </label>
+                <input
+                  id="school-currency-readonly"
+                  type="text"
+                  [value]="currentSchool.currency"
+                  readonly
+                  aria-readonly="true"
+                  class="input input-bordered min-h-11 w-full cursor-not-allowed rounded-lg bg-base-200/70 font-mono text-sm tabular-nums text-base-content/80"
+                />
+                <p class="text-xs text-base-content/60">
+                  Franc CFA (XOF) — montants strictement en entiers sans décimale.
+                </p>
+              </div>
+
+              <div class="space-y-1.5">
+                <label
+                  for="school-timezone-readonly"
+                  class="flex items-center gap-1.5 text-sm font-medium text-base-content"
+                >
+                  <span>Fuseau horaire</span>
+                  <svg lucideLock [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0 text-base-content/50" aria-hidden="true"></svg>
+                </label>
+                <input
+                  id="school-timezone-readonly"
+                  type="text"
+                  [value]="currentSchool.timezone"
+                  readonly
+                  aria-readonly="true"
+                  class="input input-bordered min-h-11 w-full cursor-not-allowed rounded-lg bg-base-200/70 font-mono text-sm text-base-content/80"
+                />
+                <p class="text-xs text-base-content/60">
+                  Toutes les dates et heures sont affichées en heure locale de Dakar.
+                </p>
+              </div>
+            </div>
+
+            @if (currentSchool.updatedAtUtc) {
+              <div class="border-t border-base-300/80 pt-4 text-xs text-base-content/60">
+                <span>Dernière mise à jour : </span>
+                <span class="font-medium tabular-nums text-base-content">
+                  {{ currentSchool.updatedAtUtc | dakarDate: 'datetime' }}
+                </span>
+              </div>
+            }
+          </aside>
+        } @else {
+          <div class="lg:col-span-3">
+            <app-empty-state
+              title="Fiche établissement non initialisée"
+              description="Aucune information d'établissement n'a été renvoyée par le serveur."
+              icon="file"
+              actionLabel="Actualiser"
+              (action)="reloadSettings()"
+            />
+          </div>
+        }
+      </div>
+    }
+
+    <!-- Tab 2: Année scolaire -->
+    @if (activeTab() === 'academic') {
+      <div
+        id="settings-panel-academic"
+        role="tabpanel"
+        aria-labelledby="settings-tab-academic"
+        class="space-y-6"
+      >
+        @if (academicYears().length === 0) {
+          <app-empty-state
+            title="Aucune année scolaire configurée"
+            description="Créez ou importez une première année scolaire depuis l'administration académique pour activer les trimestres."
+            icon="file"
+            actionLabel="Actualiser la liste"
+            (action)="reloadSettings()"
+          />
+        } @else {
+          <!-- Configuration de l'année active & trimestre courant -->
+          <form
+            id="settings-academic-form"
+            [formGroup]="academicForm"
+            (ngSubmit)="saveActiveTab()"
+            novalidate
+            class="space-y-6 rounded-xl border border-base-300/80 bg-base-100 p-6 shadow-xs"
+          >
+            <div class="flex flex-wrap items-start justify-between gap-4 border-b border-base-300/80 pb-4">
+              <div class="min-w-0">
+                <h2 class="font-display text-base font-semibold tracking-tight text-base-content">
+                  Configuration de l'année active et du trimestre courant
+                </h2>
+                <p class="mt-1 text-sm text-base-content/60">
+                  Définissez l'année de référence, la période d'évaluation ouverte et le calendrier officiel.
+                </p>
+              </div>
+              @if (selectedAcademicYear(); as selectedYear) {
+                <app-status-badge
+                  [label]="yearStatusLabel(selectedYear.status, selectedYear.current)"
+                  [tone]="yearBadgeTone(selectedYear.status, selectedYear.current)"
+                />
+              }
+            </div>
+
+            <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <!-- Année active -->
+              <div class="space-y-1.5">
+                <label
+                  for="academic-year-select"
+                  class="block text-sm font-medium text-base-content"
+                >
+                  Année scolaire sélectionnée
+                </label>
+                <select
+                  id="academic-year-select"
+                  formControlName="academicYearId"
+                  class="select select-bordered min-h-11 w-full rounded-lg bg-base-100 text-sm text-base-content"
+                  (change)="onAcademicYearSelectionChange(academicForm.controls.academicYearId.value)"
+                >
+                  @for (year of academicYears(); track year.id) {
+                    <option [value]="year.id">
+                      {{ year.label }} ({{ year.code }})
+                    </option>
+                  }
+                </select>
+              </div>
+
+              <!-- Trimestre courant -->
+              <div class="space-y-1.5">
+                <label
+                  for="academic-period-select"
+                  class="block text-sm font-medium text-base-content"
+                >
+                  Trimestre / Période courante
+                </label>
+                <select
+                  id="academic-period-select"
+                  formControlName="activePeriodId"
+                  class="select select-bordered min-h-11 w-full rounded-lg bg-base-100 text-sm text-base-content"
+                >
+                  @if (periodsLoading()) {
+                    <option value="">Chargement des périodes…</option>
+                  } @else if (selectedYearPeriods().length === 0) {
+                    <option value="">Aucune période définie pour cette année</option>
+                  } @else {
+                    @for (period of selectedYearPeriods(); track period.id) {
+                      <option [value]="period.id">
+                        {{ period.name }} — {{ periodStatusLabel(period.status) }}
+                      </option>
+                    }
+                  }
+                </select>
+                @if (selectedYearPeriods().length > 0) {
+                  <p class="text-xs text-base-content/60">
+                    La sélection d'une période planifiée l'ouvre automatiquement lors de l'enregistrement.
+                  </p>
+                }
+              </div>
+
+              <!-- Date de début -->
+              <div class="space-y-1.5">
+                <label
+                  for="academic-start-date"
+                  class="block text-sm font-medium text-base-content"
+                >
+                  Date de début <span class="text-error" aria-hidden="true">*</span>
+                </label>
+                <input
+                  id="academic-start-date"
+                  type="date"
+                  formControlName="startDate"
+                  class="input input-bordered min-h-11 w-full rounded-lg bg-base-100 text-sm tabular-nums text-base-content"
+                  [class.input-error]="getAcademicFieldError('startDate') !== null"
+                  [attr.aria-invalid]="getAcademicFieldError('startDate') !== null"
+                  [attr.aria-describedby]="getAcademicFieldError('startDate') ? 'academic-start-error' : 'academic-start-preview'"
+                />
+                @if (getAcademicFieldError('startDate'); as err) {
+                  <p id="academic-start-error" class="text-xs text-error" role="alert">{{ err }}</p>
+                } @else {
+                  <p id="academic-start-preview" class="text-xs tabular-nums text-base-content/60">
+                    Affichage Dakar : {{ formattedStartPreview() | dakarDate: 'date' }}
+                  </p>
+                }
+              </div>
+
+              <!-- Date de fin -->
+              <div class="space-y-1.5">
+                <label
+                  for="academic-end-date"
+                  class="block text-sm font-medium text-base-content"
+                >
+                  Date de fin <span class="text-error" aria-hidden="true">*</span>
+                </label>
+                <input
+                  id="academic-end-date"
+                  type="date"
+                  formControlName="endDate"
+                  class="input input-bordered min-h-11 w-full rounded-lg bg-base-100 text-sm tabular-nums text-base-content"
+                  [class.input-error]="getAcademicFieldError('endDate') !== null"
+                  [attr.aria-invalid]="getAcademicFieldError('endDate') !== null"
+                  [attr.aria-describedby]="getAcademicFieldError('endDate') ? 'academic-end-error' : 'academic-end-preview'"
+                />
+                @if (getAcademicFieldError('endDate'); as err) {
+                  <p id="academic-end-error" class="text-xs text-error" role="alert">{{ err }}</p>
+                } @else {
+                  <p id="academic-end-preview" class="text-xs tabular-nums text-base-content/60">
+                    Affichage Dakar : {{ formattedEndPreview() | dakarDate: 'date' }}
+                  </p>
+                }
+              </div>
+
+              <!-- Système de découpage -->
+              <div class="space-y-1.5">
+                <label
+                  for="academic-period-system"
+                  class="block text-sm font-medium text-base-content"
+                >
+                  Découpage pédagogique
+                </label>
+                <select
+                  id="academic-period-system"
+                  formControlName="periodSystem"
+                  class="select select-bordered min-h-11 w-full rounded-lg bg-base-100 text-sm text-base-content"
+                >
+                  <option value="TRIMESTER">Trimestriel (3 périodes)</option>
+                  <option value="SEMESTER">Semestriel (2 périodes)</option>
+                  <option value="CUSTOM">Personnalisé</option>
+                </select>
+              </div>
+
+              <!-- Définir comme année courante -->
+              <div class="flex items-end">
+                <label
+                  for="academic-set-current"
+                  class="flex min-h-11 w-full cursor-pointer items-center justify-between gap-3 rounded-lg border border-base-300/80 bg-base-200/40 px-4 py-2.5"
+                >
+                  <span class="text-sm font-medium text-base-content">
+                    Définir comme année active par défaut
+                  </span>
+                  <input
+                    id="academic-set-current"
+                    type="checkbox"
+                    formControlName="setAsCurrent"
+                    class="toggle toggle-primary toggle-sm"
+                  />
+                </label>
+              </div>
+            </div>
+          </form>
+
+          <!-- Liste des années scolaires existantes -->
+          <div class="rounded-xl border border-base-300/80 bg-base-100 shadow-xs">
+            <div class="flex flex-col gap-3 border-b border-base-300/80 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <div class="min-w-0">
+                <h2 class="font-display text-base font-semibold tracking-tight text-base-content">
+                  Années scolaires existantes
+                </h2>
+                <p class="mt-0.5 text-xs tabular-nums text-base-content/60">
+                  {{ filteredAcademicYears().length }} sur {{ academicYears().length }} années affichées
+                </p>
+              </div>
+
+              <div
+                role="group"
+                aria-label="Filtrer les années scolaires par statut"
+                class="flex flex-wrap items-center gap-1.5"
+              >
+                @for (option of yearStatusFilters; track option.value) {
+                  <button
+                    type="button"
+                    class="inline-flex min-h-11 items-center rounded-lg border px-3 py-1.5 text-xs font-medium whitespace-nowrap transition-colors duration-150 ease-out motion-reduce:transition-none sm:min-h-8"
+                    [class.border-primary/25]="yearStatusFilter() === option.value"
+                    [class.bg-primary/10]="yearStatusFilter() === option.value"
+                    [class.text-primary]="yearStatusFilter() === option.value"
+                    [class.border-base-300/80]="yearStatusFilter() !== option.value"
+                    [class.bg-base-100]="yearStatusFilter() !== option.value"
+                    [class.text-base-content/70]="yearStatusFilter() !== option.value"
+                    [class.hover:bg-base-200/60]="yearStatusFilter() !== option.value"
+                    [attr.aria-pressed]="yearStatusFilter() === option.value"
+                    (click)="setYearStatusFilter(option.value)"
+                  >
+                    {{ option.label }}
+                  </button>
+                }
+              </div>
+            </div>
+
+            @if (filteredAcademicYears().length === 0) {
+              <div class="p-6">
+                <app-empty-state
+                  variant="filtered"
+                  title="Aucune année scolaire ne correspond à ce filtre"
+                  description="Essayez un autre statut ou réinitialisez les filtres pour afficher l'ensemble de l'historique."
+                  (action)="resetYearStatusFilter()"
+                />
+              </div>
+            } @else {
+              <!-- Desktop table -->
+              <div class="hidden overflow-x-auto md:block">
+                <table class="table w-full text-sm">
+                  <thead>
+                    <tr class="border-b border-base-300/80 bg-base-200/40 text-xs font-semibold tracking-wider text-base-content/50 uppercase">
+                      <th class="px-4 py-3 text-left">Année scolaire</th>
+                      <th class="px-3 py-3 text-left whitespace-nowrap">Début — Fin (Dakar)</th>
+                      <th class="px-3 py-3 text-left whitespace-nowrap">Découpage</th>
+                      <th class="px-3 py-3 text-left whitespace-nowrap">Statut</th>
+                      <th class="px-4 py-3 text-right whitespace-nowrap">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-base-300/70">
+                    @for (year of filteredAcademicYears(); track year.id) {
+                      <tr class="transition-colors duration-150 ease-out hover:bg-base-200/50 motion-reduce:transition-none">
+                        <td class="px-4 py-3">
+                          <div class="min-w-0">
+                            <p class="truncate font-semibold text-base-content" [title]="year.label">
+                              {{ year.label }}
+                            </p>
+                            <p class="font-mono text-xs tabular-nums text-base-content/60">
+                              {{ year.code }}
+                            </p>
+                          </div>
+                        </td>
+                        <td class="px-3 py-3 whitespace-nowrap tabular-nums text-base-content/80">
+                          {{ formatIsoDateForPipe(year.startDate) | dakarDate: 'date' }}
+                          <span class="mx-1 text-base-content/40" aria-hidden="true">→</span>
+                          {{ formatIsoDateForPipe(year.endDate) | dakarDate: 'date' }}
+                        </td>
+                        <td class="px-3 py-3 whitespace-nowrap text-base-content/75">
+                          {{ periodSystemLabel(year.periodSystem) }}
+                        </td>
+                        <td class="px-3 py-3 whitespace-nowrap">
+                          <app-status-badge
+                            [label]="yearStatusLabel(year.status, year.current)"
+                            [tone]="yearBadgeTone(year.status, year.current)"
+                          />
+                        </td>
+                        <td class="px-4 py-3 text-right whitespace-nowrap">
+                          @if (year.current) {
+                            <span class="inline-flex items-center gap-1.5 text-xs font-medium text-base-content/60">
+                              <svg lucideCheck [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0 text-success" aria-hidden="true"></svg>
+                              <span>Année courante</span>
+                            </span>
+                          } @else {
+                            <button
+                              type="button"
+                              class="btn btn-outline btn-xs rounded-lg whitespace-nowrap"
+                              (click)="selectYearFromList(year)"
+                            >
+                              Sélectionner
+                            </button>
+                          }
+                        </td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+
+              <!-- Mobile stacked cards (< 768px) -->
+              <div class="divide-y divide-base-300/70 md:hidden">
+                @for (year of filteredAcademicYears(); track year.id) {
+                  <article class="space-y-3 p-4">
+                    <div class="flex items-start justify-between gap-3">
+                      <div class="min-w-0">
+                        <p class="truncate font-semibold text-base-content" [title]="year.label">
+                          {{ year.label }}
+                        </p>
+                        <p class="font-mono text-xs tabular-nums text-base-content/60">
+                          {{ year.code }}
+                        </p>
+                      </div>
+                      <app-status-badge
+                        [label]="yearStatusLabel(year.status, year.current)"
+                        [tone]="yearBadgeTone(year.status, year.current)"
+                      />
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-2 text-xs text-base-content/75">
+                      <div>
+                        <span class="block text-base-content/50">Période (Dakar)</span>
+                        <span class="tabular-nums font-medium text-base-content">
+                          {{ formatIsoDateForPipe(year.startDate) | dakarDate: 'date' }} –
+                          {{ formatIsoDateForPipe(year.endDate) | dakarDate: 'date' }}
+                        </span>
+                      </div>
+                      <div>
+                        <span class="block text-base-content/50">Découpage</span>
+                        <span class="font-medium text-base-content">
+                          {{ periodSystemLabel(year.periodSystem) }}
+                        </span>
+                      </div>
+                    </div>
+
+                    @if (!year.current) {
+                      <button
+                        type="button"
+                        class="btn btn-outline min-h-11 w-full rounded-lg text-sm"
+                        (click)="selectYearFromList(year)"
+                      >
+                        Sélectionner pour activer
+                      </button>
+                    }
+                  </article>
+                }
+              </div>
+            }
+          </div>
+        }
+      </div>
+    }
+
+    <!-- Tab 3: Sécurité & MFA -->
+    @if (activeTab() === 'security' && security(); as sec) {
+      <div
+        id="settings-panel-security"
+        role="tabpanel"
+        aria-labelledby="settings-tab-security"
+        class="grid grid-cols-1 gap-6 lg:grid-cols-2"
+      >
+        <!-- Statut MFA du compte -->
+        <section class="flex flex-col justify-between space-y-6 rounded-xl border border-base-300/80 bg-base-100 p-6 shadow-xs">
+          <div class="space-y-4">
+            <div class="flex items-start justify-between gap-4 border-b border-base-300/80 pb-4">
+              <div class="min-w-0">
+                <h2 class="font-display text-base font-semibold tracking-tight text-base-content">
+                  Authentification multifacteur (MFA)
+                </h2>
+                <p class="mt-1 text-sm text-base-content/60">
+                  Protection TOTP (6 chiffres) exigée pour les comptes d'administration.
+                </p>
+              </div>
+              <app-status-badge
+                [label]="sec.mfaEnabled ? 'MFA activée' : 'Non configurée'"
+                [tone]="sec.mfaEnabled ? 'success' : 'warning'"
+              />
+            </div>
+
+            <dl class="space-y-3 rounded-xl border border-base-300/70 bg-base-200/40 p-4 text-sm">
+              <div class="flex flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                <dt class="shrink-0 text-base-content/60">Compte connecté</dt>
+                <dd class="truncate font-semibold text-base-content" [title]="sec.fullName">
+                  {{ sec.fullName }}
+                </dd>
+              </div>
+              <div class="flex flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                <dt class="shrink-0 text-base-content/60">Adresse e-mail</dt>
+                <dd class="truncate font-mono text-xs text-base-content" [title]="sec.email">
+                  {{ sec.email }}
+                </dd>
+              </div>
+              <div class="flex flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                <dt class="shrink-0 text-base-content/60">Exigence de politique</dt>
+                <dd class="font-medium text-base-content sm:text-right">
+                  {{ sec.mfaRequiredByPolicy ? 'Obligatoire (rôle sensible)' : 'Recommandée' }}
+                </dd>
+              </div>
+            </dl>
+          </div>
+
+          <div class="pt-2">
+            <button
+              type="button"
+              class="btn btn-outline min-h-11 w-full gap-2 rounded-lg sm:w-auto"
+              (click)="openMfaDrawer()"
+            >
+              <svg lucideKeyRound [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+              <span>Configurer / Réinitialiser MFA</span>
+            </button>
+          </div>
+        </section>
+
+        <!-- Politique de session -->
+        <section class="space-y-4 rounded-xl border border-base-300/80 bg-base-100 p-6 shadow-xs">
+          <div class="flex items-start justify-between gap-4 border-b border-base-300/80 pb-4">
+            <div class="min-w-0">
+              <h2 class="font-display text-base font-semibold tracking-tight text-base-content">
+                Politique de session et verrouillage
+              </h2>
+              <p class="mt-1 text-sm text-base-content/60">
+                Règles appliquées côté serveur pour isoler votre établissement et protéger les accès.
+              </p>
+            </div>
+            <span
+              class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-info/20 bg-info/10 text-info"
+              aria-hidden="true"
+            >
+              <svg lucideClock [strokeWidth]="1.75" class="h-4 w-4 shrink-0"></svg>
+            </span>
+          </div>
+
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div class="rounded-xl border border-base-300/70 bg-base-200/40 p-4">
+              <p class="text-xs font-medium text-base-content/60">Durée du jeton d'accès</p>
+              <p class="mt-1 font-display text-xl font-bold tracking-tight tabular-nums text-base-content">
+                {{ sec.accessTokenMinutes }} min
+              </p>
+              <p class="mt-1 text-xs text-base-content/60">
+                Stocké uniquement en mémoire (zéro localStorage).
+              </p>
+            </div>
+
+            <div class="rounded-xl border border-base-300/70 bg-base-200/40 p-4">
+              <p class="text-xs font-medium text-base-content/60">Session glissante</p>
+              <p class="mt-1 font-display text-xl font-bold tracking-tight tabular-nums text-base-content">
+                {{ sec.refreshSessionDays }} jours
+              </p>
+              <p class="mt-1 text-xs text-base-content/60">
+                Cookie HttpOnly avec rotation et jeton CSRF.
+              </p>
+            </div>
+
+            <div class="rounded-xl border border-base-300/70 bg-base-200/40 p-4">
+              <p class="text-xs font-medium text-base-content/60">Verrouillage compte</p>
+              <p class="mt-1 font-display text-xl font-bold tracking-tight tabular-nums text-base-content">
+                {{ sec.maxLoginFailures }} échecs
+              </p>
+              <p class="mt-1 text-xs text-base-content/60">
+                Blocage automatique de {{ sec.lockoutMinutes }} minutes après tentatives répétées.
+              </p>
+            </div>
+
+            <div class="rounded-xl border border-base-300/70 bg-base-200/40 p-4">
+              <p class="text-xs font-medium text-base-content/60">Validité du défi MFA</p>
+              <p class="mt-1 font-display text-xl font-bold tracking-tight tabular-nums text-base-content">
+                {{ sec.mfaChallengeMinutes }} min
+              </p>
+              <p class="mt-1 text-xs text-base-content/60">
+                Isolation multi-tenant vérifiée côté serveur via JWT.
+              </p>
+            </div>
+          </div>
+        </section>
+      </div>
+    }
+
+    <!-- Tab 4: Préférences -->
+    @if (activeTab() === 'preferences') {
+      <div
+        id="settings-panel-preferences"
+        role="tabpanel"
+        aria-labelledby="settings-tab-preferences"
+        class="grid grid-cols-1 gap-6 lg:grid-cols-2"
+      >
+        <!-- Thème clair / sombre branché sur ThemeService -->
+        <section class="space-y-5 rounded-xl border border-base-300/80 bg-base-100 p-6 shadow-xs">
+          <div class="flex items-start justify-between gap-4 border-b border-base-300/80 pb-4">
+            <div class="min-w-0">
+              <h2 class="font-display text-base font-semibold tracking-tight text-base-content">
+                Apparence de l'interface
+              </h2>
+              <p class="mt-1 text-sm text-base-content/60">
+                Choisissez le thème clair ou sombre (contraste WCAG 2.1 AA garanti).
+              </p>
+            </div>
+            <app-status-badge
+              [label]="themeService.isDark() ? 'Sombre actif' : 'Clair actif'"
+              tone="info"
+            />
+          </div>
+
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2" role="group" aria-label="Sélection du thème">
+            <button
+              type="button"
+              class="flex min-h-11 flex-col items-start gap-2 rounded-xl border p-4 text-left transition-colors duration-150 ease-out motion-reduce:transition-none"
+              [class.border-primary]="!themeService.isDark()"
+              [class.bg-primary/5]="!themeService.isDark()"
+              [class.border-base-300/80]="themeService.isDark()"
+              [class.hover:bg-base-200/50]="themeService.isDark()"
+              [attr.aria-pressed]="!themeService.isDark()"
+              (click)="setTheme('light')"
+            >
+              <span class="flex h-8 w-8 items-center justify-center rounded-lg border border-warning/20 bg-warning/10 text-warning" aria-hidden="true">
+                <svg lucideSun [strokeWidth]="1.75" class="h-4 w-4 shrink-0"></svg>
+              </span>
+              <span class="font-display text-sm font-semibold text-base-content">Thème clair</span>
+              <span class="text-xs text-base-content/60">
+                Fond lumineux haute lisibilité adapté aux postes administratifs.
+              </span>
+            </button>
+
+            <button
+              type="button"
+              class="flex min-h-11 flex-col items-start gap-2 rounded-xl border p-4 text-left transition-colors duration-150 ease-out motion-reduce:transition-none"
+              [class.border-primary]="themeService.isDark()"
+              [class.bg-primary/5]="themeService.isDark()"
+              [class.border-base-300/80]="!themeService.isDark()"
+              [class.hover:bg-base-200/50]="!themeService.isDark()"
+              [attr.aria-pressed]="themeService.isDark()"
+              (click)="setTheme('dark')"
+            >
+              <span class="flex h-8 w-8 items-center justify-center rounded-lg border border-primary/20 bg-primary/10 text-primary" aria-hidden="true">
+                <svg lucideMoon [strokeWidth]="1.75" class="h-4 w-4 shrink-0"></svg>
+              </span>
+              <span class="font-display text-sm font-semibold text-base-content">Thème sombre</span>
+              <span class="text-xs text-base-content/60">
+                Surface nuit marine apaisante avec contrastes OKLCH calibrés.
+              </span>
+            </button>
+          </div>
+
+          <p class="text-xs text-base-content/60">
+            Le thème s'applique immédiatement et reste strictement conservé en mémoire durant votre session.
+          </p>
+        </section>
+
+        <!-- Notifications reçus & absences -->
+        <form
+          id="settings-preferences-form"
+          [formGroup]="preferencesForm"
+          (ngSubmit)="saveActiveTab()"
+          novalidate
+          class="space-y-5 rounded-xl border border-base-300/80 bg-base-100 p-6 shadow-xs"
+        >
+          <div class="flex items-start justify-between gap-4 border-b border-base-300/80 pb-4">
+            <div class="min-w-0">
+              <h2 class="font-display text-base font-semibold tracking-tight text-base-content">
+                Notifications reçus et absences
+              </h2>
+              <p class="mt-1 text-sm text-base-content/60">
+                Choisissez les événements suivis et vos canaux de réception prioritaires.
+              </p>
+            </div>
+            <span
+              class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-secondary/20 bg-secondary/10 text-secondary"
+              aria-hidden="true"
+            >
+              <svg lucideBell [strokeWidth]="1.75" class="h-4 w-4 shrink-0"></svg>
+            </span>
+          </div>
+
+          <div class="space-y-3">
+            <label
+              for="pref-receipts-toggle"
+              class="flex min-h-11 cursor-pointer items-center justify-between gap-4 rounded-xl border border-base-300/70 bg-base-200/30 px-4 py-3"
+            >
+              <div class="min-w-0">
+                <span class="block text-sm font-medium text-base-content">
+                  Notifications de reçus de paiement
+                </span>
+                <span class="block text-xs text-base-content/60">
+                  Confirmation lors de l'émission d'un reçu FCFA ou d'une clôture de caisse.
+                </span>
+              </div>
+              <input
+                id="pref-receipts-toggle"
+                type="checkbox"
+                formControlName="receiptNotificationsEnabled"
+                class="toggle toggle-primary toggle-sm shrink-0"
+              />
+            </label>
+
+            <label
+              for="pref-absences-toggle"
+              class="flex min-h-11 cursor-pointer items-center justify-between gap-4 rounded-xl border border-base-300/70 bg-base-200/30 px-4 py-3"
+            >
+              <div class="min-w-0">
+                <span class="block text-sm font-medium text-base-content">
+                  Alertes d'absences et retards
+                </span>
+                <span class="block text-xs text-base-content/60">
+                  Synthèse quotidienne des absences non justifiées et justificatifs déposés.
+                </span>
+              </div>
+              <input
+                id="pref-absences-toggle"
+                type="checkbox"
+                formControlName="absenceNotificationsEnabled"
+                class="toggle toggle-primary toggle-sm shrink-0"
+              />
+            </label>
+          </div>
+
+          <div class="grid grid-cols-1 gap-4 border-t border-base-300/80 pt-4 sm:grid-cols-2">
+            <div class="space-y-1.5 sm:col-span-2">
+              <label for="pref-channel-select" class="block text-sm font-medium text-base-content">
+                Canal de notification privilégié
+              </label>
+              <select
+                id="pref-channel-select"
+                formControlName="preferredChannel"
+                class="select select-bordered min-h-11 w-full rounded-lg bg-base-100 text-sm text-base-content"
+              >
+                <option value="IN_APP">Dans l'application</option>
+                <option value="EMAIL">E-mail officiel</option>
+                <option value="SMS">SMS (+221)</option>
+                <option value="WHATSAPP">WhatsApp</option>
+              </select>
+            </div>
+
+            <label
+              for="pref-inapp-toggle"
+              class="flex min-h-11 cursor-pointer items-center justify-between gap-2 rounded-lg border border-base-300/70 px-3 py-2 text-sm text-base-content"
+            >
+              <span>In-App</span>
+              <input id="pref-inapp-toggle" type="checkbox" formControlName="inAppEnabled" class="checkbox checkbox-primary checkbox-sm" />
+            </label>
+
+            <label
+              for="pref-email-toggle"
+              class="flex min-h-11 cursor-pointer items-center justify-between gap-2 rounded-lg border border-base-300/70 px-3 py-2 text-sm text-base-content"
+            >
+              <span>E-mail</span>
+              <input id="pref-email-toggle" type="checkbox" formControlName="emailEnabled" class="checkbox checkbox-primary checkbox-sm" />
+            </label>
+
+            <label
+              for="pref-sms-toggle"
+              class="flex min-h-11 cursor-pointer items-center justify-between gap-2 rounded-lg border border-base-300/70 px-3 py-2 text-sm text-base-content"
+            >
+              <span>SMS</span>
+              <input id="pref-sms-toggle" type="checkbox" formControlName="smsEnabled" class="checkbox checkbox-primary checkbox-sm" />
+            </label>
+
+            <label
+              for="pref-whatsapp-toggle"
+              class="flex min-h-11 cursor-pointer items-center justify-between gap-2 rounded-lg border border-base-300/70 px-3 py-2 text-sm text-base-content"
+            >
+              <span>WhatsApp</span>
+              <input id="pref-whatsapp-toggle" type="checkbox" formControlName="whatsappEnabled" class="checkbox checkbox-primary checkbox-sm" />
+            </label>
+          </div>
+        </form>
+      </div>
+    }
+  }
+
+  <!-- Accessible MFA Drawer (Angular CDK FocusTrap + Escape + focus restore) -->
+  <app-drawer
+    [open]="mfaDrawerOpen()"
+    title="Configurer / Réinitialiser MFA"
+    subtitle="Authentification à deux facteurs (TOTP 6 chiffres)"
+    [closeDisabled]="mfaVerifying()"
+    (closed)="closeMfaDrawer()"
+  >
+    <div class="space-y-5">
+      @if (mfaEnrolling()) {
+        <app-skeleton-loader variant="card" [count]="1" ariaLabel="Génération de la clé secrète MFA…" />
+      } @else {
+        @if (mfaError(); as problem) {
+          <app-error-state
+            [problem]="problem"
+            [retryable]="!mfaEnrollment()"
+            [retrying]="mfaEnrolling()"
+            (retry)="startMfaEnrollment()"
+          />
+        }
+
+        @if (mfaEnrollment(); as enroll) {
+          <div class="space-y-4">
+            <div class="rounded-xl border border-base-300/80 bg-base-200/40 p-4 space-y-3">
+              <div class="flex items-center justify-between gap-2">
+                <p class="text-xs font-semibold uppercase tracking-wider text-base-content/60">
+                  1. Clé de configuration TOTP
+                </p>
+                <button
+                  type="button"
+                  class="btn btn-ghost btn-xs min-h-9 gap-1.5 rounded-lg"
+                  (click)="startMfaEnrollment()"
+                  [disabled]="mfaEnrolling() || mfaVerifying()"
+                >
+                  <svg lucideRefreshCw [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0" aria-hidden="true"></svg>
+                  <span>Régénérer</span>
+                </button>
+              </div>
+
+              <p class="text-sm text-base-content/80">
+                Ajoutez cette clé secrète dans votre application d'authentification (Google Authenticator, FreeOTP ou Authy) :
+              </p>
+
+              <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-base-300 bg-base-100 px-3 py-2.5">
+                <code class="break-all font-mono text-sm font-semibold tabular-nums text-base-content">
+                  {{ enroll.secret }}
+                </code>
+                <button
+                  type="button"
+                  class="btn btn-outline btn-xs min-h-9 gap-1.5 rounded-lg whitespace-nowrap"
+                  (click)="copyMfaSecret(enroll.secret)"
+                >
+                  @if (secretCopied()) {
+                    <svg lucideCheck [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0 text-success" aria-hidden="true"></svg>
+                    <span class="text-success">Copié</span>
+                  } @else {
+                    <svg lucideCopy [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0" aria-hidden="true"></svg>
+                    <span>Copier la clé</span>
+                  }
+                </button>
+              </div>
+
+              <p class="text-xs tabular-nums text-base-content/60">
+                Paramètres : TOTP SHA-1 · {{ enroll.digits }} chiffres · renouvellement toutes les {{ enroll.periodSeconds }} s.
+              </p>
+            </div>
+
+            <form
+              id="mfa-verify-form"
+              [formGroup]="mfaVerifyForm"
+              (ngSubmit)="submitMfaVerification()"
+              novalidate
+              class="space-y-2"
+            >
+              <label
+                for="mfa-totp-code"
+                class="block text-sm font-medium text-base-content"
+              >
+                2. Code de vérification à 6 chiffres <span class="text-error" aria-hidden="true">*</span>
+              </label>
+              <input
+                id="mfa-totp-code"
+                type="text"
+                formControlName="code"
+                inputmode="numeric"
+                autocomplete="one-time-code"
+                maxlength="6"
+                placeholder="123456"
+                class="input input-bordered min-h-11 w-full rounded-lg bg-base-100 font-mono text-base tracking-widest tabular-nums text-base-content"
+                [class.input-error]="getMfaCodeError() !== null"
+                [attr.aria-invalid]="getMfaCodeError() !== null"
+                [attr.aria-describedby]="getMfaCodeError() ? 'mfa-code-error' : 'mfa-code-hint'"
+              />
+              @if (getMfaCodeError(); as err) {
+                <p id="mfa-code-error" class="text-xs text-error" role="alert">{{ err }}</p>
+              } @else {
+                <p id="mfa-code-hint" class="text-xs text-base-content/60">
+                  Saisissez le code affiché par votre application pour confirmer l'activation.
+                </p>
+              }
+            </form>
+          </div>
+        }
+      }
+    </div>
+
+    <div drawerFooter class="flex flex-wrap items-center justify-end gap-2">
+      <button
+        type="button"
+        class="btn btn-ghost min-h-11 rounded-lg"
+        [disabled]="mfaVerifying()"
+        (click)="closeMfaDrawer()"
+      >
+        Annuler
+      </button>
+      <button
+        type="submit"
+        form="mfa-verify-form"
+        class="btn btn-primary min-h-11 gap-2 rounded-lg"
+        [disabled]="mfaVerifying() || mfaEnrolling() || !mfaEnrollment()"
+        [attr.aria-busy]="mfaVerifying()"
+      >
+        @if (mfaVerifying()) {
+          <span class="loading loading-spinner loading-xs" aria-hidden="true"></span>
+          <span>Vérification…</span>
+        } @else {
+          <svg lucideShieldCheck [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+          <span>Valider et activer MFA</span>
+        }
+      </button>
+    </div>
+  </app-drawer>
+</section>
