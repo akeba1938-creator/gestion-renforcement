@@ -1,6 +1,6 @@
 import { Routes } from '@angular/router';
 import { devRoutes } from './app.dev-routes';
-import { ADMIN_ROLES, ROUTE_ROLES } from './core/config/role-access.config';
+import { ROUTE_ROLES, SHELL_ROLES } from './core/config/role-access.config';
 import { authGuard } from './core/guards/auth.guard';
 import { roleGuard } from './core/guards/role.guard';
 
@@ -23,12 +23,14 @@ export const routes: Routes = [
     loadComponent: () =>
       import('./layouts/admin/admin-layout').then((m) => m.AdminLayoutComponent),
     canActivate: [authGuard, roleGuard],
-    data: { roles: ADMIN_ROLES },
+    data: { roles: SHELL_ROLES },
     children: [
       { path: '', redirectTo: 'dashboard', pathMatch: 'full' },
       {
         path: 'dashboard',
         title: 'Tableau de bord — École SaaS',
+        canActivate: [roleGuard],
+        data: { roles: ROUTE_ROLES.dashboard },
         loadComponent: () =>
           import('./features/dashboard/dashboard-page').then((m) => m.DashboardPageComponent),
       },
@@ -51,13 +53,17 @@ export const routes: Routes = [
           import('./features/grades/grades-page').then((m) => m.GradesPageComponent),
       },
       {
-        path: 'attendance',
-        title: 'Absences — École SaaS',
+        path: 'absences',
+        title: 'Absences & Présences — École SaaS',
         canActivate: [roleGuard],
-        // Le rôle TEACHER sera rattaché à TeacherLayoutComponent lors de son branchement.
         data: { roles: ROUTE_ROLES.attendance },
         loadComponent: () =>
-          import('./features/attendance/attendance-page').then((m) => m.AttendancePageComponent),
+          import('./features/absences/absences-page').then((m) => m.AbsencesPageComponent),
+      },
+      {
+        path: 'attendance',
+        redirectTo: 'absences',
+        pathMatch: 'full',
       },
       {
         path: 'finances',

@@ -81,7 +81,7 @@ export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
     roles: ROUTE_ROLES.grades,
   },
   {
-    route: '/attendance',
+    route: '/absences',
     label: 'Absences',
     icon: 'attendance',
     group: 'main',

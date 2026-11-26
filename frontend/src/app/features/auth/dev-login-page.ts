@@ -22,6 +22,9 @@ import { AuthService } from '../../core/auth/auth.service';
           <button type="button" class="btn btn-primary w-full" (click)="signInDemo('DIRECTOR')">
             Accéder en mode démonstration (Directeur)
           </button>
+          <button type="button" class="btn btn-outline w-full" (click)="signInDemo('TEACHER')">
+            Accéder en mode démonstration (Enseignant)
+          </button>
           <button type="button" class="btn btn-outline w-full" (click)="signInDemo('CASHIER')">
             Accéder en mode démonstration (Caissier)
           </button>
@@ -34,16 +37,36 @@ export class DevLoginPageComponent {
   private readonly authService = inject(AuthService);
   private readonly router = inject(Router);
 
-  protected signInDemo(role: 'DIRECTOR' | 'CASHIER' = 'DIRECTOR'): void {
-    const isCashier = role === 'CASHIER';
+  protected signInDemo(role: 'DIRECTOR' | 'CASHIER' | 'TEACHER' = 'DIRECTOR'): void {
+    const profileMap = {
+      DIRECTOR: {
+        id: 'usr-demo-director',
+        fullName: 'Direction Démo',
+        email: 'direction@ecole-demo.invalid',
+        targetRoute: '/dashboard',
+      },
+      CASHIER: {
+        id: 'usr-demo-cashier',
+        fullName: 'Caisse Démo',
+        email: 'caisse@ecole-demo.invalid',
+        targetRoute: '/finances',
+      },
+      TEACHER: {
+        id: 'usr-demo-teacher',
+        fullName: 'Enseignant Démo',
+        email: 'enseignant@ecole-demo.invalid',
+        targetRoute: '/absences',
+      },
+    } as const;
+    const profile = profileMap[role];
     this.authService.setSession('demo-memory-token', {
-      id: isCashier ? 'usr-demo-cashier' : 'usr-demo-director',
-      fullName: isCashier ? 'Caisse Démo' : 'Direction Démo',
-      email: isCashier ? 'caisse@ecole-demo.invalid' : 'direction@ecole-demo.invalid',
+      id: profile.id,
+      fullName: profile.fullName,
+      email: profile.email,
       role,
       tenantId: 'tenant-demo-01',
       tenantName: 'Groupe Scolaire Démo',
     });
-    void this.router.navigate([isCashier ? '/finances' : '/dashboard']);
+    void this.router.navigate([profile.targetRoute]);
   }
 }

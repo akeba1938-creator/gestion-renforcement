@@ -53,11 +53,11 @@ describe('AdminLayoutComponent', () => {
 
     expect(links).toEqual(['/dashboard', '/students', '/finances', '/import']);
     expect(links).not.toContain('/grades');
-    expect(links).not.toContain('/attendance');
+    expect(links).not.toContain('/absences');
     expect(links).not.toContain('/settings');
   });
 
-  it('shows all 7 admin navigation entries for DIRECTOR and only permitted ones for SAAS_ADMIN', () => {
+  it('shows all 7 admin navigation entries for DIRECTOR and only permitted ones for SAAS_ADMIN and TEACHER', () => {
     setUserRole(authService, 'DIRECTOR');
     const fixture = TestBed.createComponent(AdminLayoutComponent);
     fixture.detectChanges();
@@ -70,7 +70,7 @@ describe('AdminLayoutComponent', () => {
       '/dashboard',
       '/students',
       '/grades',
-      '/attendance',
+      '/absences',
       '/finances',
       '/import',
       '/settings',
@@ -82,6 +82,13 @@ describe('AdminLayoutComponent', () => {
       (a) => a.getAttribute('href')
     );
     expect(saasAdminLinks).toEqual(['/dashboard', '/finances', '/settings']);
+
+    setUserRole(authService, 'TEACHER');
+    fixture.detectChanges();
+    const teacherLinks = Array.from(el.querySelectorAll<HTMLAnchorElement>('aside nav a')).map(
+      (a) => a.getAttribute('href')
+    );
+    expect(teacherLinks).toEqual(['/absences']);
   });
 
   it('renders the contrasted navy sidebar with academic year selector 2026–2027 and user profile', () => {

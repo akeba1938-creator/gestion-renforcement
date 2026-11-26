@@ -1,0 +1,901 @@
+<div class="space-y-6">
+  <!-- En-tête : titre, date du jour (Africa/Dakar), bouton contour Exporter et unique btn-primary -->
+  <app-page-header title="Absences & Présences" [subtitle]="headerSubtitle()">
+    <div pageHeaderActions class="flex flex-wrap items-center gap-2">
+      <button
+        type="button"
+        class="btn btn-outline btn-sm min-h-11 gap-1.5 rounded-lg sm:min-h-8"
+        [disabled]="exporting() || loading() || records().length === 0"
+        [attr.aria-busy]="exporting()"
+        (click)="exportRegister()"
+      >
+        <svg lucideDownload [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+        Exporter
+      </button>
+
+      <button
+        type="button"
+        class="btn btn-primary btn-sm min-h-11 gap-1.5 rounded-lg sm:min-h-8"
+        (click)="openRollCallDrawer()"
+      >
+        <svg lucidePlus [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+        Faire l'appel
+      </button>
+    </div>
+  </app-page-header>
+
+  <!-- État 6 : Indicateur discret hors-ligne PWA -->
+  @if (!networkStatus.isOnline()) {
+    <div
+      role="status"
+      aria-live="polite"
+      class="flex items-center gap-3 rounded-xl border border-warning/40 bg-base-100 px-4 py-3 text-sm text-base-content"
+    >
+      <svg lucideWifiOff [strokeWidth]="1.75" class="h-4 w-4 shrink-0 text-warning" aria-hidden="true"></svg>
+      <span>
+        Mode hors-ligne détecté : les appels saisis localement seront synchronisés automatiquement
+        dès le retour de la connexion.
+      </span>
+    </div>
+  }
+
+  <!-- Synthèse KPI (4 StatCardComponent max par ligne desktop, encre neutre tabular-nums) -->
+  @if (loading() && !kpis()) {
+    <app-skeleton-loader variant="kpi" [count]="4" ariaLabel="Chargement des indicateurs d'assiduité…" />
+  } @else if (kpis(); as summary) {
+    <section aria-label="Indicateurs d'assiduité et d'absences">
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <app-stat-card
+          label="Taux de présence"
+          [value]="attendanceRateValue()"
+          [trend]="summary.attendanceRateTrendLabel"
+          [trendTone]="attendanceRateTrendTone()"
+          [description]="summary.attendanceRateSubLabel"
+          tone="secondary"
+          icon="attendance"
+        />
+        <app-stat-card
+          label="Absences du jour"
+          [value]="formatCountValue(summary.todayAbsencesCount)"
+          [trend]="summary.todayAbsencesTrendLabel"
+          [trendTone]="summary.todayAbsencesCount > 0 ? 'warning' : 'success'"
+          [description]="summary.todayAbsencesSubLabel"
+          tone="primary"
+          icon="users"
+        />
+        <app-stat-card
+          label="Non justifiées"
+          [value]="formatCountValue(summary.unjustifiedCount)"
+          [trend]="summary.unjustifiedTrendLabel"
+          [trendTone]="summary.unjustifiedCount > 0 ? 'error' : 'success'"
+          [description]="summary.unjustifiedSubLabel"
+          tone="warning"
+          icon="alert"
+        />
+        <app-stat-card
+          label="Retards"
+          [value]="formatCountValue(summary.lateCount)"
+          [trend]="summary.lateTrendLabel"
+          [trendTone]="summary.lateCount > 0 ? 'info' : 'neutral'"
+          [description]="summary.lateSubLabel"
+          tone="info"
+          icon="clock"
+        />
+      </div>
+    </section>
+  }
+
+  <!-- Barre de recherche & filtres synchronisés dans l'URL (queryParams : q, class, status, date) -->
+  <section
+    aria-label="Recherche et filtres des absences et retards"
+    class="rounded-xl border border-base-300/80 bg-base-100 p-4 shadow-xs"
+  >
+    <div class="flex flex-col gap-4 lg:flex-row lg:flex-wrap lg:items-end">
+      <div class="min-w-0 flex-1 space-y-1.5 lg:min-w-60">
+        <label for="absences-search-input" class="block text-xs font-medium text-base-content/75">
+          Rechercher un élève
+        </label>
+        <div class="relative">
+          <svg
+            lucideSearch
+            [strokeWidth]="1.75"
+            class="pointer-events-none absolute top-1/2 left-3 z-10 h-4 w-4 shrink-0 -translate-y-1/2 text-base-content/55"
+            aria-hidden="true"
+          ></svg>
+          <input
+            id="absences-search-input"
+            type="search"
+            [formControl]="searchControl"
+            placeholder="Nom, matricule, classe ou motif…"
+            class="input input-bordered min-h-11 w-full rounded-lg pl-9 pr-9 text-sm sm:min-h-10"
+          />
+          @if (searchControl.value.length > 0) {
+            <button
+              type="button"
+              class="btn btn-ghost btn-xs btn-square absolute top-1/2 right-1.5 z-10 -translate-y-1/2 rounded-lg"
+              aria-label="Effacer la recherche"
+              (click)="clearSearch()"
+            >
+              <svg lucideX [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0" aria-hidden="true"></svg>
+            </button>
+          }
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-3 lg:flex lg:items-end">
+        <div class="w-full space-y-1.5 lg:w-44 lg:shrink-0">
+          <label for="absences-class-filter" class="block text-xs font-medium text-base-content/75">
+            Classe
+          </label>
+          <select
+            id="absences-class-filter"
+            class="select select-bordered min-h-11 w-full rounded-lg text-sm sm:min-h-10"
+            [value]="selectedClass()"
+            (change)="onClassFilterChange($event)"
+          >
+            <option value="">Toutes les classes</option>
+            @for (cls of availableClasses(); track cls.id) {
+              <option [value]="cls.name">{{ cls.name }}</option>
+            }
+          </select>
+        </div>
+
+        <div class="w-full space-y-1.5 lg:w-40 lg:shrink-0">
+          <label for="absences-status-filter" class="block text-xs font-medium text-base-content/75">
+            Statut
+          </label>
+          <select
+            id="absences-status-filter"
+            class="select select-bordered min-h-11 w-full rounded-lg text-sm sm:min-h-10"
+            [value]="selectedStatus()"
+            (change)="onStatusFilterChange($event)"
+          >
+            @for (option of statusFilterOptions; track option.value) {
+              <option [value]="option.value">{{ option.label }}</option>
+            }
+          </select>
+        </div>
+
+        <div class="w-full space-y-1.5 lg:w-40 lg:shrink-0">
+          <label for="absences-date-filter" class="block text-xs font-medium text-base-content/75">
+            Date
+          </label>
+          <input
+            id="absences-date-filter"
+            type="date"
+            class="input input-bordered min-h-11 w-full rounded-lg text-sm tabular-nums sm:min-h-10"
+            [value]="selectedDate()"
+            (change)="onDateFilterChange($event)"
+          />
+        </div>
+      </div>
+
+      @if (hasActiveFilters()) {
+        <div class="w-full lg:w-auto lg:shrink-0">
+          <button
+            type="button"
+            class="btn btn-outline min-h-11 w-full gap-1.5 rounded-lg text-sm sm:min-h-10 lg:w-auto"
+            (click)="resetFilters()"
+          >
+            <svg lucideRotateCcw [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+            Réinitialiser
+          </button>
+        </div>
+      }
+    </div>
+  </section>
+
+  <!-- États 1, 2, 3, 4 et Registre des absences & retards -->
+  @if (loading()) {
+    <!-- État 1 : Chargement (Skeletons dimensionnés zéro CLS) -->
+    <div class="hidden md:block">
+      <app-skeleton-loader
+        variant="table"
+        [count]="6"
+        [columns]="6"
+        ariaLabel="Chargement du registre des absences…"
+      />
+    </div>
+    <div class="md:hidden">
+      <app-skeleton-loader
+        variant="card"
+        [count]="4"
+        ariaLabel="Chargement des absences…"
+      />
+    </div>
+  } @else if (errorProblem(); as problem) {
+    <!-- État 4 : Erreur RFC 9457 avec requestId copiable et bouton Réessayer -->
+    <app-error-state [problem]="problem" [retrying]="loading()" (retry)="reload()" />
+  } @else if (records().length === 0) {
+    @if (hasActiveFilters()) {
+      <!-- État 3 : Vide après filtre -->
+      <app-empty-state
+        variant="filtered"
+        title="Aucun signalement ne correspond à vos critères"
+        description="Modifiez la recherche, la classe, le statut ou la date pour afficher d'autres absences et retards."
+        (action)="resetFilters()"
+      />
+    } @else {
+      <!-- État 2 : Vide initial -->
+      <app-empty-state
+        variant="empty"
+        icon="users"
+        title="Aucune absence ou retard enregistré"
+        description="Lancez un appel rapide pour une classe afin de suivre la présence quotidienne et gérer les justificatifs."
+        actionLabel="Faire l'appel"
+        (action)="openRollCallDrawer()"
+      />
+    }
+  } @else {
+    <section
+      aria-label="Registre des absences et retards"
+      class="rounded-xl border border-base-300/80 bg-base-100 shadow-xs"
+    >
+      <!-- Tableau haute densité Desktop (>= 768px, zéro débordement dès 1280px) -->
+      <div class="hidden overflow-x-auto md:block">
+        <table class="w-full table-auto border-collapse text-left">
+          <thead>
+            <tr
+              class="border-b border-base-300/80 text-xs font-semibold uppercase tracking-wider text-base-content/50"
+            >
+              <th scope="col" class="py-3 pl-4 pr-2 text-left font-semibold min-[1400px]:px-3 min-[1400px]:pl-5">
+                Élève
+              </th>
+              <th scope="col" class="px-2 py-3 text-left font-semibold whitespace-nowrap min-[1400px]:px-3">
+                Classe
+              </th>
+              <th scope="col" class="px-2 py-3 text-left font-semibold whitespace-nowrap min-[1400px]:px-3">
+                Date &amp; créneau
+              </th>
+              <th scope="col" class="px-2 py-3 text-left font-semibold whitespace-nowrap min-[1400px]:px-3">
+                Type / Statut
+              </th>
+              <th scope="col" class="px-2 py-3 text-left font-semibold min-[1400px]:px-3">
+                Justificatif
+              </th>
+              <th scope="col" class="py-3 pl-2 pr-4 text-right font-semibold whitespace-nowrap min-[1400px]:px-3 min-[1400px]:pr-5">
+                Action
+              </th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-base-300/70">
+            @for (record of records(); track record.id) {
+              <tr
+                class="transition-colors duration-150 ease-out hover:bg-base-200/50 motion-reduce:transition-none"
+              >
+                <!-- Élève : avatar initiales + nom tronqué + matricule -->
+                <td class="py-3 pl-4 pr-2 min-[1400px]:px-3 min-[1400px]:pl-5">
+                  <div class="flex items-center gap-2.5">
+                    <span
+                      class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-primary/20 bg-primary/10 font-display text-xs font-semibold text-primary"
+                      aria-hidden="true"
+                    >
+                      {{ record.studentInitials }}
+                    </span>
+                    <div class="min-w-0">
+                      <p
+                        class="max-w-36 truncate text-sm font-semibold text-base-content min-[1400px]:max-w-48"
+                        [title]="record.studentName"
+                      >
+                        {{ record.studentName }}
+                      </p>
+                      <p class="font-mono text-xs tabular-nums text-base-content/60">
+                        {{ record.matricule }}
+                      </p>
+                    </div>
+                  </div>
+                </td>
+
+                <!-- Classe -->
+                <td class="px-2 py-3 whitespace-nowrap min-[1400px]:px-3">
+                  <span
+                    class="inline-flex items-center rounded-lg border border-base-300/80 bg-base-200/60 px-2.5 py-0.5 text-xs font-medium whitespace-nowrap text-base-content/85"
+                  >
+                    {{ record.className }}
+                  </span>
+                </td>
+
+                <!-- Date & créneau (Africa/Dakar) -->
+                <td class="px-2 py-3 whitespace-nowrap min-[1400px]:px-3">
+                  <p class="text-xs font-medium tabular-nums text-base-content">
+                    {{ record.recordedAtUtc | dakarDate: 'date' }}
+                  </p>
+                  <p class="text-xs text-base-content/60">
+                    {{ record.slotLabel }}
+                  </p>
+                </td>
+
+                <!-- Type / Statut (StatusBadgeComponent soft/tinted) -->
+                <td class="px-2 py-3 whitespace-nowrap min-[1400px]:px-3">
+                  <app-status-badge [label]="statusLabel(record)" [tone]="statusTone(record.status)" />
+                </td>
+
+                <!-- Justificatif -->
+                <td class="px-2 py-3 min-[1400px]:px-3">
+                  @if (record.justified) {
+                    <div class="min-w-0">
+                      @if (record.justificationDocumentRef) {
+                        <p
+                          class="max-w-40 truncate font-mono text-xs font-medium tabular-nums text-base-content min-[1400px]:max-w-52"
+                          [title]="record.justificationDocumentRef"
+                        >
+                          {{ record.justificationDocumentRef }}
+                        </p>
+                      }
+                      <p
+                        class="max-w-40 truncate text-xs text-base-content/65 min-[1400px]:max-w-52"
+                        [title]="record.justificationReason ?? ''"
+                      >
+                        {{ record.justificationReason || 'Justifié au secrétariat' }}
+                      </p>
+                    </div>
+                  } @else if (record.status === 'UNJUSTIFIED') {
+                    <span class="text-xs whitespace-nowrap text-base-content/50">
+                      En attente de motif
+                    </span>
+                  } @else {
+                    <p
+                      class="max-w-40 truncate text-xs text-base-content/60 min-[1400px]:max-w-52"
+                      [title]="record.notes ?? 'Aucune note'"
+                    >
+                      {{ record.notes || '—' }}
+                    </p>
+                  }
+                </td>
+
+                <!-- Action Justifier / Détail compacte sans débordement -->
+                <td class="py-3 pl-2 pr-4 text-right whitespace-nowrap min-[1400px]:px-3 min-[1400px]:pr-5">
+                  <button
+                    type="button"
+                    class="inline-flex h-7 items-center justify-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium whitespace-nowrap transition-colors duration-150 ease-out motion-reduce:transition-none"
+                    [class]="
+                      record.status === 'UNJUSTIFIED'
+                        ? 'border-base-300 bg-base-100 text-base-content hover:bg-base-200/70'
+                        : 'border-transparent bg-transparent text-base-content/75 hover:border-base-300/80 hover:bg-base-200/60 hover:text-base-content'
+                    "
+                    [attr.aria-label]="
+                      (record.status === 'UNJUSTIFIED' ? 'Justifier l’absence de ' : 'Voir le détail de ') +
+                      record.studentName
+                    "
+                    (click)="openJustifyDrawer(record)"
+                  >
+                    @if (record.status === 'UNJUSTIFIED') {
+                      <svg lucideCheck [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0" aria-hidden="true"></svg>
+                      Justifier
+                    } @else {
+                      <svg lucideFileText [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0" aria-hidden="true"></svg>
+                      Détail
+                    }
+                  </button>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Cartes empilées Mobile (< 768px, zones tactiles >= 44px) -->
+      <div class="space-y-3 p-4 md:hidden">
+        @for (record of records(); track record.id) {
+          <article
+            class="space-y-3 rounded-xl border border-base-300/80 bg-base-100 p-4 shadow-xs transition-colors duration-150 ease-out hover:border-base-300 motion-reduce:transition-none"
+          >
+            <div class="flex items-start justify-between gap-3">
+              <div class="flex min-w-0 items-center gap-3">
+                <span
+                  class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-primary/20 bg-primary/10 font-display text-xs font-semibold text-primary"
+                  aria-hidden="true"
+                >
+                  {{ record.studentInitials }}
+                </span>
+                <div class="min-w-0">
+                  <p class="truncate text-sm font-semibold text-base-content" [title]="record.studentName">
+                    {{ record.studentName }}
+                  </p>
+                  <p class="truncate font-mono text-xs tabular-nums text-base-content/60">
+                    {{ record.matricule }}
+                  </p>
+                </div>
+              </div>
+              <app-status-badge [label]="statusLabel(record)" [tone]="statusTone(record.status)" />
+            </div>
+
+            <div class="flex flex-wrap items-center justify-between gap-2 text-xs">
+              <span
+                class="inline-flex items-center rounded-lg border border-base-300/80 bg-base-200/60 px-2.5 py-0.5 font-medium whitespace-nowrap text-base-content/85"
+              >
+                {{ record.className }}
+              </span>
+              <span class="tabular-nums text-base-content/65">
+                {{ record.recordedAtUtc | dakarDate: 'date' }} • {{ record.slotLabel }}
+              </span>
+            </div>
+
+            <div class="flex items-center justify-between gap-3 border-t border-base-300/70 pt-3">
+              <p class="min-w-0 flex-1 truncate text-xs text-base-content/65">
+                @if (record.justified) {
+                  {{ record.justificationDocumentRef || record.justificationReason || 'Absence justifiée' }}
+                } @else if (record.status === 'UNJUSTIFIED') {
+                  En attente de justificatif
+                } @else {
+                  {{ record.notes || 'Retard signalé' }}
+                }
+              </p>
+              <button
+                type="button"
+                class="btn btn-outline min-h-11 shrink-0 gap-1.5 rounded-lg px-4"
+                [attr.aria-label]="
+                  (record.status === 'UNJUSTIFIED' ? 'Justifier l’absence de ' : 'Voir le détail de ') +
+                  record.studentName
+                "
+                (click)="openJustifyDrawer(record)"
+              >
+                @if (record.status === 'UNJUSTIFIED') {
+                  <svg lucideCheck [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+                  Justifier
+                } @else {
+                  <svg lucideFileText [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+                  Détail
+                }
+              </button>
+            </div>
+          </article>
+        }
+      </div>
+
+      <!-- Pagination en pied de tableau -->
+      <nav
+        aria-label="Pagination du registre des absences"
+        class="flex flex-col gap-3 border-t border-base-300/80 px-4 py-3 text-xs text-base-content/60 sm:flex-row sm:items-center sm:justify-between sm:px-6"
+      >
+        <p class="tabular-nums">
+          {{ paginationRangeLabel() }}
+        </p>
+
+        <div class="flex items-center justify-between gap-2 sm:justify-end">
+          <button
+            type="button"
+            class="btn btn-outline btn-sm min-h-11 gap-1 rounded-lg sm:min-h-8"
+            [disabled]="isFirstPage() || loading()"
+            (click)="goToPreviousPage()"
+          >
+            <svg lucideChevronLeft [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+            Précédent
+          </button>
+
+          <span class="px-2 font-medium whitespace-nowrap tabular-nums text-base-content">
+            Page {{ currentPageDisplay() }} / {{ totalPages() }}
+          </span>
+
+          <button
+            type="button"
+            class="btn btn-outline btn-sm min-h-11 gap-1 rounded-lg sm:min-h-8"
+            [disabled]="isLastPage() || loading()"
+            (click)="goToNextPage()"
+          >
+            Suivant
+            <svg lucideChevronRight [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+          </button>
+        </div>
+      </nav>
+    </section>
+  }
+</div>
+
+<!-- Drawer latéral : Mode Appel rapide & Mode Justification / Détail -->
+<app-drawer
+  [open]="drawerOpen()"
+  [title]="drawerTitle()"
+  [subtitle]="drawerSubtitle()"
+  [size]="drawerSize()"
+  [closeDisabled]="submitting()"
+  (closed)="closeDrawer()"
+>
+  @if (drawerMode() === 'rollcall') {
+    <div class="space-y-5">
+      @if (rollCallErrorProblem(); as problem) {
+        <app-error-state [problem]="problem" [retryable]="false" />
+      }
+
+      <!-- Paramètres de la séance d'appel -->
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div class="space-y-1.5">
+          <label for="rollcall-class-select" class="block text-sm font-medium text-base-content">
+            Classe
+          </label>
+          <select
+            id="rollcall-class-select"
+            class="select select-bordered min-h-11 w-full rounded-lg text-sm sm:min-h-10"
+            [value]="rollCallClassId()"
+            (change)="onRollCallClassChange($event)"
+          >
+            @for (cls of availableClasses(); track cls.id) {
+              <option [value]="cls.id">{{ cls.name }}</option>
+            }
+          </select>
+        </div>
+
+        <div class="space-y-1.5">
+          <label for="rollcall-date-input" class="block text-sm font-medium text-base-content">
+            Date
+          </label>
+          <input
+            id="rollcall-date-input"
+            type="date"
+            class="input input-bordered min-h-11 w-full rounded-lg text-sm tabular-nums sm:min-h-10"
+            [value]="rollCallDate()"
+            (change)="onRollCallDateChange($event)"
+          />
+        </div>
+
+        <div class="space-y-1.5">
+          <label for="rollcall-slot-select" class="block text-sm font-medium text-base-content">
+            Créneau
+          </label>
+          <select
+            id="rollcall-slot-select"
+            class="select select-bordered min-h-11 w-full rounded-lg text-sm sm:min-h-10"
+            [value]="rollCallTimeSlot()"
+            (change)="onRollCallTimeSlotChange($event)"
+          >
+            @for (slot of timeSlotOptions; track slot.value) {
+              <option [value]="slot.value">{{ slot.label }}</option>
+            }
+          </select>
+        </div>
+      </div>
+
+      <!-- Compteurs temps réel + action Tous présents -->
+      <div
+        class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-base-300/80 bg-base-200/40 px-3.5 py-2.5"
+      >
+        <div class="flex flex-wrap items-center gap-2 text-xs">
+          <span
+            class="inline-flex items-center gap-1.5 rounded-lg border border-success/20 bg-success/10 px-2.5 py-1 font-medium whitespace-nowrap tabular-nums text-success"
+          >
+            {{ rollCallSummary().present }} Présent(s)
+          </span>
+          <span
+            class="inline-flex items-center gap-1.5 rounded-lg border border-error/20 bg-error/10 px-2.5 py-1 font-medium whitespace-nowrap tabular-nums text-error"
+          >
+            {{ rollCallSummary().absent }} Absent(s)
+          </span>
+          <span
+            class="inline-flex items-center gap-1.5 rounded-lg border border-warning/20 bg-warning/10 px-2.5 py-1 font-medium whitespace-nowrap tabular-nums text-warning"
+          >
+            {{ rollCallSummary().late }} Retard(s)
+          </span>
+        </div>
+
+        <button
+          type="button"
+          class="btn btn-ghost btn-xs gap-1 rounded-lg"
+          [disabled]="currentRollCallRoster().length === 0"
+          (click)="markAllPresent()"
+        >
+          <svg lucideCalendarCheck [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0" aria-hidden="true"></svg>
+          Tous présents
+        </button>
+      </div>
+
+      <!-- Liste d'élèves avec bascule rapide Présent / Absent / Retard -->
+      @if (currentRollCallRoster().length === 0) {
+        <div class="rounded-xl border border-base-300/80 bg-base-200/30 p-6 text-center text-sm text-base-content/70">
+          Aucun élève inscrit n'a été chargé pour cette classe.
+        </div>
+      } @else {
+        <ul class="divide-y divide-base-300/70 rounded-xl border border-base-300/80 bg-base-100">
+          @for (student of currentRollCallRoster(); track student.studentId) {
+            <li class="flex flex-col gap-3 p-3.5 sm:flex-row sm:items-center sm:justify-between">
+              <div class="flex min-w-0 items-center gap-2.5">
+                <span
+                  class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-primary/20 bg-primary/10 font-display text-xs font-semibold text-primary"
+                  aria-hidden="true"
+                >
+                  {{ student.studentInitials }}
+                </span>
+                <div class="min-w-0">
+                  <p class="truncate text-sm font-semibold text-base-content" [title]="student.studentName">
+                    {{ student.studentName }}
+                  </p>
+                  <p class="font-mono text-xs tabular-nums text-base-content/60">
+                    {{ student.matricule }}
+                  </p>
+                </div>
+              </div>
+
+              <div class="flex flex-wrap items-center gap-2 sm:justify-end">
+                <div
+                  role="group"
+                  [attr.aria-label]="'Statut de présence pour ' + student.studentName"
+                  class="grid grid-cols-3 gap-1 rounded-lg border border-base-300/80 bg-base-200/40 p-0.5 sm:inline-flex"
+                >
+                  <button
+                    type="button"
+                    class="inline-flex min-h-11 items-center justify-center rounded-lg border px-2.5 text-xs font-medium whitespace-nowrap transition-colors duration-150 ease-out motion-reduce:transition-none sm:min-h-8"
+                    [class]="
+                      getStudentDraftStatus(student.studentId) === 'PRESENT'
+                        ? 'border-success/30 bg-success/10 font-semibold text-success'
+                        : 'border-transparent bg-transparent text-base-content/65 hover:bg-base-100 hover:text-base-content'
+                    "
+                    [attr.aria-pressed]="getStudentDraftStatus(student.studentId) === 'PRESENT'"
+                    (click)="setStudentRollCallStatus(student.studentId, 'PRESENT')"
+                  >
+                    Présent
+                  </button>
+                  <button
+                    type="button"
+                    class="inline-flex min-h-11 items-center justify-center rounded-lg border px-2.5 text-xs font-medium whitespace-nowrap transition-colors duration-150 ease-out motion-reduce:transition-none sm:min-h-8"
+                    [class]="
+                      getStudentDraftStatus(student.studentId) === 'ABSENT'
+                        ? 'border-error/30 bg-error/10 font-semibold text-error'
+                        : 'border-transparent bg-transparent text-base-content/65 hover:bg-base-100 hover:text-base-content'
+                    "
+                    [attr.aria-pressed]="getStudentDraftStatus(student.studentId) === 'ABSENT'"
+                    (click)="setStudentRollCallStatus(student.studentId, 'ABSENT')"
+                  >
+                    Absent
+                  </button>
+                  <button
+                    type="button"
+                    class="inline-flex min-h-11 items-center justify-center rounded-lg border px-2.5 text-xs font-medium whitespace-nowrap transition-colors duration-150 ease-out motion-reduce:transition-none sm:min-h-8"
+                    [class]="
+                      getStudentDraftStatus(student.studentId) === 'LATE'
+                        ? 'border-warning/30 bg-warning/10 font-semibold text-warning'
+                        : 'border-transparent bg-transparent text-base-content/65 hover:bg-base-100 hover:text-base-content'
+                    "
+                    [attr.aria-pressed]="getStudentDraftStatus(student.studentId) === 'LATE'"
+                    (click)="setStudentRollCallStatus(student.studentId, 'LATE')"
+                  >
+                    Retard
+                  </button>
+                </div>
+
+                @if (getStudentDraftStatus(student.studentId) === 'LATE') {
+                  <div class="flex items-center gap-1.5">
+                    <label
+                      [for]="'late-minutes-' + student.studentId"
+                      class="sr-only"
+                    >
+                      Minutes de retard pour {{ student.studentName }}
+                    </label>
+                    <input
+                      [id]="'late-minutes-' + student.studentId"
+                      type="number"
+                      min="1"
+                      max="240"
+                      step="1"
+                      inputmode="numeric"
+                      class="input input-bordered min-h-11 w-20 rounded-lg text-right font-mono text-xs tabular-nums sm:min-h-8"
+                      [value]="getStudentLateMinutes(student.studentId)"
+                      (input)="onStudentLateMinutesInput(student.studentId, $event)"
+                    />
+                    <span class="text-xs text-base-content/60">min</span>
+                  </div>
+                }
+              </div>
+            </li>
+          }
+        </ul>
+      }
+
+      <!-- Observation globale de séance -->
+      <div class="space-y-1.5">
+        <label for="rollcall-notes-input" class="block text-sm font-medium text-base-content">
+          Observation de séance (optionnelle)
+        </label>
+        <textarea
+          id="rollcall-notes-input"
+          rows="2"
+          [value]="rollCallNotes()"
+          (input)="onRollCallNotesInput($event)"
+          placeholder="Ex. Cours de mathématiques — forte pluie sur Dakar…"
+          class="textarea textarea-bordered w-full rounded-lg text-sm"
+        ></textarea>
+      </div>
+    </div>
+  } @else if (drawerMode() === 'justify' && selectedRecord(); as rec) {
+    <div class="space-y-5">
+      @if (justifyErrorProblem(); as problem) {
+        <app-error-state [problem]="problem" [retryable]="false" />
+      }
+
+      <!-- Synthèse du signalement -->
+      <div class="space-y-3 rounded-xl border border-base-300/80 bg-base-200/35 p-4">
+        <div class="flex items-start justify-between gap-3">
+          <div class="flex min-w-0 items-center gap-3">
+            <span
+              class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-primary/20 bg-primary/10 font-display text-sm font-semibold text-primary"
+              aria-hidden="true"
+            >
+              {{ rec.studentInitials }}
+            </span>
+            <div class="min-w-0">
+              <p class="truncate font-display text-base font-semibold text-base-content" [title]="rec.studentName">
+                {{ rec.studentName }}
+              </p>
+              <p class="font-mono text-xs tabular-nums text-base-content/60">
+                {{ rec.matricule }} • {{ rec.className }}
+              </p>
+            </div>
+          </div>
+          <app-status-badge [label]="statusLabel(rec)" [tone]="statusTone(rec.status)" />
+        </div>
+
+        <dl class="grid grid-cols-1 gap-2 border-t border-base-300/70 pt-3 text-xs sm:grid-cols-2">
+          <div class="flex items-center gap-2 text-base-content/75">
+            <svg lucideCalendar [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0 text-base-content/55" aria-hidden="true"></svg>
+            <dt class="sr-only">Date</dt>
+            <dd class="tabular-nums font-medium text-base-content">
+              {{ rec.recordedAtUtc | dakarDate: 'date' }}
+            </dd>
+          </div>
+          <div class="flex items-center gap-2 text-base-content/75">
+            <svg lucideClock [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0 text-base-content/55" aria-hidden="true"></svg>
+            <dt class="sr-only">Créneau</dt>
+            <dd class="font-medium text-base-content">{{ rec.slotLabel }}</dd>
+          </div>
+        </dl>
+      </div>
+
+      @if (rec.justified) {
+        <!-- Détail d'une absence déjà justifiée -->
+        <section aria-labelledby="justification-detail-heading" class="space-y-3 rounded-xl border border-base-300/80 bg-base-100 p-4">
+          <div class="flex items-center gap-2">
+            <svg lucideCircleCheck [strokeWidth]="1.75" class="h-4 w-4 shrink-0 text-success" aria-hidden="true"></svg>
+            <h3 id="justification-detail-heading" class="font-display text-sm font-semibold text-base-content">
+              Justificatif enregistré
+            </h3>
+          </div>
+
+          <dl class="space-y-2.5 text-sm">
+            <div class="space-y-0.5">
+              <dt class="text-xs text-base-content/60">Motif retenu</dt>
+              <dd class="text-sm text-base-content">
+                {{ rec.justificationReason || 'Justifié par la vie scolaire' }}
+              </dd>
+            </div>
+
+            @if (rec.justificationDocumentRef) {
+              <div class="flex items-center justify-between gap-3">
+                <dt class="text-xs text-base-content/60">Pièce justificative</dt>
+                <dd class="font-mono text-xs font-medium tabular-nums text-base-content">
+                  {{ rec.justificationDocumentRef }}
+                </dd>
+              </div>
+            }
+
+            @if (rec.justifiedAtUtc) {
+              <div class="flex items-center justify-between gap-3">
+                <dt class="text-xs text-base-content/60">Validé le (Dakar)</dt>
+                <dd class="text-xs font-medium tabular-nums text-base-content">
+                  {{ rec.justifiedAtUtc | dakarDate: 'datetime' }}
+                </dd>
+              </div>
+            }
+
+            @if (rec.teacherName) {
+              <div class="flex items-center justify-between gap-3">
+                <dt class="text-xs text-base-content/60">Enseignant / Appel</dt>
+                <dd class="text-xs font-medium text-base-content">{{ rec.teacherName }}</dd>
+              </div>
+            }
+          </dl>
+
+          @if (rec.notes) {
+            <div class="rounded-lg border border-base-300/80 bg-base-200/45 px-3 py-2 text-xs text-base-content/75">
+              <span class="font-medium text-base-content">Note :</span> {{ rec.notes }}
+            </div>
+          }
+        </section>
+      } @else {
+        <!-- Formulaire de justification (préservation de saisie sur erreur RFC 9457) -->
+        @if (rec.notes) {
+          <div class="rounded-lg border border-base-300/80 bg-base-200/45 px-3 py-2.5 text-xs text-base-content/75">
+            <span class="font-medium text-base-content">Note d'appel :</span> {{ rec.notes }}
+          </div>
+        }
+
+        <form
+          id="justify-absence-form"
+          [formGroup]="justifyForm"
+          (ngSubmit)="submitJustification()"
+          class="space-y-4"
+          novalidate
+        >
+          <div class="space-y-1.5">
+            <label for="justify-reason-input" class="block text-sm font-medium text-base-content">
+              Motif de justification
+            </label>
+            <textarea
+              id="justify-reason-input"
+              rows="3"
+              formControlName="reason"
+              placeholder="Ex. Certificat médical déposé au secrétariat par le parent…"
+              class="textarea textarea-bordered w-full rounded-lg text-sm"
+              [attr.aria-invalid]="justifyFieldErrorMessage('reason') !== null"
+              aria-describedby="justify-reason-error"
+            ></textarea>
+            @if (justifyFieldErrorMessage('reason'); as err) {
+              <p id="justify-reason-error" class="text-xs text-error">{{ err }}</p>
+            }
+          </div>
+
+          <div class="space-y-1.5">
+            <label for="justify-docref-input" class="block text-sm font-medium text-base-content">
+              Référence pièce ou note justificative (optionnelle)
+            </label>
+            <input
+              id="justify-docref-input"
+              type="text"
+              formControlName="documentRef"
+              placeholder="Ex. CERT-MED-2026-084"
+              class="input input-bordered min-h-11 w-full rounded-lg font-mono text-sm sm:min-h-10"
+              [attr.aria-invalid]="justifyFieldErrorMessage('documentRef') !== null"
+              aria-describedby="justify-docref-error"
+            />
+            @if (justifyFieldErrorMessage('documentRef'); as err) {
+              <p id="justify-docref-error" class="text-xs text-error">{{ err }}</p>
+            }
+          </div>
+        </form>
+      }
+    </div>
+  }
+
+  <div drawerFooter class="flex flex-wrap justify-end gap-2">
+    @if (drawerMode() === 'rollcall') {
+      <button
+        type="button"
+        class="btn btn-ghost min-h-11 rounded-lg sm:min-h-10"
+        [disabled]="submitting()"
+        (click)="closeDrawer()"
+      >
+        Annuler
+      </button>
+      <button
+        type="button"
+        class="btn btn-primary min-h-11 rounded-lg sm:min-h-10"
+        [disabled]="submitting() || currentRollCallRoster().length === 0"
+        [attr.aria-busy]="submitting()"
+        (click)="submitRollCall()"
+      >
+        @if (submitting()) {
+          <span class="loading loading-spinner loading-xs" aria-hidden="true"></span>
+        }
+        Valider l'appel
+      </button>
+    } @else if (selectedRecord(); as rec) {
+      @if (rec.justified) {
+        <button
+          type="button"
+          class="btn btn-outline min-h-11 rounded-lg sm:min-h-10"
+          (click)="closeDrawer()"
+        >
+          Fermer
+        </button>
+      } @else {
+        <button
+          type="button"
+          class="btn btn-ghost min-h-11 rounded-lg sm:min-h-10"
+          [disabled]="submitting()"
+          (click)="closeDrawer()"
+        >
+          Annuler
+        </button>
+        <button
+          type="submit"
+          form="justify-absence-form"
+          class="btn btn-primary min-h-11 rounded-lg sm:min-h-10"
+          [disabled]="submitting()"
+          [attr.aria-busy]="submitting()"
+        >
+          @if (submitting()) {
+            <span class="loading loading-spinner loading-xs" aria-hidden="true"></span>
+          }
+          Enregistrer la justification
+        </button>
+      }
+    }
+  </div>
+</app-drawer>
