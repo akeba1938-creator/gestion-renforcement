@@ -40,6 +40,10 @@
                 {
                   "replace": "src/app/app.dev-routes.ts",
                   "with": "src/app/app.dev-routes.prod.ts"
+                },
+                {
+                  "replace": "src/app/app.dev-providers.ts",
+                  "with": "src/app/app.dev-providers.prod.ts"
                 }
               ],
               "budgets": [

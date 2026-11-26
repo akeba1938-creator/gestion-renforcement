@@ -29,19 +29,19 @@ export type EmptyStateIcon = 'inbox' | 'search' | 'users' | 'wallet' | 'file';
       >
         @switch (resolvedIcon()) {
           @case ('search') {
-            <svg lucideSearchX class="h-6 w-6"></svg>
+            <svg lucideSearchX [strokeWidth]="1.75" class="h-6 w-6 shrink-0"></svg>
           }
           @case ('users') {
-            <svg lucideUsers class="h-6 w-6"></svg>
+            <svg lucideUsers [strokeWidth]="1.75" class="h-6 w-6 shrink-0"></svg>
           }
           @case ('wallet') {
-            <svg lucideWallet class="h-6 w-6"></svg>
+            <svg lucideWallet [strokeWidth]="1.75" class="h-6 w-6 shrink-0"></svg>
           }
           @case ('file') {
-            <svg lucideFileText class="h-6 w-6"></svg>
+            <svg lucideFileText [strokeWidth]="1.75" class="h-6 w-6 shrink-0"></svg>
           }
           @default {
-            <svg lucideInbox class="h-6 w-6"></svg>
+            <svg lucideInbox [strokeWidth]="1.75" class="h-6 w-6 shrink-0"></svg>
           }
         }
       </div>

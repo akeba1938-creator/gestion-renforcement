@@ -1,0 +1,702 @@
+<div class="space-y-6">
+  <!-- En-tête de page : 1 seul btn-primary (+ Nouvel élève) et 1 bouton secondaire Exporter -->
+  <app-page-header title="Élèves" [subtitle]="headerSubtitle()">
+    <div pageHeaderActions class="flex flex-wrap items-center gap-2">
+      <button
+        type="button"
+        class="btn btn-outline btn-sm min-h-11 gap-1.5 rounded-lg sm:min-h-8"
+        [disabled]="exporting() || loading() || students().length === 0"
+        [attr.aria-busy]="exporting()"
+        (click)="exportStudents()"
+      >
+        <svg lucideDownload [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+        Exporter
+      </button>
+
+      <button
+        type="button"
+        class="btn btn-primary btn-sm min-h-11 gap-1.5 rounded-lg sm:min-h-8"
+        (click)="openCreateDrawer()"
+      >
+        <svg lucidePlus [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+        Nouvel élève
+      </button>
+    </div>
+  </app-page-header>
+
+  <!-- État 6 : Bannière discrète hors-ligne PWA -->
+  @if (!networkStatus.isOnline()) {
+    <div
+      role="status"
+      aria-live="polite"
+      class="flex items-center gap-3 rounded-xl border border-warning/40 bg-base-100 px-4 py-3 text-sm text-base-content"
+    >
+      <svg lucideWifiOff [strokeWidth]="1.75" class="h-4 w-4 shrink-0 text-warning" aria-hidden="true"></svg>
+      <span>
+        Mode hors-ligne détecté : la liste affichée correspond aux dernières données disponibles.
+      </span>
+    </div>
+  }
+
+  <!-- Barre de recherche & filtres synchronisés dans l'URL -->
+  <section
+    aria-label="Recherche et filtres du répertoire des élèves"
+    class="rounded-xl border border-base-300/80 bg-base-100 p-4 shadow-xs"
+  >
+    <div class="flex flex-col gap-4 md:flex-row md:items-end">
+      <div class="min-w-0 flex-1 space-y-1.5">
+        <label for="students-search-input" class="block text-xs font-medium text-base-content/75">
+          Rechercher un élève
+        </label>
+        <div class="relative">
+          <svg
+            lucideSearch
+            [strokeWidth]="1.75"
+            class="pointer-events-none absolute top-1/2 left-3 z-10 h-4 w-4 shrink-0 -translate-y-1/2 text-base-content/55"
+            aria-hidden="true"
+          ></svg>
+          <input
+            id="students-search-input"
+            type="search"
+            [formControl]="searchControl"
+            placeholder="Nom, prénom, matricule ou +221…"
+            class="input input-bordered min-h-11 w-full rounded-lg pl-9 pr-9 text-sm sm:min-h-10"
+          />
+          @if (searchControl.value.length > 0) {
+            <button
+              type="button"
+              class="btn btn-ghost btn-xs btn-square absolute top-1/2 right-1.5 z-10 -translate-y-1/2 rounded-lg"
+              aria-label="Effacer la recherche"
+              (click)="clearSearch()"
+            >
+              <svg lucideX [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0" aria-hidden="true"></svg>
+            </button>
+          }
+        </div>
+      </div>
+
+      <div class="w-full space-y-1.5 md:w-52 md:shrink-0">
+        <label for="students-class-filter" class="block text-xs font-medium text-base-content/75">
+          Classe
+        </label>
+        <select
+          id="students-class-filter"
+          class="select select-bordered min-h-11 w-full rounded-lg text-sm sm:min-h-10"
+          [value]="selectedClass()"
+          (change)="onClassFilterChange($event)"
+        >
+          <option value="">Toutes les classes</option>
+          @for (className of availableClasses(); track className) {
+            <option [value]="className">{{ className }}</option>
+          }
+        </select>
+      </div>
+
+      <div class="w-full space-y-1.5 md:w-44 md:shrink-0">
+        <label for="students-status-filter" class="block text-xs font-medium text-base-content/75">
+          Statut
+        </label>
+        <select
+          id="students-status-filter"
+          class="select select-bordered min-h-11 w-full rounded-lg text-sm sm:min-h-10"
+          [value]="selectedStatus()"
+          (change)="onStatusFilterChange($event)"
+        >
+          @for (option of statusFilterOptions; track option.value) {
+            <option [value]="option.value">{{ option.label }}</option>
+          }
+        </select>
+      </div>
+
+      @if (hasActiveFilters()) {
+        <div class="w-full md:w-auto md:shrink-0">
+          <button
+            type="button"
+            class="btn btn-outline min-h-11 w-full gap-1.5 rounded-lg text-sm sm:min-h-10 md:w-auto"
+            (click)="resetFilters()"
+          >
+            <svg lucideRotateCcw [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+            Réinitialiser
+          </button>
+        </div>
+      }
+    </div>
+  </section>
+
+  <!-- États 1, 2, 3, 4 et Liste -->
+  @if (loading()) {
+    <!-- État 1 : Chargement (Skeletons dimensionnés zéro CLS) -->
+    <div class="hidden md:block">
+      <app-skeleton-loader
+        variant="table"
+        [count]="6"
+        [columns]="6"
+        ariaLabel="Chargement de la liste des élèves…"
+      />
+    </div>
+    <div class="md:hidden">
+      <app-skeleton-loader
+        variant="card"
+        [count]="4"
+        ariaLabel="Chargement des fiches élèves…"
+      />
+    </div>
+  } @else if (errorProblem(); as problem) {
+    <!-- État 4 : Erreur RFC 9457 avec requestId copiable et Réessayer -->
+    <app-error-state [problem]="problem" [retrying]="loading()" (retry)="reload()" />
+  } @else if (students().length === 0) {
+    @if (hasActiveFilters()) {
+      <!-- État 3 : Vide après filtre -->
+      <app-empty-state
+        variant="filtered"
+        title="Aucun élève ne correspond à vos critères"
+        description="Modifiez votre recherche ou réinitialisez les filtres de classe et de statut pour afficher l'ensemble du répertoire."
+        (action)="resetFilters()"
+      />
+    } @else {
+      <!-- État 2 : Vide initial -->
+      <app-empty-state
+        variant="empty"
+        icon="users"
+        title="Aucun élève enregistré"
+        description="Inscrivez votre premier élève pour constituer le répertoire de l'établissement et suivre les dossiers."
+        actionLabel="Inscrire un élève"
+        (action)="openCreateDrawer()"
+      />
+    }
+  } @else {
+    <section
+      aria-label="Liste des élèves"
+      class="rounded-xl border border-base-300/80 bg-base-100 shadow-xs"
+    >
+      <!-- Tableau haute densité Desktop (>= 768px) -->
+      <div class="hidden overflow-x-auto md:block">
+        <table class="w-full table-auto border-collapse text-left">
+          <thead>
+            <tr
+              class="border-b border-base-300/80 text-xs font-semibold uppercase tracking-wider text-base-content/50"
+            >
+              <th scope="col" class="py-3 pl-4 pr-2 text-left font-semibold min-[1400px]:px-3 min-[1400px]:pl-5">
+                Élève
+              </th>
+              <th scope="col" class="px-2 py-3 text-left font-semibold whitespace-nowrap min-[1400px]:px-3">
+                Classe
+              </th>
+              <th scope="col" class="px-2 py-3 text-left font-semibold whitespace-nowrap min-[1400px]:px-3">
+                Tuteur &amp; téléphone
+              </th>
+              <th scope="col" class="px-2 py-3 text-left font-semibold whitespace-nowrap min-[1400px]:px-3">
+                Statut
+              </th>
+              <th scope="col" class="px-2 py-3 text-right font-semibold whitespace-nowrap min-[1400px]:px-3">
+                Solde / Situation
+              </th>
+              <th scope="col" class="py-3 pl-2 pr-4 text-right font-semibold whitespace-nowrap min-[1400px]:px-3 min-[1400px]:pr-5">
+                Action
+              </th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-base-300/70">
+            @for (student of students(); track student.id) {
+              <tr
+                class="transition-colors duration-150 ease-out hover:bg-base-200/50 motion-reduce:transition-none"
+              >
+                <!-- Élève : avatar initiales + nom complet + matricule -->
+                <td class="py-3 pl-4 pr-2 min-[1400px]:px-3 min-[1400px]:pl-5">
+                  <div class="flex items-center gap-2.5">
+                    <span
+                      class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-primary/20 bg-primary/10 font-display text-xs font-semibold text-primary"
+                      aria-hidden="true"
+                    >
+                      {{ student.initials }}
+                    </span>
+                    <div class="min-w-0">
+                      <p
+                        class="max-w-36 truncate text-sm font-semibold text-base-content min-[1400px]:max-w-52"
+                        [title]="student.fullName"
+                      >
+                        {{ student.fullName }}
+                      </p>
+                      <p class="font-mono text-xs tabular-nums text-base-content/60">
+                        {{ student.matricule }}
+                      </p>
+                    </div>
+                  </div>
+                </td>
+
+                <!-- Classe -->
+                <td class="px-2 py-3 whitespace-nowrap min-[1400px]:px-3">
+                  <span
+                    class="inline-flex items-center rounded-lg border border-base-300/80 bg-base-200/60 px-2 py-0.5 text-xs font-medium whitespace-nowrap text-base-content/80"
+                  >
+                    {{ student.className }}
+                  </span>
+                </td>
+
+                <!-- Tuteur & téléphone -->
+                <td class="px-2 py-3 min-[1400px]:px-3">
+                  <div class="min-w-0">
+                    <p
+                      class="max-w-36 truncate text-sm font-medium text-base-content min-[1400px]:max-w-44"
+                      [title]="student.guardianName"
+                    >
+                      {{ student.guardianName }}
+                    </p>
+                    <p class="font-mono text-xs whitespace-nowrap tabular-nums text-base-content/60">
+                      {{ student.guardianPhone || '—' }}
+                    </p>
+                  </div>
+                </td>
+
+                <!-- Statut (soft/tinted) -->
+                <td class="px-2 py-3 whitespace-nowrap min-[1400px]:px-3">
+                  <app-status-badge
+                    [label]="statusLabel(student.status)"
+                    [tone]="statusTone(student.status)"
+                  />
+                </td>
+
+                <!-- Solde / Situation (FCFA aligné à droite en encre neutre) -->
+                <td class="px-2 py-3 text-right whitespace-nowrap min-[1400px]:px-3">
+                  <p
+                    class="font-display text-sm font-semibold tracking-tight whitespace-nowrap tabular-nums text-base-content"
+                  >
+                    {{ student.balanceFcfa | fcfa }}
+                  </p>
+                  <p class="text-xs text-base-content/60">
+                    {{ financialStatusLabel(student.financialStatus, student.balanceFcfa) }}
+                  </p>
+                </td>
+
+                <!-- Action Voir (compacte, alignée à droite sans débordement) -->
+                <td class="py-3 pl-2 pr-4 text-right whitespace-nowrap min-[1400px]:px-3 min-[1400px]:pr-5">
+                  <button
+                    type="button"
+                    class="inline-flex h-7 items-center justify-center gap-1.5 rounded-lg border border-transparent bg-transparent px-2.5 py-1 text-xs font-medium whitespace-nowrap text-base-content/75 transition-colors duration-150 ease-out hover:border-base-300/80 hover:bg-base-200/60 hover:text-base-content motion-reduce:transition-none"
+                    [attr.aria-label]="'Voir la fiche de ' + student.fullName"
+                    (click)="openDetailDrawer(student)"
+                  >
+                    <svg lucideEye [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0" aria-hidden="true"></svg>
+                    Voir
+                  </button>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Cartes empilées Mobile (< 768px, zones tactiles >= 44px) -->
+      <div class="space-y-3 p-4 md:hidden">
+        @for (student of students(); track student.id) {
+          <article
+            class="space-y-3 rounded-xl border border-base-300/80 bg-base-100 p-4 shadow-xs transition-colors duration-150 ease-out hover:border-base-300 motion-reduce:transition-none"
+          >
+            <div class="flex items-start justify-between gap-3">
+              <div class="flex min-w-0 items-center gap-3">
+                <span
+                  class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-primary/20 bg-primary/10 font-display text-xs font-semibold text-primary"
+                  aria-hidden="true"
+                >
+                  {{ student.initials }}
+                </span>
+                <div class="min-w-0">
+                  <p
+                    class="truncate text-sm font-semibold text-base-content"
+                    [title]="student.fullName"
+                  >
+                    {{ student.fullName }}
+                  </p>
+                  <p class="truncate font-mono text-xs tabular-nums text-base-content/60">
+                    {{ student.matricule }} • {{ student.className }}
+                  </p>
+                </div>
+              </div>
+              <app-status-badge
+                [label]="statusLabel(student.status)"
+                [tone]="statusTone(student.status)"
+              />
+            </div>
+
+            <div class="flex flex-wrap items-center justify-between gap-2 text-xs text-base-content/70">
+              <span class="truncate font-medium text-base-content" [title]="student.guardianName">
+                {{ student.guardianName }}
+              </span>
+              <span class="font-mono whitespace-nowrap tabular-nums text-base-content/65">
+                {{ student.guardianPhone || '—' }}
+              </span>
+            </div>
+
+            <div class="flex items-center justify-between gap-3 border-t border-base-300/70 pt-3">
+              <div class="min-w-0">
+                <p
+                  class="font-display text-base font-bold tracking-tight whitespace-nowrap tabular-nums text-base-content"
+                >
+                  {{ student.balanceFcfa | fcfa }}
+                </p>
+                <p class="text-xs text-base-content/60">
+                  {{ financialStatusLabel(student.financialStatus, student.balanceFcfa) }}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                class="btn btn-outline min-h-11 gap-1.5 rounded-lg px-4"
+                [attr.aria-label]="'Voir la fiche de ' + student.fullName"
+                (click)="openDetailDrawer(student)"
+              >
+                <svg lucideEye [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+                Voir
+              </button>
+            </div>
+          </article>
+        }
+      </div>
+
+      <!-- Pagination serveur en pied de tableau -->
+      <nav
+        aria-label="Pagination de la liste des élèves"
+        class="flex flex-col gap-3 border-t border-base-300/80 px-4 py-3 text-xs text-base-content/60 sm:flex-row sm:items-center sm:justify-between sm:px-6"
+      >
+        <p class="tabular-nums">
+          {{ paginationRangeLabel() }}
+        </p>
+
+        <div class="flex items-center justify-between gap-2 sm:justify-end">
+          <button
+            type="button"
+            class="btn btn-outline btn-sm min-h-11 gap-1 rounded-lg sm:min-h-8"
+            [disabled]="isFirstPage() || loading()"
+            (click)="goToPreviousPage()"
+          >
+            <svg lucideChevronLeft [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+            Précédent
+          </button>
+
+          <span class="px-2 font-medium whitespace-nowrap tabular-nums text-base-content">
+            Page {{ currentPageDisplay() }} / {{ totalPages() }}
+          </span>
+
+          <button
+            type="button"
+            class="btn btn-outline btn-sm min-h-11 gap-1 rounded-lg sm:min-h-8"
+            [disabled]="isLastPage() || loading()"
+            (click)="goToNextPage()"
+          >
+            Suivant
+            <svg lucideChevronRight [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+          </button>
+        </div>
+      </nav>
+    </section>
+  }
+</div>
+
+<!-- Drawer latéral : Mode Création (+ Nouvel élève) & Mode Fiche détail (Voir) -->
+<app-drawer
+  [open]="drawerOpen()"
+  [title]="drawerTitle()"
+  [subtitle]="drawerSubtitle()"
+  [closeDisabled]="submitting()"
+  (closed)="closeDrawer()"
+>
+  @if (drawerMode() === 'create') {
+    <div class="space-y-4">
+      @if (createErrorProblem(); as problem) {
+        <app-error-state [problem]="problem" [retryable]="false" />
+      }
+
+      <form
+        id="create-student-form"
+        [formGroup]="createForm"
+        (ngSubmit)="submitCreateStudent()"
+        class="space-y-4"
+        novalidate
+      >
+        <div class="space-y-1.5">
+          <label for="student-first-name" class="block text-sm font-medium text-base-content">
+            Prénom
+          </label>
+          <input
+            id="student-first-name"
+            type="text"
+            formControlName="firstName"
+            autocomplete="given-name"
+            class="input input-bordered min-h-11 w-full rounded-lg sm:min-h-10"
+            [attr.aria-invalid]="fieldErrorMessage('firstName') !== null"
+            aria-describedby="student-first-name-error"
+          />
+          @if (fieldErrorMessage('firstName'); as err) {
+            <p id="student-first-name-error" class="text-xs text-error">{{ err }}</p>
+          }
+        </div>
+
+        <div class="space-y-1.5">
+          <label for="student-last-name" class="block text-sm font-medium text-base-content">
+            Nom
+          </label>
+          <input
+            id="student-last-name"
+            type="text"
+            formControlName="lastName"
+            autocomplete="family-name"
+            class="input input-bordered min-h-11 w-full rounded-lg sm:min-h-10"
+            [attr.aria-invalid]="fieldErrorMessage('lastName') !== null"
+            aria-describedby="student-last-name-error"
+          />
+          @if (fieldErrorMessage('lastName'); as err) {
+            <p id="student-last-name-error" class="text-xs text-error">{{ err }}</p>
+          }
+        </div>
+
+        <div class="space-y-1.5">
+          <label for="student-class" class="block text-sm font-medium text-base-content">
+            Classe
+          </label>
+          <select
+            id="student-class"
+            formControlName="className"
+            class="select select-bordered min-h-11 w-full rounded-lg sm:min-h-10"
+          >
+            @for (className of availableClasses(); track className) {
+              <option [value]="className">{{ className }}</option>
+            }
+          </select>
+        </div>
+
+        <div class="space-y-1.5">
+          <label for="student-guardian-name" class="block text-sm font-medium text-base-content">
+            Nom du tuteur
+          </label>
+          <input
+            id="student-guardian-name"
+            type="text"
+            formControlName="guardianName"
+            class="input input-bordered min-h-11 w-full rounded-lg sm:min-h-10"
+            [attr.aria-invalid]="fieldErrorMessage('guardianName') !== null"
+            aria-describedby="student-guardian-name-error"
+          />
+          @if (fieldErrorMessage('guardianName'); as err) {
+            <p id="student-guardian-name-error" class="text-xs text-error">{{ err }}</p>
+          }
+        </div>
+
+        <div class="space-y-1.5">
+          <label for="student-guardian-phone" class="block text-sm font-medium text-base-content">
+            Téléphone du tuteur (format E.164 +221)
+          </label>
+          <input
+            id="student-guardian-phone"
+            type="tel"
+            formControlName="guardianPhone"
+            placeholder="+221770000001"
+            class="input input-bordered min-h-11 w-full rounded-lg font-mono tabular-nums sm:min-h-10"
+            [attr.aria-invalid]="fieldErrorMessage('guardianPhone') !== null"
+            aria-describedby="student-guardian-phone-error"
+          />
+          @if (fieldErrorMessage('guardianPhone'); as err) {
+            <p id="student-guardian-phone-error" class="text-xs text-error">{{ err }}</p>
+          }
+        </div>
+
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div class="space-y-1.5">
+            <label for="student-gender" class="block text-sm font-medium text-base-content">
+              Genre
+            </label>
+            <select
+              id="student-gender"
+              formControlName="gender"
+              class="select select-bordered min-h-11 w-full rounded-lg sm:min-h-10"
+            >
+              @for (option of genderOptions; track option.value) {
+                <option [value]="option.value">{{ option.label }}</option>
+              }
+            </select>
+          </div>
+
+          <div class="space-y-1.5">
+            <label for="student-birth-date" class="block text-sm font-medium text-base-content">
+              Date de naissance
+            </label>
+            <input
+              id="student-birth-date"
+              type="date"
+              formControlName="birthDate"
+              class="input input-bordered min-h-11 w-full rounded-lg tabular-nums sm:min-h-10"
+            />
+          </div>
+        </div>
+      </form>
+    </div>
+  } @else if (drawerMode() === 'detail' && selectedStudent(); as student) {
+    <div class="space-y-5">
+      <!-- En-tête synthétique élève -->
+      <div class="flex items-center justify-between gap-3 rounded-xl border border-base-300/80 bg-base-200/40 p-4">
+        <div class="flex min-w-0 items-center gap-3">
+          <span
+            class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-primary/20 bg-primary/10 font-display text-sm font-bold text-primary"
+            aria-hidden="true"
+          >
+            {{ student.initials }}
+          </span>
+          <div class="min-w-0">
+            <p class="truncate font-display text-base font-semibold text-base-content" [title]="student.fullName">
+              {{ student.fullName }}
+            </p>
+            <p class="font-mono text-xs tabular-nums text-base-content/65">
+              {{ student.matricule }}
+            </p>
+          </div>
+        </div>
+        <app-status-badge
+          [label]="statusLabel(student.status)"
+          [tone]="statusTone(student.status)"
+        />
+      </div>
+
+      <!-- Scolarité & identité -->
+      <section aria-labelledby="detail-academic-heading" class="space-y-3 rounded-xl border border-base-300/80 bg-base-100 p-4">
+        <div class="flex items-center gap-2">
+          <svg lucideGraduationCap [strokeWidth]="1.75" class="h-4 w-4 shrink-0 text-primary" aria-hidden="true"></svg>
+          <h3 id="detail-academic-heading" class="font-display text-sm font-semibold text-base-content">
+            Scolarité &amp; dossier
+          </h3>
+        </div>
+
+        <dl class="grid grid-cols-2 gap-3 text-sm">
+          <div>
+            <dt class="text-xs text-base-content/60">Classe</dt>
+            <dd class="mt-1">
+              <span
+                class="inline-flex items-center rounded-lg border border-base-300/80 bg-base-200/60 px-2 py-0.5 text-xs font-medium whitespace-nowrap text-base-content/85"
+              >
+                {{ student.className }}
+              </span>
+            </dd>
+          </div>
+          <div>
+            <dt class="text-xs text-base-content/60">Genre</dt>
+            <dd class="mt-1 font-medium text-base-content">{{ genderLabel(student.gender) }}</dd>
+          </div>
+          <div>
+            <dt class="text-xs text-base-content/60">Date d'admission</dt>
+            <dd class="mt-1 font-medium tabular-nums text-base-content">
+              {{ student.admissionDate | dakarDate: 'date' }}
+            </dd>
+          </div>
+          <div>
+            <dt class="text-xs text-base-content/60">Date de naissance</dt>
+            <dd class="mt-1 font-medium tabular-nums text-base-content">
+              {{ student.birthDate | dakarDate: 'date' }}
+            </dd>
+          </div>
+        </dl>
+
+        @if (student.statusReason) {
+          <div class="rounded-lg border border-base-300/80 bg-base-200/50 px-3 py-2 text-xs text-base-content/75">
+            <span class="font-medium text-base-content">Motif :</span> {{ student.statusReason }}
+          </div>
+        }
+      </section>
+
+      <!-- Contact tuteur -->
+      <section aria-labelledby="detail-guardian-heading" class="space-y-3 rounded-xl border border-base-300/80 bg-base-100 p-4">
+        <div class="flex items-center gap-2">
+          <svg lucideUser [strokeWidth]="1.75" class="h-4 w-4 shrink-0 text-secondary" aria-hidden="true"></svg>
+          <h3 id="detail-guardian-heading" class="font-display text-sm font-semibold text-base-content">
+            Contact tuteur
+          </h3>
+        </div>
+
+        <dl class="space-y-2.5 text-sm">
+          <div class="flex items-center justify-between gap-3">
+            <dt class="text-xs text-base-content/60">Responsable légal</dt>
+            <dd class="truncate font-medium text-base-content" [title]="student.guardianName">
+              {{ student.guardianName }}
+            </dd>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <dt class="text-xs text-base-content/60">Téléphone</dt>
+            <dd class="inline-flex items-center gap-1.5 font-mono text-xs font-medium tabular-nums text-base-content">
+              <svg lucidePhone [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0 text-base-content/60" aria-hidden="true"></svg>
+              {{ student.guardianPhone || 'Non renseigné' }}
+            </dd>
+          </div>
+          @if (student.address) {
+            <div class="flex items-start justify-between gap-3">
+              <dt class="text-xs text-base-content/60">Adresse</dt>
+              <dd class="text-right text-xs text-base-content/80">{{ student.address }}</dd>
+            </div>
+          }
+        </dl>
+      </section>
+
+      <!-- Situation financière -->
+      <section aria-labelledby="detail-finance-heading" class="space-y-3 rounded-xl border border-base-300/80 bg-base-100 p-4">
+        <div class="flex items-center justify-between gap-2">
+          <div class="flex items-center gap-2">
+            <svg lucideWallet [strokeWidth]="1.75" class="h-4 w-4 shrink-0 text-warning" aria-hidden="true"></svg>
+            <h3 id="detail-finance-heading" class="font-display text-sm font-semibold text-base-content">
+              Situation financière
+            </h3>
+          </div>
+          <app-status-badge
+            [label]="financialStatusLabel(student.financialStatus, student.balanceFcfa)"
+            [tone]="financialStatusTone(student.financialStatus, student.balanceFcfa)"
+          />
+        </div>
+
+        <div class="flex items-end justify-between gap-3 rounded-lg border border-base-300/70 bg-base-200/40 px-3.5 py-3">
+          <div>
+            <p class="text-xs text-base-content/60">Solde restant dû</p>
+            <p class="mt-0.5 font-display text-xl font-bold tracking-tight tabular-nums text-base-content">
+              {{ student.balanceFcfa | fcfa }}
+            </p>
+          </div>
+          <a
+            routerLink="/finance"
+            class="btn btn-outline btn-xs gap-1 rounded-lg"
+            (click)="closeDrawer()"
+          >
+            Voir finances
+            <svg lucideArrowRight [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0" aria-hidden="true"></svg>
+          </a>
+        </div>
+      </section>
+    </div>
+  }
+
+  <div drawerFooter class="flex justify-end gap-2">
+    @if (drawerMode() === 'create') {
+      <button
+        type="button"
+        class="btn btn-ghost min-h-11 rounded-lg sm:min-h-10"
+        [disabled]="submitting()"
+        (click)="closeDrawer()"
+      >
+        Annuler
+      </button>
+      <button
+        type="submit"
+        form="create-student-form"
+        class="btn btn-primary min-h-11 rounded-lg sm:min-h-10"
+        [disabled]="submitting()"
+        [attr.aria-busy]="submitting()"
+      >
+        @if (submitting()) {
+          <span class="loading loading-spinner loading-xs" aria-hidden="true"></span>
+        }
+        Enregistrer l'élève
+      </button>
+    } @else {
+      <button
+        type="button"
+        class="btn btn-outline min-h-11 rounded-lg sm:min-h-10"
+        (click)="closeDrawer()"
+      >
+        Fermer
+      </button>
+    }
+  </div>
+</app-drawer>

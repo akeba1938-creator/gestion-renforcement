@@ -49,7 +49,7 @@ export interface BreadcrumbItem {
             {{ title() }}
           </h1>
           @if (subtitle()) {
-            <p class="mt-1 text-sm text-base-content/75">{{ subtitle() }}</p>
+            <p class="mt-1 text-sm tabular-nums text-base-content/75">{{ subtitle() }}</p>
           }
         </div>
 

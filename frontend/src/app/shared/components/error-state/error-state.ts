@@ -31,7 +31,7 @@ import { ProblemDetail } from '../../../core/models/problem-detail.model';
           class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-error/10 text-error"
           aria-hidden="true"
         >
-          <svg lucideCircleAlert class="h-5 w-5"></svg>
+          <svg lucideCircleAlert [strokeWidth]="1.75" class="h-5 w-5 shrink-0"></svg>
         </span>
 
         <div class="min-w-0 flex-1 space-y-2">
@@ -65,10 +65,10 @@ import { ProblemDetail } from '../../../core/models/problem-detail.model';
                 (click)="copyRequestId(reqId)"
               >
                 @if (copied()) {
-                  <svg lucideCheck class="h-3.5 w-3.5 text-success" aria-hidden="true"></svg>
+                  <svg lucideCheck [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0 text-success" aria-hidden="true"></svg>
                   <span class="text-success">Copié</span>
                 } @else {
-                  <svg lucideCopy class="h-3.5 w-3.5" aria-hidden="true"></svg>
+                  <svg lucideCopy [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0" aria-hidden="true"></svg>
                   <span>Copier</span>
                 }
               </button>
@@ -92,7 +92,7 @@ import { ProblemDetail } from '../../../core/models/problem-detail.model';
                 @if (retrying()) {
                   <span class="loading loading-spinner loading-xs" aria-hidden="true"></span>
                 } @else {
-                  <svg lucideRefreshCw class="h-4 w-4" aria-hidden="true"></svg>
+                  <svg lucideRefreshCw [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
                 }
                 Réessayer
               </button>

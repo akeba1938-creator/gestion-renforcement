@@ -1,6 +1,7 @@
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { ApplicationConfig, provideBrowserGlobalErrorListeners } from '@angular/core';
 import { provideRouter } from '@angular/router';
+import { devProviders } from './app.dev-providers';
 import { routes } from './app.routes';
 import { FINANCE_API } from './core/api/finance.api';
 import { FinanceMockApi } from './core/api/finance-mock.api';
@@ -16,5 +17,6 @@ export const appConfig: ApplicationConfig = {
     provideHttpClient(withInterceptors([authInterceptor, problemDetailInterceptor])),
     { provide: STUDENT_API, useExisting: StudentMockApi },
     { provide: FINANCE_API, useExisting: FinanceMockApi },
+    ...devProviders,
   ],
 };

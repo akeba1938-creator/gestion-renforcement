@@ -66,7 +66,7 @@ let nextDrawerId = 0;
               [disabled]="closeDisabled()"
               (click)="requestClose()"
             >
-              <svg lucideX class="h-5 w-5" aria-hidden="true"></svg>
+              <svg lucideX [strokeWidth]="1.75" class="h-5 w-5 shrink-0" aria-hidden="true"></svg>
             </button>
           </header>
 
