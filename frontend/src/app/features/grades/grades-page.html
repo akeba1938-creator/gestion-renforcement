@@ -1,0 +1,905 @@
+<div class="space-y-6">
+  <!-- En-tête de page : bouton contour Générer bulletins + unique btn-primary (+ Saisir des notes) -->
+  <app-page-header title="Notes et bulletins" [subtitle]="headerSubtitle()">
+    <div pageHeaderActions class="flex flex-wrap items-center gap-2">
+      <button
+        type="button"
+        class="btn btn-outline btn-sm min-h-11 gap-1.5 rounded-lg sm:min-h-8"
+        [disabled]="generatingBulletins() || loading() || reportCards().length === 0"
+        [attr.aria-busy]="generatingBulletins()"
+        (click)="generateBulletins()"
+      >
+        @if (generatingBulletins()) {
+          <span class="loading loading-spinner loading-xs" aria-hidden="true"></span>
+        } @else {
+          <svg lucideFileCheck [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+        }
+        Générer bulletins
+      </button>
+
+      <button
+        type="button"
+        class="btn btn-primary btn-sm min-h-11 gap-1.5 rounded-lg sm:min-h-8"
+        (click)="openGradeEntryDrawer()"
+      >
+        <svg lucidePlus [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+        Saisir des notes
+      </button>
+    </div>
+  </app-page-header>
+
+  <!-- État 6 : Indicateur discret hors-ligne PWA -->
+  @if (!networkStatus.isOnline()) {
+    <div
+      role="status"
+      aria-live="polite"
+      class="flex items-center gap-3 rounded-xl border border-warning/40 bg-base-100 px-4 py-3 text-sm text-base-content"
+    >
+      <svg lucideWifiOff [strokeWidth]="1.75" class="h-4 w-4 shrink-0 text-warning" aria-hidden="true"></svg>
+      <span>
+        Mode hors-ligne détecté : les moyennes affichées correspondent aux dernières données
+        synchronisées ; la saisie de notes sera synchronisée dès le retour du réseau.
+      </span>
+    </div>
+  }
+
+  <!-- Synthèse KPI : 4 StatCardComponent max par ligne desktop, encre neutre text-base-content -->
+  @if (loading() && !kpis()) {
+    <app-skeleton-loader variant="kpi" [count]="4" ariaLabel="Chargement des indicateurs scolaires…" />
+  } @else if (kpis(); as summary) {
+    <section aria-label="Indicateurs académiques du trimestre">
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <app-stat-card
+          label="Moyenne générale"
+          [value]="overallAverageValue()"
+          [trend]="summary.overallAverageTrend"
+          [trendTone]="overallAverageTrendTone()"
+          [description]="summary.overallAverageDescription"
+          tone="primary"
+          icon="graduation"
+        />
+        <app-stat-card
+          label="Taux de réussite (>= 10/20)"
+          [value]="passRateValue()"
+          [trend]="passRateTrendLabel()"
+          [trendTone]="passRateTrendTone()"
+          description="moyenne >= 10/20"
+          tone="secondary"
+          icon="trending"
+        />
+        <app-stat-card
+          label="Notes saisies"
+          [value]="enteredGradesValue()"
+          [trend]="evaluationsTrendLabel()"
+          trendTone="info"
+          description="devoirs & compositions"
+          tone="info"
+          icon="clipboard"
+        />
+        <app-stat-card
+          label="Bulletins prêts"
+          [value]="readyReportCardsValue()"
+          [trend]="readyReportCardsTrendLabel()"
+          [trendTone]="readyReportCardsTrendTone()"
+          description="validés ou verrouillés"
+          tone="warning"
+          icon="file-check"
+        />
+      </div>
+    </section>
+  }
+
+  <!-- Barre de recherche & filtres synchronisés dans l'URL (queryParams) -->
+  <section
+    aria-label="Recherche et filtres des notes et bulletins"
+    class="rounded-xl border border-base-300/80 bg-base-100 p-4 shadow-xs"
+  >
+    <div class="flex flex-col gap-4 lg:flex-row lg:flex-wrap lg:items-end">
+      <div class="min-w-0 flex-1 space-y-1.5 lg:min-w-52">
+        <label for="grades-search-input" class="block text-xs font-medium text-base-content/75">
+          Rechercher un élève
+        </label>
+        <div class="relative">
+          <svg
+            lucideSearch
+            [strokeWidth]="1.75"
+            class="pointer-events-none absolute top-1/2 left-3 z-10 h-4 w-4 shrink-0 -translate-y-1/2 text-base-content/55"
+            aria-hidden="true"
+          ></svg>
+          <input
+            id="grades-search-input"
+            type="search"
+            [formControl]="searchControl"
+            placeholder="Nom, prénom ou matricule…"
+            class="input input-bordered min-h-11 w-full rounded-lg pl-9 pr-9 text-sm sm:min-h-10"
+          />
+          @if (searchControl.value.length > 0) {
+            <button
+              type="button"
+              class="btn btn-ghost btn-xs btn-square absolute top-1/2 right-1.5 z-10 -translate-y-1/2 rounded-lg"
+              aria-label="Effacer la recherche"
+              (click)="clearSearch()"
+            >
+              <svg lucideX [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0" aria-hidden="true"></svg>
+            </button>
+          }
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:flex lg:items-end">
+        <div class="w-full space-y-1.5 lg:w-44 lg:shrink-0">
+          <label for="grades-class-filter" class="block text-xs font-medium text-base-content/75">
+            Classe
+          </label>
+          <select
+            id="grades-class-filter"
+            class="select select-bordered min-h-11 w-full rounded-lg text-sm sm:min-h-10"
+            [value]="selectedClassId()"
+            (change)="onClassFilterChange($event)"
+          >
+            <option value="ALL">Toutes les classes</option>
+            @for (cls of classOptions(); track cls.id) {
+              <option [value]="cls.id">{{ cls.name }}</option>
+            }
+          </select>
+        </div>
+
+        <div class="w-full space-y-1.5 lg:w-44 lg:shrink-0">
+          <label for="grades-subject-filter" class="block text-xs font-medium text-base-content/75">
+            Matière
+          </label>
+          <select
+            id="grades-subject-filter"
+            class="select select-bordered min-h-11 w-full rounded-lg text-sm sm:min-h-10"
+            [value]="selectedSubjectId()"
+            (change)="onSubjectFilterChange($event)"
+          >
+            <option value="ALL">Toutes les matières</option>
+            @for (sub of subjectOptions(); track sub.id) {
+              <option [value]="sub.id">{{ sub.name }}</option>
+            }
+          </select>
+        </div>
+      </div>
+
+      <div class="space-y-1.5 lg:shrink-0">
+        <span class="block text-xs font-medium text-base-content/75">Trimestre</span>
+        <div
+          role="group"
+          aria-label="Sélection du trimestre"
+          class="grid grid-cols-3 rounded-lg border border-base-300/80 bg-base-200/50 p-0.5 sm:inline-flex"
+        >
+          @for (term of termOptions(); track term.code) {
+            <button
+              type="button"
+              class="btn min-h-11 rounded-lg border-0 px-2 text-xs whitespace-nowrap transition-colors duration-150 ease-out motion-reduce:transition-none sm:min-h-9 sm:btn-sm sm:px-3"
+              [class.bg-base-100]="selectedTerm() === term.code"
+              [class.font-semibold]="selectedTerm() === term.code"
+              [class.text-base-content]="selectedTerm() === term.code"
+              [class.shadow-xs]="selectedTerm() === term.code"
+              [class.btn-ghost]="selectedTerm() !== term.code"
+              [attr.aria-pressed]="selectedTerm() === term.code"
+              (click)="selectTerm(term.code)"
+            >
+              {{ term.label }}
+            </button>
+          }
+        </div>
+      </div>
+
+      @if (hasActiveFilters()) {
+        <div class="w-full lg:w-auto lg:shrink-0">
+          <button
+            type="button"
+            class="btn btn-outline min-h-11 w-full gap-1.5 rounded-lg text-sm sm:min-h-10 lg:w-auto"
+            (click)="resetFilters()"
+          >
+            <svg lucideRotateCcw [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+            Réinitialiser
+          </button>
+        </div>
+      }
+    </div>
+  </section>
+
+  <!-- États 1, 2, 3, 4 et Liste des résultats / bulletins -->
+  @if (loading()) {
+    <!-- État 1 : Chargement (Skeletons dimensionnés zéro CLS) -->
+    <div class="hidden md:block">
+      <app-skeleton-loader
+        variant="table"
+        [count]="6"
+        [columns]="6"
+        ariaLabel="Chargement du relevé des notes et bulletins…"
+      />
+    </div>
+    <div class="md:hidden">
+      <app-skeleton-loader
+        variant="card"
+        [count]="4"
+        ariaLabel="Chargement des résultats scolaires…"
+      />
+    </div>
+  } @else if (errorProblem(); as problem) {
+    <!-- État 4 : Erreur RFC 9457 avec requestId copiable et bouton Réessayer -->
+    <app-error-state [problem]="problem" [retrying]="loading()" (retry)="reload()" />
+  } @else if (reportCards().length === 0) {
+    @if (hasActiveFilters()) {
+      <!-- État 3 : Vide après filtre -->
+      <app-empty-state
+        variant="filtered"
+        title="Aucun bulletin ne correspond à vos critères"
+        description="Modifiez la recherche, la classe, la matière ou le trimestre pour consulter d'autres résultats."
+        (action)="resetFilters()"
+      />
+    } @else {
+      <!-- État 2 : Vide initial -->
+      <app-empty-state
+        variant="empty"
+        icon="file"
+        title="Aucune note enregistrée pour ce trimestre"
+        description="Commencez par saisir les notes d'un devoir ou d'une composition pour calculer les moyennes et générer les bulletins."
+        actionLabel="Saisir des notes"
+        (action)="openGradeEntryDrawer()"
+      />
+    }
+  } @else {
+    <section
+      aria-label="Tableau des moyennes et bulletins par élève"
+      class="rounded-xl border border-base-300/80 bg-base-100 shadow-xs"
+    >
+      <!-- Tableau haute densité Desktop (>= 768px, 0 débordement dès 1280px) -->
+      <div class="hidden overflow-x-auto md:block">
+        <table class="w-full table-auto border-collapse text-left">
+          <thead>
+            <tr
+              class="border-b border-base-300/80 text-xs font-semibold uppercase tracking-wider text-base-content/50"
+            >
+              <th scope="col" class="py-3 pl-4 pr-3 text-left font-semibold min-[1400px]:pl-5">
+                Élève
+              </th>
+              <th scope="col" class="px-3 py-3 text-left font-semibold whitespace-nowrap">
+                Classe
+              </th>
+              <th scope="col" class="px-3 py-3 text-right font-semibold whitespace-nowrap">
+                Moyenne
+              </th>
+              <th scope="col" class="px-3 py-3 text-right font-semibold whitespace-nowrap">
+                Rang
+              </th>
+              <th scope="col" class="px-3 py-3 text-left font-semibold whitespace-nowrap">
+                Appréciation
+              </th>
+              <th
+                scope="col"
+                class="py-3 pl-3 pr-4 text-right font-semibold whitespace-nowrap min-[1400px]:pr-5"
+              >
+                Action
+              </th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-base-300/70">
+            @for (card of reportCards(); track card.id) {
+              <tr
+                class="transition-colors duration-150 ease-out hover:bg-base-200/50 motion-reduce:transition-none"
+              >
+                <!-- Élève : avatar initiales + nom tronqué + matricule -->
+                <td class="py-3 pl-4 pr-3 min-[1400px]:pl-5">
+                  <div class="flex items-center gap-2.5">
+                    <span
+                      class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-primary/20 bg-primary/10 font-display text-xs font-semibold text-primary"
+                      aria-hidden="true"
+                    >
+                      {{ card.studentInitials }}
+                    </span>
+                    <div class="min-w-0">
+                      <p
+                        class="max-w-44 truncate text-sm font-semibold text-base-content min-[1400px]:max-w-60"
+                        [title]="card.studentFullName"
+                      >
+                        {{ card.studentFullName }}
+                      </p>
+                      <p class="font-mono text-xs tabular-nums text-base-content/60">
+                        {{ card.studentMatricule }}
+                      </p>
+                    </div>
+                  </div>
+                </td>
+
+                <!-- Classe -->
+                <td class="px-3 py-3 whitespace-nowrap">
+                  <span
+                    class="inline-flex items-center rounded-lg border border-base-300/80 bg-base-200/70 px-2.5 py-0.5 text-xs font-medium whitespace-nowrap text-base-content/85"
+                  >
+                    {{ card.classRoomName }}
+                  </span>
+                </td>
+
+                <!-- Moyenne / 20 (encre neutre, tabular-nums, alignée à droite) -->
+                <td class="px-3 py-3 text-right whitespace-nowrap">
+                  <p class="font-display text-sm font-semibold tracking-tight tabular-nums text-base-content">
+                    {{ formatAverage(card.generalAverage) }}
+                    <span class="font-sans text-xs font-normal text-base-content/55">
+                      / {{ card.gradingScale }}
+                    </span>
+                  </p>
+                  @if (selectedSubjectScoreForCard(card); as subScore) {
+                    <p class="font-mono text-xs tabular-nums text-base-content/60">
+                      {{ subScore.subjectCode }} : {{ formatAverage(subScore.averageScore) }} / 20
+                    </p>
+                  }
+                </td>
+
+                <!-- Rang -->
+                <td class="px-3 py-3 text-right whitespace-nowrap">
+                  <span class="font-mono text-xs font-medium tabular-nums text-base-content">
+                    {{ formatRank(card.rankInClass, card.classSize, card.tiedRank) }}
+                  </span>
+                </td>
+
+                <!-- Appréciation (StatusBadgeComponent soft/tinted) -->
+                <td class="px-3 py-3 whitespace-nowrap">
+                  <app-status-badge
+                    [label]="mentionLabel(card.mention)"
+                    [tone]="mentionTone(card.mention)"
+                  />
+                </td>
+
+                <!-- Action Bulletin compacte sans débordement -->
+                <td class="py-3 pl-3 pr-4 text-right whitespace-nowrap min-[1400px]:pr-5">
+                  <button
+                    type="button"
+                    class="inline-flex h-7 items-center justify-center gap-1.5 rounded-lg border border-transparent bg-transparent px-2.5 py-1 text-xs font-medium whitespace-nowrap text-base-content/75 transition-colors duration-150 ease-out hover:border-base-300/80 hover:bg-base-200/60 hover:text-base-content motion-reduce:transition-none"
+                    [attr.aria-label]="'Voir le bulletin de ' + card.studentFullName"
+                    (click)="openBulletinDrawer(card)"
+                  >
+                    <svg lucideFileText [strokeWidth]="1.75" class="h-3.5 w-3.5 shrink-0" aria-hidden="true"></svg>
+                    Bulletin
+                  </button>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Cartes empilées Mobile (< 768px, zones tactiles >= 44px) -->
+      <div class="space-y-3 p-4 md:hidden">
+        @for (card of reportCards(); track card.id) {
+          <article
+            class="space-y-3 rounded-xl border border-base-300/80 bg-base-100 p-4 shadow-xs transition-colors duration-150 ease-out hover:border-base-300 motion-reduce:transition-none"
+          >
+            <div class="flex items-start justify-between gap-3">
+              <div class="flex min-w-0 items-center gap-3">
+                <span
+                  class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-primary/20 bg-primary/10 font-display text-xs font-semibold text-primary"
+                  aria-hidden="true"
+                >
+                  {{ card.studentInitials }}
+                </span>
+                <div class="min-w-0">
+                  <p
+                    class="truncate text-sm font-semibold text-base-content"
+                    [title]="card.studentFullName"
+                  >
+                    {{ card.studentFullName }}
+                  </p>
+                  <p class="truncate font-mono text-xs tabular-nums text-base-content/60">
+                    {{ card.studentMatricule }}
+                  </p>
+                </div>
+              </div>
+              <app-status-badge
+                [label]="mentionLabel(card.mention)"
+                [tone]="mentionTone(card.mention)"
+              />
+            </div>
+
+            <div class="flex flex-wrap items-center justify-between gap-2 text-xs">
+              <span
+                class="inline-flex items-center rounded-lg border border-base-300/80 bg-base-200/70 px-2.5 py-0.5 font-medium whitespace-nowrap text-base-content/85"
+              >
+                {{ card.classRoomName }}
+              </span>
+              <span class="font-mono font-medium tabular-nums text-base-content/75">
+                Rang {{ formatRank(card.rankInClass, card.classSize, card.tiedRank) }}
+              </span>
+            </div>
+
+            <div class="flex items-center justify-between gap-3 border-t border-base-300/70 pt-3">
+              <div>
+                <p class="text-xs text-base-content/60">Moyenne générale</p>
+                <p
+                  class="font-display text-base font-bold tracking-tight whitespace-nowrap tabular-nums text-base-content"
+                >
+                  {{ formatAverage(card.generalAverage) }}
+                  <span class="font-sans text-xs font-normal text-base-content/55">
+                    / {{ card.gradingScale }}
+                  </span>
+                </p>
+              </div>
+              <button
+                type="button"
+                class="btn btn-outline min-h-11 gap-1.5 rounded-lg px-4"
+                [attr.aria-label]="'Voir le bulletin de ' + card.studentFullName"
+                (click)="openBulletinDrawer(card)"
+              >
+                <svg lucideFileText [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+                Bulletin
+              </button>
+            </div>
+          </article>
+        }
+      </div>
+
+      <!-- Pagination en pied de tableau -->
+      <nav
+        aria-label="Pagination des résultats et bulletins"
+        class="flex flex-col gap-3 border-t border-base-300/80 px-4 py-3 text-xs text-base-content/60 sm:flex-row sm:items-center sm:justify-between sm:px-6"
+      >
+        <p class="tabular-nums">
+          {{ paginationRangeLabel() }}
+        </p>
+
+        <div class="flex items-center justify-between gap-2 sm:justify-end">
+          <button
+            type="button"
+            class="btn btn-outline btn-sm min-h-11 gap-1 rounded-lg sm:min-h-8"
+            [disabled]="isFirstPage() || loading()"
+            (click)="goToPreviousPage()"
+          >
+            <svg lucideChevronLeft [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+            Précédent
+          </button>
+
+          <span class="px-2 font-medium whitespace-nowrap tabular-nums text-base-content">
+            Page {{ currentPageDisplay() }} / {{ totalPages() }}
+          </span>
+
+          <button
+            type="button"
+            class="btn btn-outline btn-sm min-h-11 gap-1 rounded-lg sm:min-h-8"
+            [disabled]="isLastPage() || loading()"
+            (click)="goToNextPage()"
+          >
+            Suivant
+            <svg lucideChevronRight [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+          </button>
+        </div>
+      </nav>
+    </section>
+  }
+</div>
+
+<!-- Drawer latéral : Mode Saisie des notes & Mode Aperçu Bulletin -->
+<app-drawer
+  [open]="drawerOpen()"
+  [title]="drawerTitle()"
+  [subtitle]="drawerSubtitle()"
+  size="lg"
+  [closeDisabled]="submittingGrades()"
+  (closed)="closeDrawer()"
+>
+  @if (drawerMode() === 'entry') {
+    <div class="space-y-5">
+      @if (entryErrorProblem(); as problem) {
+        <app-error-state [problem]="problem" [retryable]="false" />
+      }
+
+      <form
+        id="grade-entry-form"
+        [formGroup]="entryForm"
+        (ngSubmit)="submitGrades()"
+        class="space-y-5"
+        novalidate
+      >
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div class="space-y-1.5">
+            <label for="grades-entry-class" class="block text-sm font-medium text-base-content">
+              Classe
+            </label>
+            <select
+              id="grades-entry-class"
+              formControlName="classRoomId"
+              class="select select-bordered min-h-11 w-full rounded-lg text-sm sm:min-h-10"
+              [attr.aria-invalid]="fieldErrorMessage('classRoomId') !== null"
+              aria-describedby="grades-entry-class-error"
+            >
+              <option value="">Sélectionner une classe…</option>
+              @for (cls of classOptions(); track cls.id) {
+                <option [value]="cls.id">{{ cls.name }}</option>
+              }
+            </select>
+            @if (fieldErrorMessage('classRoomId'); as err) {
+              <p id="grades-entry-class-error" class="text-xs text-error">{{ err }}</p>
+            }
+          </div>
+
+          <div class="space-y-1.5">
+            <label for="grades-entry-subject" class="block text-sm font-medium text-base-content">
+              Matière
+            </label>
+            <select
+              id="grades-entry-subject"
+              formControlName="subjectId"
+              class="select select-bordered min-h-11 w-full rounded-lg text-sm sm:min-h-10"
+              [attr.aria-invalid]="fieldErrorMessage('subjectId') !== null"
+              aria-describedby="grades-entry-subject-error"
+            >
+              <option value="">Sélectionner une matière…</option>
+              @for (sub of subjectOptions(); track sub.id) {
+                <option [value]="sub.id">{{ sub.name }}</option>
+              }
+            </select>
+            @if (fieldErrorMessage('subjectId'); as err) {
+              <p id="grades-entry-subject-error" class="text-xs text-error">{{ err }}</p>
+            }
+          </div>
+
+          <div class="space-y-1.5">
+            <label for="grades-entry-type" class="block text-sm font-medium text-base-content">
+              Type d'évaluation
+            </label>
+            <select
+              id="grades-entry-type"
+              formControlName="evaluationType"
+              class="select select-bordered min-h-11 w-full rounded-lg text-sm sm:min-h-10"
+            >
+              @for (option of evaluationTypeOptions; track option.value) {
+                <option [value]="option.value">{{ option.label }}</option>
+              }
+            </select>
+          </div>
+
+          <div class="space-y-1.5">
+            <label for="grades-entry-coefficient" class="block text-sm font-medium text-base-content">
+              Coefficient
+            </label>
+            <input
+              id="grades-entry-coefficient"
+              type="number"
+              min="1"
+              max="20"
+              step="1"
+              formControlName="coefficient"
+              class="input input-bordered min-h-11 w-full rounded-lg font-mono tabular-nums text-sm sm:min-h-10"
+              [attr.aria-invalid]="fieldErrorMessage('coefficient') !== null"
+              aria-describedby="grades-entry-coefficient-error"
+            />
+            @if (fieldErrorMessage('coefficient'); as err) {
+              <p id="grades-entry-coefficient-error" class="text-xs text-error">{{ err }}</p>
+            }
+          </div>
+
+          <div class="space-y-1.5">
+            <label for="grades-entry-title" class="block text-sm font-medium text-base-content">
+              Intitulé de l'évaluation
+            </label>
+            <input
+              id="grades-entry-title"
+              type="text"
+              formControlName="title"
+              placeholder="Ex. Devoir de Mathématiques — T1"
+              class="input input-bordered min-h-11 w-full rounded-lg text-sm sm:min-h-10"
+              [attr.aria-invalid]="fieldErrorMessage('title') !== null"
+              aria-describedby="grades-entry-title-error"
+            />
+            @if (fieldErrorMessage('title'); as err) {
+              <p id="grades-entry-title-error" class="text-xs text-error">{{ err }}</p>
+            }
+          </div>
+
+          <div class="space-y-1.5">
+            <label for="grades-entry-date" class="block text-sm font-medium text-base-content">
+              Date de l'évaluation
+            </label>
+            <input
+              id="grades-entry-date"
+              type="date"
+              formControlName="evaluationDate"
+              class="input input-bordered min-h-11 w-full rounded-lg font-mono tabular-nums text-sm sm:min-h-10"
+              [attr.aria-invalid]="fieldErrorMessage('evaluationDate') !== null"
+              aria-describedby="grades-entry-date-error"
+            />
+            @if (fieldErrorMessage('evaluationDate'); as err) {
+              <p id="grades-entry-date-error" class="text-xs text-error">{{ err }}</p>
+            }
+          </div>
+        </div>
+
+        <!-- Synthèse en direct & grille de saisie rapide [0..20] -->
+        <section
+          aria-labelledby="quick-grade-entry-heading"
+          class="space-y-3 rounded-xl border border-base-300/80 bg-base-200/30 p-4"
+        >
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="flex items-center gap-2">
+              <svg lucideGraduationCap [strokeWidth]="1.75" class="h-4 w-4 shrink-0 text-primary" aria-hidden="true"></svg>
+              <h3 id="quick-grade-entry-heading" class="font-display text-sm font-semibold text-base-content">
+                Saisie rapide des notes (sur 20)
+              </h3>
+            </div>
+            <div class="flex flex-wrap items-center gap-2 text-xs tabular-nums">
+              <span
+                class="inline-flex items-center rounded-lg border border-base-300/80 bg-base-100 px-2.5 py-0.5 font-medium text-base-content/80"
+              >
+                {{ entryStats().filledCount }} / {{ entryStats().totalStudents }} saisies
+              </span>
+              @if (entryStats().liveAverage !== null) {
+                <span
+                  class="inline-flex items-center rounded-lg border border-primary/20 bg-primary/10 px-2.5 py-0.5 font-semibold text-primary"
+                >
+                  Moy. {{ formatAverage(entryStats().liveAverage) }} / 20
+                </span>
+              }
+            </div>
+          </div>
+
+          @if (entrySubmitAttempted() && entryStats().filledCount === 0 && !entryStats().hasInvalidScore) {
+            <p role="alert" class="text-xs text-error">
+              Veuillez saisir au moins une note comprise entre 0 et 20 avant d'enregistrer.
+            </p>
+          }
+
+          @if (studentsForEntry().length === 0) {
+            <p class="py-4 text-center text-sm text-base-content/65">
+              Aucun élève inscrit dans la classe sélectionnée.
+            </p>
+          } @else {
+            <div class="divide-y divide-base-300/70 rounded-xl border border-base-300/80 bg-base-100">
+              @for (student of studentsForEntry(); track student.studentId) {
+                <div class="flex flex-col gap-2 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
+                  <div class="flex min-w-0 items-center gap-2.5">
+                    <span
+                      class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-primary/20 bg-primary/10 font-display text-xs font-semibold text-primary"
+                      aria-hidden="true"
+                    >
+                      {{ student.studentInitials }}
+                    </span>
+                    <div class="min-w-0">
+                      <label
+                        [for]="'grade-score-' + student.studentId"
+                        class="block truncate text-sm font-medium text-base-content"
+                        [title]="student.studentFullName"
+                      >
+                        {{ student.studentFullName }}
+                      </label>
+                      <p class="font-mono text-xs tabular-nums text-base-content/60">
+                        {{ student.studentMatricule }}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div class="flex flex-col items-end gap-1">
+                    <div class="flex items-center gap-1.5">
+                      <input
+                        [id]="'grade-score-' + student.studentId"
+                        type="text"
+                        inputmode="decimal"
+                        autocomplete="off"
+                        placeholder="0 – 20"
+                        [value]="getStudentScoreValue(student.studentId)"
+                        (input)="onStudentScoreInput(student.studentId, $event)"
+                        class="input input-bordered min-h-11 w-24 rounded-lg text-right font-mono text-sm tabular-nums sm:min-h-9"
+                        [class.input-error]="getStudentScoreError(student.studentId) !== null"
+                        [attr.aria-invalid]="getStudentScoreError(student.studentId) !== null"
+                        [attr.aria-describedby]="'grade-score-err-' + student.studentId"
+                      />
+                      <span class="text-xs font-medium tabular-nums text-base-content/60">/ 20</span>
+                    </div>
+                    @if (getStudentScoreError(student.studentId); as scoreErr) {
+                      <p [id]="'grade-score-err-' + student.studentId" class="text-xs text-error">
+                        {{ scoreErr }}
+                      </p>
+                    }
+                  </div>
+                </div>
+              }
+            </div>
+          }
+        </section>
+      </form>
+    </div>
+  } @else if (drawerMode() === 'bulletin' && selectedReportCard(); as card) {
+    <div class="space-y-5">
+      <!-- En-tête officiel du bulletin (encre neutre sur la moyenne générale) -->
+      <div class="space-y-4 rounded-xl border border-base-300/80 bg-base-200/35 p-4">
+        <div class="flex items-start justify-between gap-3">
+          <div class="flex min-w-0 items-center gap-3">
+            <span
+              class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-primary/20 bg-primary/10 font-display text-sm font-semibold text-primary"
+              aria-hidden="true"
+            >
+              {{ card.studentInitials }}
+            </span>
+            <div class="min-w-0">
+              <p
+                class="truncate font-display text-base font-semibold text-base-content"
+                [title]="card.studentFullName"
+              >
+                {{ card.studentFullName }}
+              </p>
+              <p class="font-mono text-xs tabular-nums text-base-content/65">
+                {{ card.studentMatricule }} • {{ card.classRoomName }}
+              </p>
+            </div>
+          </div>
+          <app-status-badge
+            [label]="reportCardStatusLabel(card.status)"
+            [tone]="reportCardStatusTone(card.status)"
+          />
+        </div>
+
+        <div class="grid grid-cols-2 gap-3 border-t border-base-300/70 pt-3 sm:grid-cols-4">
+          <div>
+            <p class="text-xs text-base-content/60">Moyenne générale</p>
+            <p class="mt-0.5 font-display text-xl font-bold tracking-tight tabular-nums text-base-content">
+              {{ formatAverage(card.generalAverage) }}
+              <span class="font-sans text-xs font-normal text-base-content/55">
+                / {{ card.gradingScale }}
+              </span>
+            </p>
+          </div>
+          <div>
+            <p class="text-xs text-base-content/60">Rang</p>
+            <p class="mt-0.5 font-display text-lg font-bold tracking-tight tabular-nums text-base-content">
+              {{ formatRank(card.rankInClass, card.classSize, card.tiedRank) }}
+            </p>
+          </div>
+          <div>
+            <p class="text-xs text-base-content/60">Moy. classe</p>
+            <p class="mt-0.5 font-mono text-sm font-semibold tabular-nums text-base-content">
+              {{ formatAverage(card.classAverage) }} / 20
+            </p>
+          </div>
+          <div>
+            <p class="text-xs text-base-content/60">Min / Max</p>
+            <p class="mt-0.5 font-mono text-sm font-semibold tabular-nums text-base-content">
+              {{ formatAverage(card.minClassAverage) }} – {{ formatAverage(card.maxClassAverage) }}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Synthèse structurée par matière & coefficients -->
+      <section
+        aria-labelledby="bulletin-subjects-heading"
+        class="space-y-3 rounded-xl border border-base-300/80 bg-base-100 p-4"
+      >
+        <div class="flex items-center justify-between gap-2">
+          <div class="flex items-center gap-2">
+            <svg lucideFileText [strokeWidth]="1.75" class="h-4 w-4 shrink-0 text-primary" aria-hidden="true"></svg>
+            <h3 id="bulletin-subjects-heading" class="font-display text-sm font-semibold text-base-content">
+              Relevé par matière
+            </h3>
+          </div>
+          <span class="font-mono text-xs tabular-nums text-base-content/65">
+            Total coeff. {{ card.totalCoefficients }}
+          </span>
+        </div>
+
+        <div class="divide-y divide-base-300/70 rounded-lg border border-base-300/80">
+          @for (sub of card.subjectResults; track sub.id) {
+            <div class="space-y-1 px-3 py-2.5">
+              <div class="flex items-center justify-between gap-3">
+                <div class="min-w-0">
+                  <p class="truncate text-sm font-medium text-base-content" [title]="sub.subjectName">
+                    {{ sub.subjectName }}
+                  </p>
+                  <p class="font-mono text-xs tabular-nums text-base-content/60">
+                    Coeff. {{ sub.coefficient }} • Classe {{ formatAverage(sub.classSubjectAverage) }} / 20
+                  </p>
+                </div>
+                <p class="shrink-0 font-display text-sm font-bold tabular-nums text-base-content">
+                  {{ formatAverage(sub.averageScore) }}
+                  <span class="font-sans text-xs font-normal text-base-content/55">/ 20</span>
+                </p>
+              </div>
+              @if (sub.teacherAppreciation) {
+                <p class="text-xs text-base-content/70">
+                  {{ sub.teacherAppreciation }}
+                </p>
+              }
+            </div>
+          }
+        </div>
+      </section>
+
+      <!-- Décision et appréciations du conseil de classe -->
+      <section
+        aria-labelledby="bulletin-council-heading"
+        class="space-y-3 rounded-xl border border-base-300/80 bg-base-100 p-4"
+      >
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="flex items-center gap-2">
+            <svg lucideAward [strokeWidth]="1.75" class="h-4 w-4 shrink-0 text-primary" aria-hidden="true"></svg>
+            <h3 id="bulletin-council-heading" class="font-display text-sm font-semibold text-base-content">
+              Appréciation du conseil de classe
+            </h3>
+          </div>
+          <div class="flex flex-wrap items-center gap-1.5">
+            <app-status-badge
+              [label]="mentionLabel(card.mention)"
+              [tone]="mentionTone(card.mention)"
+            />
+            <app-status-badge
+              [label]="councilDecisionLabel(card.councilDecision)"
+              [tone]="councilDecisionTone(card.councilDecision)"
+              [showDot]="false"
+            />
+          </div>
+        </div>
+
+        <dl class="space-y-2.5 text-sm">
+          @if (card.homeroomAppreciation) {
+            <div class="rounded-lg border border-base-300/80 bg-base-200/40 px-3 py-2">
+              <dt class="text-xs font-medium text-base-content/60">Professeur principal</dt>
+              <dd class="mt-0.5 text-xs text-base-content/85">{{ card.homeroomAppreciation }}</dd>
+            </div>
+          }
+          @if (card.directorAppreciation) {
+            <div class="rounded-lg border border-base-300/80 bg-base-200/40 px-3 py-2">
+              <dt class="text-xs font-medium text-base-content/60">Visa de la direction</dt>
+              <dd class="mt-0.5 text-xs text-base-content/85">{{ card.directorAppreciation }}</dd>
+            </div>
+          }
+          @if (card.computedAtUtc) {
+            <div class="flex items-center justify-between gap-3 pt-1 text-xs text-base-content/60">
+              <dt>Dernier calcul (Dakar)</dt>
+              <dd class="tabular-nums">{{ card.computedAtUtc | dakarDate: 'datetime' }}</dd>
+            </div>
+          }
+        </dl>
+      </section>
+    </div>
+  }
+
+  <div drawerFooter class="flex flex-wrap justify-end gap-2">
+    @if (drawerMode() === 'entry') {
+      <button
+        type="button"
+        class="btn btn-ghost min-h-11 rounded-lg sm:min-h-10"
+        [disabled]="submittingGrades()"
+        (click)="closeDrawer()"
+      >
+        Annuler
+      </button>
+      <button
+        type="submit"
+        form="grade-entry-form"
+        class="btn btn-primary min-h-11 rounded-lg sm:min-h-10"
+        [disabled]="submittingGrades()"
+        [attr.aria-busy]="submittingGrades()"
+      >
+        @if (submittingGrades()) {
+          <span class="loading loading-spinner loading-xs" aria-hidden="true"></span>
+        }
+        Enregistrer les notes
+      </button>
+    } @else if (selectedReportCard()) {
+      <button
+        type="button"
+        class="btn btn-ghost min-h-11 rounded-lg sm:min-h-10"
+        (click)="closeDrawer()"
+      >
+        Fermer
+      </button>
+      <button
+        type="button"
+        class="btn btn-outline min-h-11 gap-1.5 rounded-lg sm:min-h-10"
+        (click)="printBulletin()"
+      >
+        <svg lucidePrinter [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+        Imprimer
+      </button>
+      <button
+        type="button"
+        class="btn btn-primary min-h-11 gap-1.5 rounded-lg sm:min-h-10"
+        (click)="downloadBulletin()"
+      >
+        <svg lucideDownload [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+        Télécharger
+      </button>
+    }
+  </div>
+</app-drawer>

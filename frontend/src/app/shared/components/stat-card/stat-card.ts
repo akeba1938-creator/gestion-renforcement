@@ -1,8 +1,12 @@
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
 import {
+  LucideAward,
   LucideCalendarCheck,
   LucideCircleAlert,
+  LucideClipboardCheck,
   LucideClock,
+  LucideFileCheck,
+  LucideGraduationCap,
   LucideTrendingUp,
   LucideUsers,
   LucideWallet,
@@ -18,15 +22,29 @@ export type StatCardTone =
   | 'error'
   | 'info';
 export type StatCardTrendTone = 'success' | 'warning' | 'error' | 'info' | 'neutral';
-export type StatCardIcon = 'users' | 'wallet' | 'alert' | 'attendance' | 'trending' | 'clock';
+export type StatCardIcon =
+  | 'users'
+  | 'wallet'
+  | 'alert'
+  | 'attendance'
+  | 'trending'
+  | 'clock'
+  | 'graduation'
+  | 'award'
+  | 'clipboard'
+  | 'file-check';
 
 @Component({
   selector: 'app-stat-card',
   standalone: true,
   imports: [
+    LucideAward,
     LucideCalendarCheck,
     LucideCircleAlert,
+    LucideClipboardCheck,
     LucideClock,
+    LucideFileCheck,
+    LucideGraduationCap,
     LucideTrendingUp,
     LucideUsers,
     LucideWallet,
@@ -60,6 +78,18 @@ export type StatCardIcon = 'users' | 'wallet' | 'alert' | 'attendance' | 'trendi
               }
               @case ('clock') {
                 <svg lucideClock [strokeWidth]="1.75" class="h-4 w-4 shrink-0"></svg>
+              }
+              @case ('graduation') {
+                <svg lucideGraduationCap [strokeWidth]="1.75" class="h-4 w-4 shrink-0"></svg>
+              }
+              @case ('award') {
+                <svg lucideAward [strokeWidth]="1.75" class="h-4 w-4 shrink-0"></svg>
+              }
+              @case ('clipboard') {
+                <svg lucideClipboardCheck [strokeWidth]="1.75" class="h-4 w-4 shrink-0"></svg>
+              }
+              @case ('file-check') {
+                <svg lucideFileCheck [strokeWidth]="1.75" class="h-4 w-4 shrink-0"></svg>
               }
             }
           </span>
