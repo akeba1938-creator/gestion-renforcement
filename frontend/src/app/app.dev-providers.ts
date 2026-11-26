@@ -5,6 +5,8 @@ import { FINANCES_DEMO_FALLBACK } from './features/finances/data-access/finances
 import { FinancesDevFallbackService } from './features/finances/data-access/finances-dev-fallback.service';
 import { GRADES_DEMO_FALLBACK } from './features/grades/data-access/grades-demo-fallback.token';
 import { GradesDevFallbackService } from './features/grades/data-access/grades-dev-fallback.service';
+import { IMPORT_DEMO_FALLBACK } from './features/import/data-access/import-demo-fallback.token';
+import { ImportDevFallbackService } from './features/import/data-access/import-dev-fallback.service';
 import { STUDENTS_DEMO_FALLBACK } from './features/students/data-access/students-demo-fallback.token';
 import { StudentsDevFallbackService } from './features/students/data-access/students-dev-fallback.service';
 
@@ -17,4 +19,5 @@ export const devProviders: readonly Provider[] = [
   { provide: FINANCES_DEMO_FALLBACK, useExisting: FinancesDevFallbackService },
   { provide: ABSENCES_DEMO_FALLBACK, useExisting: AbsencesDevFallbackService },
   { provide: GRADES_DEMO_FALLBACK, useExisting: GradesDevFallbackService },
+  { provide: IMPORT_DEMO_FALLBACK, useExisting: ImportDevFallbackService },
 ];

@@ -1,0 +1,799 @@
+<div class="space-y-6">
+  <!-- En-tête de page : bouton contour Télécharger le modèle CSV + unique btn-primary Lancer l'import -->
+  <app-page-header title="Import Excel & CSV" [subtitle]="headerSubtitle()">
+    <div
+      pageHeaderActions
+      class="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center"
+    >
+      <button
+        type="button"
+        class="btn btn-outline btn-sm min-h-11 w-full gap-1.5 rounded-lg sm:min-h-8 sm:w-auto"
+        [disabled]="downloadingTemplate() || executing() || !networkStatus.isOnline()"
+        [attr.aria-busy]="downloadingTemplate()"
+        (click)="downloadTemplate()"
+      >
+        @if (downloadingTemplate()) {
+          <span class="loading loading-spinner loading-xs" aria-hidden="true"></span>
+        } @else {
+          <svg lucideDownload [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+        }
+        Télécharger le modèle CSV
+      </button>
+
+      <button
+        type="button"
+        class="btn btn-primary btn-sm min-h-11 w-full gap-1.5 rounded-lg sm:min-h-8 sm:w-auto"
+        [disabled]="!canLaunchImport()"
+        [attr.aria-busy]="executing()"
+        (click)="launchImport()"
+      >
+        @if (executing()) {
+          <span class="loading loading-spinner loading-xs" aria-hidden="true"></span>
+          Importation…
+        } @else {
+          <svg lucideUpload [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+          Lancer l'import
+        }
+      </button>
+    </div>
+  </app-page-header>
+
+  <!-- État 6 : Bannière discrète hors-ligne PWA -->
+  @if (!networkStatus.isOnline()) {
+    <div
+      role="status"
+      aria-live="polite"
+      class="flex items-center gap-3 rounded-xl border border-warning/40 bg-base-100 px-4 py-3 text-sm text-base-content"
+    >
+      <svg lucideWifiOff [strokeWidth]="1.75" class="h-4 w-4 shrink-0 text-warning" aria-hidden="true"></svg>
+      <span>
+        Mode hors-ligne détecté : une connexion réseau est requise pour analyser ou exécuter un import.
+      </span>
+    </div>
+  }
+
+  <!-- Stepper clair en 3 étapes -->
+  <nav
+    aria-label="Étapes de l'import"
+    class="rounded-xl border border-base-300/80 bg-base-100 p-4 shadow-xs"
+  >
+    <ol class="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
+      @for (step of steps; track step.number) {
+        <li
+          class="flex items-center gap-3 rounded-lg border px-3 py-2.5 transition-colors duration-150 ease-out motion-reduce:transition-none"
+          [class.border-primary/30]="currentStep() === step.number"
+          [class.bg-primary/5]="currentStep() === step.number"
+          [class.border-success/25]="currentStep() > step.number"
+          [class.bg-success/5]="currentStep() > step.number"
+          [class.border-base-300/70]="currentStep() < step.number"
+          [class.bg-base-200/40]="currentStep() < step.number"
+          [attr.aria-current]="currentStep() === step.number ? 'step' : null"
+        >
+          <span
+            class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border text-xs font-semibold tabular-nums"
+            [class.border-primary/30]="currentStep() === step.number"
+            [class.bg-primary/10]="currentStep() === step.number"
+            [class.text-primary]="currentStep() === step.number"
+            [class.border-success/30]="currentStep() > step.number"
+            [class.bg-success/10]="currentStep() > step.number"
+            [class.text-success]="currentStep() > step.number"
+            [class.border-base-300]="currentStep() < step.number"
+            [class.bg-base-100]="currentStep() < step.number"
+            [class.text-base-content/55]="currentStep() < step.number"
+            aria-hidden="true"
+          >
+            @if (currentStep() > step.number) {
+              <svg lucideCheck [strokeWidth]="1.75" class="h-4 w-4 shrink-0"></svg>
+            } @else {
+              {{ step.number }}
+            }
+          </span>
+
+          <div class="min-w-0">
+            <p
+              class="truncate text-sm font-medium"
+              [class.text-base-content]="currentStep() >= step.number"
+              [class.text-base-content/55]="currentStep() < step.number"
+              [title]="step.label"
+            >
+              {{ step.label }}
+            </p>
+          </div>
+        </li>
+      }
+    </ol>
+  </nav>
+
+  <!-- État 4 : Erreur RFC 9457 avec requestId copiable et Réessayer -->
+  @if (errorProblem(); as problem) {
+    <app-error-state [problem]="problem" [retrying]="isBusy()" (retry)="retryLastAction()" />
+  }
+
+  <!-- État 1 : Skeletons pendant analyse ou exécution (zéro CLS) -->
+  @if (analyzing() || executing()) {
+    <div class="space-y-4" aria-live="polite">
+      <div class="rounded-xl border border-base-300/80 bg-base-100 p-4 shadow-xs">
+        <div class="flex items-center gap-3">
+          <span class="loading loading-spinner loading-sm text-primary" aria-hidden="true"></span>
+          <p class="text-sm font-medium text-base-content">
+            @if (analyzing()) {
+              Analyse et validation du fichier {{ selectedFileName() }} en cours…
+            } @else {
+              Exécution du lot {{ currentJob()?.jobNumber }} en cours…
+            }
+          </p>
+        </div>
+      </div>
+
+      <app-skeleton-loader
+        variant="kpi"
+        [count]="3"
+        ariaLabel="Chargement des indicateurs d'import…"
+      />
+
+      <div class="hidden md:block">
+        <app-skeleton-loader
+          variant="table"
+          [count]="5"
+          [columns]="6"
+          ariaLabel="Chargement de la prévisualisation des lignes…"
+        />
+      </div>
+      <div class="md:hidden">
+        <app-skeleton-loader
+          variant="card"
+          [count]="3"
+          ariaLabel="Chargement de la prévisualisation mobile…"
+        />
+      </div>
+    </div>
+  } @else if (currentStep() === 1) {
+    <!-- ÉTAPE 1 : Configuration & Zone de dépôt accessible -->
+    <section
+      aria-labelledby="import-step1-heading"
+      class="space-y-6 rounded-xl border border-base-300/80 bg-base-100 p-4 shadow-xs sm:p-6"
+    >
+      <div class="space-y-1">
+        <h2
+          id="import-step1-heading"
+          class="font-display text-base font-semibold tracking-tight text-base-content"
+        >
+          Sélectionner un fichier à importer
+        </h2>
+        <p class="text-sm text-base-content/65">
+          {{ activeImportTypeMeta().description }}
+        </p>
+      </div>
+
+      <!-- Paramètres du lot (labels persistants au-dessus) -->
+      <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div class="space-y-1.5">
+          <label for="import-type-select" class="block text-xs font-medium text-base-content/75">
+            Type de données à importer
+          </label>
+          <select
+            id="import-type-select"
+            class="select select-bordered min-h-11 w-full rounded-lg text-sm sm:min-h-10"
+            [value]="selectedImportType()"
+            (change)="onImportTypeChange($event)"
+          >
+            @for (option of importTypeOptions; track option.value) {
+              <option [value]="option.value">{{ option.label }}</option>
+            }
+          </select>
+        </div>
+
+        <div class="space-y-1.5">
+          <label
+            for="import-validation-mode-select"
+            class="block text-xs font-medium text-base-content/75"
+          >
+            Politique de validation
+          </label>
+          <select
+            id="import-validation-mode-select"
+            class="select select-bordered min-h-11 w-full rounded-lg text-sm sm:min-h-10"
+            [value]="selectedValidationMode()"
+            (change)="onValidationModeChange($event)"
+          >
+            @for (mode of validationModeOptions; track mode.value) {
+              <option [value]="mode.value">{{ mode.label }}</option>
+            }
+          </select>
+        </div>
+      </div>
+
+      <!-- Zone de dépôt accessible (drag & drop + clavier + bouton parcourir) -->
+      <div class="space-y-2">
+        <input
+          #fileInput
+          id="import-file-input"
+          type="file"
+          class="sr-only"
+          [accept]="acceptAttribute"
+          aria-describedby="import-dropzone-help import-file-error"
+          (change)="onFileInputChange($event)"
+        />
+
+        <div
+          role="button"
+          tabindex="0"
+          aria-label="Zone de dépôt de fichier CSV ou Excel. Appuyez sur Entrée ou cliquez pour parcourir."
+          [attr.aria-invalid]="fileValidationError() !== null"
+          class="flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-10 text-center transition-colors duration-150 ease-out motion-reduce:transition-none"
+          [class.border-primary]="isDragging()"
+          [class.bg-primary/5]="isDragging()"
+          [class.border-error/60]="!isDragging() && fileValidationError() !== null"
+          [class.bg-error/5]="!isDragging() && fileValidationError() !== null"
+          [class.border-base-content/20]="!isDragging() && fileValidationError() === null"
+          [class.bg-base-200/35]="!isDragging() && fileValidationError() === null"
+          [class.hover:border-primary/50]="!isDragging() && fileValidationError() === null"
+          [class.hover:bg-base-200/60]="!isDragging() && fileValidationError() === null"
+          (click)="openFilePicker()"
+          (keydown)="onDropzoneKeydown($event)"
+          (dragenter)="onDragEnter($event)"
+          (dragover)="onDragOver($event)"
+          (dragleave)="onDragLeave($event)"
+          (drop)="onFileDrop($event)"
+        >
+          <span
+            class="mb-4 flex h-12 w-12 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 text-primary"
+            aria-hidden="true"
+          >
+            <svg lucideUpload [strokeWidth]="1.75" class="h-6 w-6 shrink-0"></svg>
+          </span>
+
+          <p class="font-display text-sm font-semibold text-base-content sm:text-base">
+            Glissez-déposez votre fichier ici
+          </p>
+          <p id="import-dropzone-help" class="mt-1 text-xs text-base-content/65 sm:text-sm">
+            Formats acceptés : <span class="font-mono font-medium">.csv</span> (UTF-8) et
+            <span class="font-mono font-medium">.xlsx</span> • Taille maximale :
+            <span class="tabular-nums font-medium">{{ maxFileSizeLabel }}</span>
+          </p>
+
+          <button
+            type="button"
+            class="btn btn-outline btn-sm mt-5 min-h-11 gap-2 rounded-lg px-4 sm:min-h-9"
+            [disabled]="!networkStatus.isOnline()"
+            (click)="openFilePicker($event)"
+          >
+            <svg lucideFileText [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+            Parcourir un fichier
+          </button>
+        </div>
+
+        @if (fileValidationError(); as validationErr) {
+          <div
+            id="import-file-error"
+            role="alert"
+            class="flex items-start gap-2 rounded-lg border border-error/30 bg-error/10 px-3.5 py-2.5 text-xs font-medium text-error"
+          >
+            <svg
+              lucideCircleAlert
+              [strokeWidth]="1.75"
+              class="mt-0.5 h-4 w-4 shrink-0"
+              aria-hidden="true"
+            ></svg>
+            <span>{{ validationErr }}</span>
+          </div>
+        }
+      </div>
+
+      <!-- Fichier sélectionné conservé en cas de retour depuis l'étape 2 ou d'erreur serveur -->
+      @if (selectedFile(); as file) {
+        <div
+          class="flex flex-col gap-3 rounded-xl border border-base-300/80 bg-base-200/40 p-4 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <div class="flex min-w-0 items-center gap-3">
+            <span
+              class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-primary/20 bg-primary/10 text-primary"
+              aria-hidden="true"
+            >
+              <svg lucideFileCheck [strokeWidth]="1.75" class="h-5 w-5 shrink-0"></svg>
+            </span>
+            <div class="min-w-0">
+              <p class="truncate text-sm font-semibold text-base-content" [title]="file.name">
+                {{ file.name }}
+              </p>
+              <p class="mt-0.5 text-xs tabular-nums text-base-content/65">
+                {{ selectedFileSizeLabel() }}
+                @if (selectedFileFormat(); as fmt) {
+                  <span> • Format {{ fmt }}</span>
+                }
+              </p>
+            </div>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              class="btn btn-outline btn-sm min-h-11 gap-1.5 rounded-lg sm:min-h-8"
+              [disabled]="!networkStatus.isOnline()"
+              (click)="analyzeSelectedFile()"
+            >
+              <svg lucideRotateCcw [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+              Analyser le fichier
+            </button>
+            <button
+              type="button"
+              class="btn btn-ghost btn-sm min-h-11 gap-1.5 rounded-lg sm:min-h-8"
+              aria-label="Retirer le fichier sélectionné"
+              (click)="clearSelectedFile()"
+            >
+              <svg lucideX [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+              Retirer
+            </button>
+          </div>
+        </div>
+      }
+
+      <!-- Bandeau de bonnes pratiques (sobre, encre neutre) -->
+      <div
+        class="flex items-start gap-3 rounded-xl border border-base-300/70 bg-base-200/35 px-4 py-3 text-xs text-base-content/70"
+      >
+        <svg lucideInfo [strokeWidth]="1.75" class="mt-0.5 h-4 w-4 shrink-0 text-info" aria-hidden="true"></svg>
+        <p>
+          Les numéros de téléphone doivent respecter le format international E.164
+          (<span class="font-mono text-base-content">+221770000001</span>). Téléchargez le modèle
+          CSV pour disposer des colonnes attendues et éviter les rejets de structure.
+        </p>
+      </div>
+    </section>
+  } @else if (currentStep() === 2 && currentJob(); as job) {
+    <!-- ÉTAPE 2 : Prévisualisation & validation -->
+    <div class="space-y-6">
+      <!-- Carte récapitulative du fichier analysé -->
+      <section
+        aria-label="Fichier analysé"
+        class="flex flex-col gap-3 rounded-xl border border-base-300/80 bg-base-100 p-4 shadow-xs sm:flex-row sm:items-center sm:justify-between"
+      >
+        <div class="flex min-w-0 items-center gap-3">
+          <span
+            class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-primary/20 bg-primary/10 text-primary"
+            aria-hidden="true"
+          >
+            <svg lucideFileText [strokeWidth]="1.75" class="h-5 w-5 shrink-0"></svg>
+          </span>
+          <div class="min-w-0">
+            <div class="flex flex-wrap items-center gap-2">
+              <p
+                class="truncate text-sm font-semibold text-base-content"
+                [title]="selectedFileName()"
+              >
+                {{ selectedFileName() }}
+              </p>
+              <app-status-badge
+                [label]="jobStatusLabel(job.status)"
+                [tone]="jobStatusTone(job.status)"
+              />
+            </div>
+            <p class="mt-0.5 text-xs tabular-nums text-base-content/60">
+              <span class="font-mono">{{ job.jobNumber }}</span> • {{ selectedFileSizeLabel() }} •
+              {{ job.sourceFormat }}
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          class="btn btn-outline btn-sm min-h-11 gap-1.5 rounded-lg sm:min-h-8"
+          (click)="backToFileSelection()"
+        >
+          <svg lucideArrowLeft [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+          Changer de fichier
+        </button>
+      </section>
+
+      <!-- Compteurs synthétiques (encre neutre, tabular-nums, max 3 par ligne) -->
+      <section
+        aria-label="Compteurs de prévisualisation"
+        class="grid grid-cols-1 gap-4 sm:grid-cols-3"
+      >
+        <app-stat-card
+          label="Lignes détectées"
+          [value]="totalRowsFormatted()"
+          description="Total lu dans le fichier"
+          tone="primary"
+          icon="clipboard"
+        />
+        <app-stat-card
+          label="Valides"
+          [value]="validRowsFormatted()"
+          description="Prêtes pour l'importation"
+          tone="success"
+          icon="file-check"
+        />
+        <app-stat-card
+          label="En erreur"
+          [value]="errorRowsFormatted()"
+          [description]="hasJobErrors() ? 'À corriger ou ignorer' : 'Aucune anomalie détectée'"
+          [tone]="hasJobErrors() ? 'error' : 'neutral'"
+          icon="alert"
+        />
+      </section>
+
+      @if (isStrictValidationBlocked()) {
+        <div
+          role="alert"
+          class="flex items-start gap-3 rounded-xl border border-error/30 bg-error/10 px-4 py-3 text-sm text-error"
+        >
+          <svg
+            lucideCircleAlert
+            [strokeWidth]="1.75"
+            class="mt-0.5 h-4 w-4 shrink-0"
+            aria-hidden="true"
+          ></svg>
+          <span>
+            Mode strict actif : corrigez les {{ errorRowsFormatted() }} ligne(s) en erreur ou
+            revenez à l'étape 1 pour activer l'option « Ignorer les lignes en erreur ».
+          </span>
+        </div>
+      }
+
+      <!-- État 2 : Fichier sans aucune ligne de données -->
+      @if (job.totalRows === 0) {
+        <app-empty-state
+          variant="empty"
+          icon="file"
+          title="Aucune ligne exploitable détectée"
+          description="Le fichier ne contient aucune ligne de données après l'en-tête. Vérifiez son contenu ou utilisez le modèle CSV."
+        />
+      } @else {
+        <!-- Tableau de prévisualisation Desktop + Cartes Mobiles -->
+        <section
+          aria-label="Prévisualisation des lignes du fichier"
+          class="rounded-xl border border-base-300/80 bg-base-100 shadow-xs"
+        >
+          <!-- Barre de filtre rapide (Toutes / Valides / En erreur) -->
+          <div
+            class="flex flex-col gap-3 border-b border-base-300/80 p-4 sm:flex-row sm:items-center sm:justify-between"
+          >
+            <div class="space-y-0.5">
+              <h2 class="font-display text-sm font-semibold tracking-tight text-base-content">
+                Prévisualisation &amp; anomalies
+              </h2>
+              <p class="text-xs text-base-content/60">
+                Contrôlez les colonnes détectées avant de confirmer l'import.
+              </p>
+            </div>
+
+            <div
+              role="group"
+              aria-label="Filtrer les lignes par statut"
+              class="inline-flex w-full rounded-lg border border-base-300/80 bg-base-200/70 p-1 sm:w-auto"
+            >
+              @for (option of rowFilterOptions; track option.value) {
+                <button
+                  type="button"
+                  class="inline-flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium whitespace-nowrap transition-colors duration-150 ease-out motion-reduce:transition-none sm:min-h-8 sm:flex-initial"
+                  [class.bg-base-100]="rowFilter() === option.value"
+                  [class.text-base-content]="rowFilter() === option.value"
+                  [class.shadow-xs]="rowFilter() === option.value"
+                  [class.text-base-content/65]="rowFilter() !== option.value"
+                  [class.hover:text-base-content]="rowFilter() !== option.value"
+                  [attr.aria-pressed]="rowFilter() === option.value"
+                  [disabled]="rowsLoading()"
+                  (click)="setRowFilter(option.value)"
+                >
+                  <span>{{ option.label }}</span>
+                  <span
+                    class="rounded-md bg-base-200/90 px-1.5 py-0.5 font-mono text-[11px] tabular-nums text-base-content/75"
+                  >
+                    {{ filterBadgeCount(option.value) }}
+                  </span>
+                </button>
+              }
+            </div>
+          </div>
+
+          @if (rowsLoading()) {
+            <div class="p-4">
+              <app-skeleton-loader
+                variant="table"
+                [count]="4"
+                [columns]="6"
+                ariaLabel="Filtrage des lignes en cours…"
+              />
+            </div>
+          } @else if (previewRows().length === 0) {
+            <!-- État 3 : Vide après filtre -->
+            <div class="p-4">
+              <app-empty-state
+                variant="filtered"
+                title="Aucune ligne pour ce filtre"
+                description="Aucune ligne du fichier ne correspond au statut sélectionné. Réinitialisez le filtre pour revoir toutes les lignes."
+                (action)="resetRowFilter()"
+              />
+            </div>
+          } @else {
+            <!-- Tableau Desktop (>= 768px) -->
+            <div class="hidden overflow-x-auto md:block">
+              <table class="w-full table-auto border-collapse text-left">
+                <thead>
+                  <tr
+                    class="border-b border-base-300/80 text-xs font-semibold uppercase tracking-wider text-base-content/50"
+                  >
+                    <th scope="col" class="py-3 pl-4 pr-2 text-right font-semibold whitespace-nowrap">
+                      Ligne
+                    </th>
+                    <th scope="col" class="px-3 py-3 text-left font-semibold">
+                      Élève
+                    </th>
+                    <th scope="col" class="px-3 py-3 text-left font-semibold whitespace-nowrap">
+                      Classe
+                    </th>
+                    <th scope="col" class="px-3 py-3 text-left font-semibold whitespace-nowrap">
+                      Téléphone tuteur
+                    </th>
+                    <th scope="col" class="px-3 py-3 text-left font-semibold whitespace-nowrap">
+                      Statut
+                    </th>
+                    <th scope="col" class="py-3 pl-3 pr-4 text-left font-semibold">
+                      Anomalie détectée
+                    </th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-base-300/70">
+                  @for (row of previewRows(); track row.id) {
+                    <tr
+                      class="transition-colors duration-150 ease-out hover:bg-base-200/50 motion-reduce:transition-none"
+                    >
+                      <td class="py-3 pl-4 pr-2 text-right font-mono text-xs whitespace-nowrap tabular-nums text-base-content/65">
+                        #{{ row.rowNumber }}
+                      </td>
+                      <td class="px-3 py-3">
+                        <div class="min-w-0">
+                          <p
+                            class="max-w-44 truncate text-sm font-semibold text-base-content xl:max-w-56"
+                            [title]="row.studentName"
+                          >
+                            {{ row.studentName }}
+                          </p>
+                          @if (row.matricule) {
+                            <p class="font-mono text-xs tabular-nums text-base-content/60">
+                              {{ row.matricule }}
+                            </p>
+                          }
+                        </div>
+                      </td>
+                      <td class="px-3 py-3 whitespace-nowrap">
+                        <span
+                          class="inline-flex items-center rounded-lg border border-base-300/80 bg-base-200/60 px-2 py-0.5 text-xs font-medium whitespace-nowrap text-base-content/80"
+                        >
+                          {{ row.className }}
+                        </span>
+                      </td>
+                      <td class="px-3 py-3 font-mono text-xs whitespace-nowrap tabular-nums text-base-content/80">
+                        {{ row.guardianPhone }}
+                      </td>
+                      <td class="px-3 py-3 whitespace-nowrap">
+                        <app-status-badge
+                          [label]="rowStatusLabel(row.rowStatus)"
+                          [tone]="rowStatusTone(row.rowStatus)"
+                        />
+                      </td>
+                      <td class="py-3 pl-3 pr-4 text-xs">
+                        @if (row.anomaly) {
+                          <p class="max-w-xs text-error xl:max-w-sm" [title]="row.anomaly">
+                            {{ row.anomaly }}
+                          </p>
+                        } @else {
+                          <span class="text-base-content/50">Aucune anomalie</span>
+                        }
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Cartes empilées Mobile (< 768px) -->
+            <div class="space-y-3 p-4 md:hidden">
+              @for (row of previewRows(); track row.id) {
+                <article
+                  class="space-y-2.5 rounded-xl border border-base-300/80 bg-base-100 p-4 shadow-xs"
+                >
+                  <div class="flex items-start justify-between gap-2">
+                    <div class="min-w-0">
+                      <p
+                        class="truncate text-sm font-semibold text-base-content"
+                        [title]="row.studentName"
+                      >
+                        {{ row.studentName }}
+                      </p>
+                      <p class="mt-0.5 font-mono text-xs tabular-nums text-base-content/60">
+                        Ligne #{{ row.rowNumber }}
+                        @if (row.matricule) {
+                          <span> • {{ row.matricule }}</span>
+                        }
+                      </p>
+                    </div>
+                    <app-status-badge
+                      [label]="rowStatusLabel(row.rowStatus)"
+                      [tone]="rowStatusTone(row.rowStatus)"
+                    />
+                  </div>
+
+                  <div class="flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <span
+                      class="inline-flex items-center rounded-lg border border-base-300/80 bg-base-200/60 px-2 py-0.5 font-medium whitespace-nowrap text-base-content/80"
+                    >
+                      {{ row.className }}
+                    </span>
+                    <span class="font-mono whitespace-nowrap tabular-nums text-base-content/75">
+                      {{ row.guardianPhone }}
+                    </span>
+                  </div>
+
+                  @if (row.anomaly) {
+                    <div
+                      class="rounded-lg border border-error/25 bg-error/10 px-3 py-2 text-xs text-error"
+                    >
+                      {{ row.anomaly }}
+                    </div>
+                  }
+                </article>
+              }
+            </div>
+
+            <!-- Pagination si plusieurs pages -->
+            @if (rowsTotalPages() > 1) {
+              <nav
+                aria-label="Pagination de la prévisualisation"
+                class="flex flex-col gap-3 border-t border-base-300/80 px-4 py-3 text-xs text-base-content/60 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <p class="tabular-nums">{{ paginationRangeLabel() }}</p>
+                <div class="flex items-center justify-between gap-2 sm:justify-end">
+                  <button
+                    type="button"
+                    class="btn btn-outline btn-sm min-h-11 gap-1 rounded-lg sm:min-h-8"
+                    [disabled]="rowsFirst() || rowsLoading()"
+                    (click)="goToPreviousRowsPage()"
+                  >
+                    <svg lucideChevronLeft [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+                    Précédent
+                  </button>
+                  <span class="px-2 font-medium whitespace-nowrap tabular-nums text-base-content">
+                    Page {{ currentPageDisplay() }} / {{ rowsTotalPages() }}
+                  </span>
+                  <button
+                    type="button"
+                    class="btn btn-outline btn-sm min-h-11 gap-1 rounded-lg sm:min-h-8"
+                    [disabled]="rowsLast() || rowsLoading()"
+                    (click)="goToNextRowsPage()"
+                  >
+                    Suivant
+                    <svg lucideChevronRight [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+                  </button>
+                </div>
+              </nav>
+            }
+          }
+        </section>
+      }
+    </div>
+  } @else if (currentStep() === 3 && currentJob(); as job) {
+    <!-- ÉTAPE 3 : Rapport final d'import -->
+    <div class="space-y-6">
+      <section
+        aria-labelledby="import-report-heading"
+        class="rounded-xl border border-base-300/80 bg-base-100 p-5 shadow-xs sm:p-6"
+      >
+        <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div class="flex items-start gap-3">
+            <span
+              class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border"
+              [class.border-success/25]="!hasJobErrors()"
+              [class.bg-success/10]="!hasJobErrors()"
+              [class.text-success]="!hasJobErrors()"
+              [class.border-warning/25]="hasJobErrors()"
+              [class.bg-warning/10]="hasJobErrors()"
+              [class.text-warning]="hasJobErrors()"
+              aria-hidden="true"
+            >
+              <svg lucideCircleCheck [strokeWidth]="1.75" class="h-6 w-6 shrink-0"></svg>
+            </span>
+
+            <div class="min-w-0 space-y-1">
+              <div class="flex flex-wrap items-center gap-2">
+                <h2
+                  id="import-report-heading"
+                  class="font-display text-lg font-bold tracking-tight text-base-content"
+                >
+                  Rapport d'import finalisé
+                </h2>
+                <app-status-badge
+                  [label]="jobStatusLabel(job.status)"
+                  [tone]="jobStatusTone(job.status)"
+                />
+              </div>
+              <p class="text-sm text-base-content/70">
+                Lot <span class="font-mono font-medium text-base-content">{{ job.jobNumber }}</span>
+                • Fichier <span class="font-medium text-base-content">{{ job.fileName }}</span>
+                @if (job.executedAt) {
+                  <span>
+                    • Exécuté le
+                    <span class="tabular-nums">{{ job.executedAt | dakarDate: 'datetime' }}</span>
+                  </span>
+                }
+              </p>
+            </div>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-2">
+            @if (hasJobErrors()) {
+              <button
+                type="button"
+                class="btn btn-outline btn-sm min-h-11 gap-1.5 rounded-lg sm:min-h-9"
+                [disabled]="downloadingErrors() || !networkStatus.isOnline()"
+                [attr.aria-busy]="downloadingErrors()"
+                (click)="downloadErrorReport()"
+              >
+                @if (downloadingErrors()) {
+                  <span class="loading loading-spinner loading-xs" aria-hidden="true"></span>
+                } @else {
+                  <svg lucideDownload [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+                }
+                Télécharger le rapport d'erreurs CSV
+              </button>
+            }
+
+            <button
+              type="button"
+              class="btn btn-outline btn-sm min-h-11 gap-1.5 rounded-lg sm:min-h-9"
+              (click)="startNewImport()"
+            >
+              <svg lucideRotateCcw [strokeWidth]="1.75" class="h-4 w-4 shrink-0" aria-hidden="true"></svg>
+              Nouvel import
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Résumé chiffré (encre neutre, tabular-nums) -->
+      <section aria-label="Bilan chiffré de l'import" class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <app-stat-card
+          label="Lignes importées"
+          [value]="importedCountFormatted()"
+          [description]="importedBreakdown()"
+          tone="success"
+          icon="file-check"
+        />
+        <app-stat-card
+          label="Lignes ignorées"
+          [value]="skippedCountFormatted()"
+          description="Doublons ou lignes non traitées"
+          tone="neutral"
+          icon="clipboard"
+        />
+        <app-stat-card
+          label="Lignes en erreur"
+          [value]="errorRowsFormatted()"
+          [description]="hasJobErrors() ? 'Disponibles dans le rapport CSV' : 'Zéro anomalie'"
+          [tone]="hasJobErrors() ? 'error' : 'neutral'"
+          icon="alert"
+        />
+      </section>
+
+      <div
+        class="flex items-start gap-3 rounded-xl border border-base-300/80 bg-base-100 px-4 py-3 text-xs text-base-content/70 shadow-xs"
+      >
+        <svg
+          lucideShieldCheck
+          [strokeWidth]="1.75"
+          class="mt-0.5 h-4 w-4 shrink-0 text-secondary"
+          aria-hidden="true"
+        ></svg>
+        <p>
+          Les données importées ont été enregistrées pour votre établissement et journalisées côté
+          serveur.
+          @if (hasJobErrors()) {
+            Vous pouvez télécharger le rapport CSV des anomalies, corriger les lignes concernées et
+            lancer un nouvel import.
+          }
+        </p>
+      </div>
+    </div>
+  }
+</div>
